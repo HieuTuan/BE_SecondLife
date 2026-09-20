@@ -16,6 +16,7 @@ import com.secondlife.secondlife.mapper.SellerVerificationMapper;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.SellerVerificationRepository;
 import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.SellerVerificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +37,7 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final SellerVerificationMapper sellerVerificationMapper;
+    private final NotificationService notificationService;
 
     @Override
     @Transactional
@@ -122,6 +124,9 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
 
         SellerVerification saved = sellerVerificationRepository.save(verification);
         log.info("Admin {} APPROVED seller verification {} for user {}", admin.getEmail(), verificationId, targetUser.getEmail());
+
+        notificationService.sendSellerVerificationApproved(targetUser);
+
         return sellerVerificationMapper.toResponse(saved);
     }
 
@@ -145,6 +150,9 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
 
         SellerVerification saved = sellerVerificationRepository.save(verification);
         log.info("Admin {} REJECTED seller verification {} for user {}", admin.getEmail(), verificationId, verification.getUser().getEmail());
+
+        notificationService.sendSellerVerificationRejected(verification.getUser(), request.rejectionReason().trim());
+
         return sellerVerificationMapper.toResponse(saved);
     }
 }

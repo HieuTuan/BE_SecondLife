@@ -47,6 +47,9 @@ class SellerVerificationServiceTest {
     @Mock
     private SellerVerificationMapper sellerVerificationMapper;
 
+    @Mock
+    private NotificationService notificationService;
+
     @InjectMocks
     private SellerVerificationServiceImpl service;
 
@@ -142,6 +145,7 @@ class SellerVerificationServiceTest {
         assertTrue(buyer.hasRole(RoleCode.SELLER.name()));
         verify(userRepository).save(buyer);
         verify(sellerVerificationRepository).save(sv);
+        verify(notificationService).sendSellerVerificationApproved(buyer);
     }
 
     @Test
@@ -171,5 +175,6 @@ class SellerVerificationServiceTest {
         assertFalse(buyer.hasRole(RoleCode.SELLER.name()));
         verify(userRepository, never()).save(buyer);
         verify(sellerVerificationRepository).save(sv);
+        verify(notificationService).sendSellerVerificationRejected(buyer, "Document is blurry");
     }
 }

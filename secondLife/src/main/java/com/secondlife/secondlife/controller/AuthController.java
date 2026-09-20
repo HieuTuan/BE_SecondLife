@@ -51,7 +51,7 @@ public class AuthController {
     }
 
     @PostMapping("/verify-email")
-    @Operation(summary = "Verify account email using verification token")
+    @Operation(summary = "Verify account email using 6-digit OTP code")
     public ResponseEntity<ApiResponse<Void>> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
         authService.verifyEmail(request);
         return ResponseEntity.ok(ApiResponse.success("Email verified successfully"));
@@ -72,10 +72,17 @@ public class AuthController {
     }
 
     @PostMapping("/reset-password")
-    @Operation(summary = "Reset account password with reset token")
+    @Operation(summary = "Reset account password with 6-digit OTP code")
     public ResponseEntity<ApiResponse<Void>> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         authService.resetPassword(request);
         return ResponseEntity.ok(ApiResponse.success("Password has been reset successfully"));
+    }
+
+    @PostMapping("/google")
+    @Operation(summary = "Authenticate with Google ID token (auto-registers new user with BUYER role if not exists)")
+    public ResponseEntity<ApiResponse<AuthResponse>> googleLogin(@Valid @RequestBody GoogleLoginRequest request) {
+        AuthResponse response = authService.loginWithGoogle(request);
+        return ResponseEntity.ok(ApiResponse.success("Google login successful", response));
     }
 }
 

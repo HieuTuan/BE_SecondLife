@@ -11,6 +11,7 @@ import com.secondlife.secondlife.exception.UnauthorizedException;
 import com.secondlife.secondlife.repository.EmailVerificationTokenRepository;
 import com.secondlife.secondlife.repository.PasswordResetTokenRepository;
 import com.secondlife.secondlife.repository.RefreshTokenRepository;
+import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
 import com.secondlife.secondlife.service.impl.TokenServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +42,9 @@ class TokenServiceTest {
 
     @Mock
     private PasswordResetTokenRepository passwordResetTokenRepository;
+
+    @Mock
+    private UserRepository userRepository;
 
     @Mock
     private JwtTokenProvider jwtTokenProvider;
@@ -139,14 +143,25 @@ class TokenServiceTest {
     }
 
     @Test
-    void verifyEmailToken_WhenValid_ShouldMarkUsedAndSetEmailVerified() {
-        String rawToken = "email-token-123";
-        String hash = tokenService.hashToken(rawToken);
+    void createEmailVerificationOtp_ShouldReturn6Digits() {
+        String otp = tokenService.createEmailVerificationOtp(user);
+        assertNotNull(otp);
+        assertEquals(6, otp.length());
+        assertTrue(otp.matches("^[0-9]{6}$"));
+        verify(emailVerificationTokenRepository).save(any(EmailVerificationToken.class));
+    }
+
+    @Test
+    void verifyEmailOtp_WhenValid_ShouldMarkUsedAndSetEmailVerified() {
+        String rawOtp = "123456";
+        String hash = tokenService.hashToken(userId.toString() + ":" + rawOtp);
 
         EmailVerificationToken token = new EmailVerificationToken(user, hash, Instant.now().plusSeconds(3600));
+        when(userRepository.findByEmailIgnoreCase("user@example.com")).thenReturn(Optional.of(user));
         when(emailVerificationTokenRepository.findByTokenHash(hash)).thenReturn(Optional.of(token));
+        when(userRepository.save(user)).thenReturn(user);
 
-        User verifiedUser = tokenService.verifyEmailToken(rawToken);
+        User verifiedUser = tokenService.verifyEmailOtp("user@example.com", rawOtp);
 
         assertTrue(verifiedUser.isEmailVerified());
         assertTrue(token.isUsed());
@@ -154,26 +169,37 @@ class TokenServiceTest {
     }
 
     @Test
-    void verifyEmailToken_WhenAlreadyUsed_ShouldThrowBadRequest() {
-        String rawToken = "used-email-token";
-        String hash = tokenService.hashToken(rawToken);
+    void verifyEmailOtp_WhenAlreadyUsed_ShouldThrowBadRequest() {
+        String rawOtp = "654321";
+        String hash = tokenService.hashToken(userId.toString() + ":" + rawOtp);
 
         EmailVerificationToken token = new EmailVerificationToken(user, hash, Instant.now().plusSeconds(3600));
         token.markAsUsed();
+        when(userRepository.findByEmailIgnoreCase("user@example.com")).thenReturn(Optional.of(user));
         when(emailVerificationTokenRepository.findByTokenHash(hash)).thenReturn(Optional.of(token));
 
-        assertThrows(BadRequestException.class, () -> tokenService.verifyEmailToken(rawToken));
+        assertThrows(BadRequestException.class, () -> tokenService.verifyEmailOtp("user@example.com", rawOtp));
     }
 
     @Test
-    void verifyAndConsumePasswordResetToken_WhenValid_ShouldMarkUsedAndReturnUser() {
-        String rawToken = "reset-token-xyz";
-        String hash = tokenService.hashToken(rawToken);
+    void createPasswordResetOtp_ShouldReturn6Digits() {
+        String otp = tokenService.createPasswordResetOtp(user);
+        assertNotNull(otp);
+        assertEquals(6, otp.length());
+        assertTrue(otp.matches("^[0-9]{6}$"));
+        verify(passwordResetTokenRepository).save(any(PasswordResetToken.class));
+    }
+
+    @Test
+    void verifyAndConsumePasswordResetOtp_WhenValid_ShouldMarkUsedAndReturnUser() {
+        String rawOtp = "123456";
+        String hash = tokenService.hashToken(userId.toString() + ":" + rawOtp);
 
         PasswordResetToken token = new PasswordResetToken(user, hash, Instant.now().plusSeconds(3600));
+        when(userRepository.findByEmailIgnoreCase("user@example.com")).thenReturn(Optional.of(user));
         when(passwordResetTokenRepository.findByTokenHash(hash)).thenReturn(Optional.of(token));
 
-        User resetUser = tokenService.verifyAndConsumePasswordResetToken(rawToken);
+        User resetUser = tokenService.verifyAndConsumePasswordResetOtp("user@example.com", rawOtp);
 
         assertEquals(user.getEmail(), resetUser.getEmail());
         assertTrue(token.isUsed());

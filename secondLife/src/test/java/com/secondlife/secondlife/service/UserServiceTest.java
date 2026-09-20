@@ -15,6 +15,7 @@ import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.impl.UserServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,6 +50,9 @@ class UserServiceTest {
 
     @Mock
     private UserMapper userMapper;
+
+    @Mock
+    private NotificationService notificationService;
 
     @InjectMocks
     private UserServiceImpl userService;
@@ -111,6 +115,7 @@ class UserServiceTest {
         assertEquals("encoded-new-pass", user.getPasswordHash());
         verify(userRepository).save(user);
         verify(tokenService).revokeAllUserRefreshTokens(userId);
+        verify(notificationService).sendPasswordChangedAlert(user);
     }
 
     @Test
@@ -178,5 +183,23 @@ class UserServiceTest {
         assertNotNull(result);
         assertEquals("center@secondlife.com", result.email());
         verify(userRepository).save(any(User.class));
+        verify(notificationService).sendInspectionCenterCreated(any(User.class), eq("CenterPass@123"));
+    }
+
+    @Test
+    void updateAdminUserStatus_WhenValid_ShouldUpdateStatusAndSendNotification() {
+        UUID targetUserId = UUID.randomUUID();
+        User targetUser = new User("target@example.com", "pass", AccountStatus.ACTIVE);
+        AdminStatusUpdateRequest request = new AdminStatusUpdateRequest(AccountStatus.LOCKED);
+
+        when(userRepository.findByIdWithAuthorities(targetUserId)).thenReturn(Optional.of(targetUser));
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        userService.updateAdminUserStatus(adminId, targetUserId, request);
+
+        assertEquals(AccountStatus.LOCKED, targetUser.getAccountStatus());
+        verify(userRepository).save(targetUser);
+        verify(tokenService).revokeAllUserRefreshTokens(targetUserId);
+        verify(notificationService).sendAccountStatusChanged(targetUser, AccountStatus.LOCKED);
     }
 }
