@@ -7,4 +7,6 @@ import java.util.UUID;
 
 public interface PostService {
     PostInitResponse initPost(UUID userId, PostInitRequest request);
+    String finalizeChatAndDescription(UUID userId, UUID sessionId);
+    void submitPost(UUID userId, UUID postId);
 }

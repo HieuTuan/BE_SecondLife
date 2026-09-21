@@ -135,4 +135,42 @@ public class AiChatServiceImpl implements AiChatService {
                 .reply(aiReply)
                 .build();
     }
+
+    @Override
+    @Transactional
+    public String finalizeChat(UUID sessionId, UUID currentUserId) {
+        AiChatSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new RuntimeException("Session not found"));
+        
+        if (!session.getUser().getId().equals(currentUserId)) {
+            throw new RuntimeException("Unauthorized to finalize this session");
+        }
+        
+        if (session.isCompleted()) {
+            throw new RuntimeException("Session is already completed");
+        }
+
+        List<Message> aiMessages = new ArrayList<>();
+        // Load history
+        List<AiChatMessage> history = messageRepository.findBySessionIdOrderBySentAtAsc(session.getId());
+        for (AiChatMessage msg : history) {
+            if ("USER".equals(msg.getRole())) {
+                aiMessages.add(new UserMessage(msg.getMessageContent()));
+            } else {
+                aiMessages.add(new AssistantMessage(msg.getMessageContent()));
+            }
+        }
+        
+        // Add final prompt to summarize
+        String finalizePrompt = "Dựa vào toàn bộ cuộc trò chuyện trên, hãy tổng hợp và viết ra một đoạn mô tả hoàn chỉnh, hấp dẫn cho sản phẩm này để đăng bán. Trả về đúng nội dung mô tả, không cần giải thích hay thêm bình luận gì khác.";
+        aiMessages.add(new UserMessage(finalizePrompt));
+
+        Prompt prompt = new Prompt(aiMessages, org.springframework.ai.ollama.api.OllamaChatOptions.builder().model("gemma4:31b").build());
+        String finalDescription = chatClient.prompt(prompt).call().content();
+
+        session.setCompleted(true);
+        sessionRepository.save(session);
+        
+        return finalDescription;
+    }
 }

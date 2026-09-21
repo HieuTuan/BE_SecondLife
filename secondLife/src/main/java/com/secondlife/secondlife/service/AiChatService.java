@@ -7,4 +7,5 @@ import java.util.UUID;
 
 public interface AiChatService {
     AiChatResponse processChat(AiChatRequest request, UUID currentUserId);
+    String finalizeChat(UUID sessionId, UUID currentUserId);
 }

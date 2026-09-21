@@ -26,17 +26,20 @@ public class PostServiceImpl implements PostService {
     private final CreditService creditService;
     private final AiChatService aiChatService;
     private final CategoryQuestionTemplateRepository templateRepository;
+    private final com.secondlife.secondlife.repository.AiChatSessionRepository sessionRepository;
 
     public PostServiceImpl(PostRepository postRepository,
                            UserRepository userRepository,
                            CreditService creditService,
                            AiChatService aiChatService,
-                           CategoryQuestionTemplateRepository templateRepository) {
+                           CategoryQuestionTemplateRepository templateRepository,
+                           com.secondlife.secondlife.repository.AiChatSessionRepository sessionRepository) {
         this.postRepository = postRepository;
         this.userRepository = userRepository;
         this.creditService = creditService;
         this.aiChatService = aiChatService;
         this.templateRepository = templateRepository;
+        this.sessionRepository = sessionRepository;
     }
 
     @Override
@@ -83,5 +86,39 @@ public class PostServiceImpl implements PostService {
                 aiResponse.getSessionId(),
                 combinedResponse
         );
+    }
+
+    @Override
+    @Transactional
+    public String finalizeChatAndDescription(UUID userId, UUID sessionId) {
+        // 1. Tell AiChatService to summarize
+        String finalDescription = aiChatService.finalizeChat(sessionId, userId);
+
+        // 2. Fetch the session to get postId
+        com.secondlife.secondlife.entity.AiChatSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new RuntimeException("Session not found"));
+
+        if (session.getPostId() != null) {
+            Post post = postRepository.findById(session.getPostId())
+                    .orElseThrow(() -> new RuntimeException("Post not found"));
+            post.setDescription(finalDescription);
+            postRepository.save(post);
+        }
+        
+        return finalDescription;
+    }
+
+    @Override
+    @Transactional
+    public void submitPost(UUID userId, UUID postId) {
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new RuntimeException("Post not found"));
+        
+        if (!post.getUser().getId().equals(userId)) {
+            throw new RuntimeException("Unauthorized");
+        }
+        
+        post.setStatus("PENDING");
+        postRepository.save(post);
     }
 }

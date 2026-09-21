@@ -24,4 +24,20 @@ public class PostController {
             @RequestBody PostInitRequest request) {
         return ResponseEntity.ok(postService.initPost(userId, request));
     }
+
+    @PostMapping("/finalize-chat/{sessionId}")
+    public ResponseEntity<String> finalizeChat(
+            @RequestAttribute("userId") UUID userId,
+            @PathVariable UUID sessionId) {
+        String description = postService.finalizeChatAndDescription(userId, sessionId);
+        return ResponseEntity.ok(description);
+    }
+
+    @PostMapping("/submit/{postId}")
+    public ResponseEntity<String> submitPost(
+            @RequestAttribute("userId") UUID userId,
+            @PathVariable UUID postId) {
+        postService.submitPost(userId, postId);
+        return ResponseEntity.ok("Post submitted successfully");
+    }
 }
