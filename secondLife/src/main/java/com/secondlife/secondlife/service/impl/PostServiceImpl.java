@@ -121,4 +121,34 @@ public class PostServiceImpl implements PostService {
         post.setStatus("PENDING");
         postRepository.save(post);
     }
+
+    @Override
+    @Transactional
+    public void approvePost(UUID postId) {
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new RuntimeException("Post not found"));
+        
+        if (!"PENDING".equals(post.getStatus())) {
+            throw new RuntimeException("Post must be in PENDING status to be approved");
+        }
+        
+        post.setStatus("ACTIVE");
+        postRepository.save(post);
+    }
+
+    @Override
+    @Transactional
+    public void rejectPost(UUID postId, String reason) {
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new RuntimeException("Post not found"));
+        
+        if (!"PENDING".equals(post.getStatus())) {
+            throw new RuntimeException("Post must be in PENDING status to be rejected");
+        }
+        
+        post.setStatus("REJECTED");
+        // We could also store the reject reason in the entity if there is a field for it
+        // and potentially refund the post_credit to the user.
+        postRepository.save(post);
+    }
 }
