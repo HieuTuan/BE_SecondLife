@@ -2,6 +2,7 @@ package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.dto.request.SellerVerificationRequest;
+import com.secondlife.secondlife.dto.request.SellerVerificationResubmitRequest;
 import com.secondlife.secondlife.dto.response.SellerVerificationResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
@@ -37,7 +38,7 @@ public class SellerVerificationController {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         SellerVerificationResponse response = sellerVerificationService.submitVerification(userId, request);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success("Seller verification submitted successfully", response));
+                .body(ApiResponse.success("Hồ sơ xác thực người bán đã được tiếp nhận và xử lý", response));
     }
 
     @GetMapping("/me")
@@ -48,7 +49,19 @@ public class SellerVerificationController {
     ) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         SellerVerificationResponse response = sellerVerificationService.getCurrentVerification(userId);
-        return ResponseEntity.ok(ApiResponse.success("Get seller verification status successfully", response));
+        return ResponseEntity.ok(ApiResponse.success("Lấy thông tin hồ sơ xác thực thành công", response));
+    }
+
+    @PostMapping("/{verificationId}/resubmit")
+    @Operation(summary = "Resubmit documents for a verification requiring resubmission")
+    @PreAuthorize("hasAuthority('SELLER_VERIFICATION_SUBMIT')")
+    public ResponseEntity<ApiResponse<SellerVerificationResponse>> resubmitVerification(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID verificationId,
+            @Valid @RequestBody SellerVerificationResubmitRequest request
+    ) {
+        UUID userId = currentUserProvider.resolveUserId(userDetails);
+        SellerVerificationResponse response = sellerVerificationService.resubmitVerification(userId, verificationId, request);
+        return ResponseEntity.ok(ApiResponse.success("Nộp lại chứng từ xác thực thành công", response));
     }
 }
-

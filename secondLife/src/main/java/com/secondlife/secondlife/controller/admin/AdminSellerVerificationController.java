@@ -4,9 +4,13 @@ import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.dto.request.CreateInspectionCenterRequest;
 import com.secondlife.secondlife.dto.request.SellerVerificationReviewRequest;
+import com.secondlife.secondlife.dto.response.AdminSellerVerificationDetailResponse;
 import com.secondlife.secondlife.dto.response.SellerVerificationResponse;
 import com.secondlife.secondlife.dto.response.UserSummaryResponse;
-import com.secondlife.secondlife.enums.VerificationStatus;
+import com.secondlife.secondlife.enums.EkycStatus;
+import com.secondlife.secondlife.enums.ReasonCode;
+import com.secondlife.secondlife.enums.RiskStatus;
+import com.secondlife.secondlife.enums.SellerVerificationStatus;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.SellerVerificationService;
@@ -37,28 +41,33 @@ public class AdminSellerVerificationController {
     private final CurrentUserProvider currentUserProvider;
 
     @GetMapping("/seller-verifications")
-    @Operation(summary = "Get seller verifications with optional status filtering and pagination")
+    @Operation(summary = "Get seller verifications with filters (status, ekycStatus, riskStatus, reasonCode) and pagination")
     @PreAuthorize("hasAuthority('SELLER_VERIFICATION_READ_ANY')")
     public ResponseEntity<ApiResponse<PageResponse<SellerVerificationResponse>>> getSellerVerifications(
-            @RequestParam(required = false) VerificationStatus status,
+            @RequestParam(required = false) SellerVerificationStatus status,
+            @RequestParam(required = false) EkycStatus ekycStatus,
+            @RequestParam(required = false) RiskStatus riskStatus,
+            @RequestParam(required = false) ReasonCode reasonCode,
             @PageableDefault(sort = "submittedAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
-        PageResponse<SellerVerificationResponse> response = sellerVerificationService.getAdminVerifications(status, pageable);
+        PageResponse<SellerVerificationResponse> response = sellerVerificationService.getAdminVerifications(
+                status, ekycStatus, riskStatus, reasonCode, pageable
+        );
         return ResponseEntity.ok(ApiResponse.success("Get seller verifications successfully", response));
     }
 
     @GetMapping("/seller-verifications/{id}")
-    @Operation(summary = "Get seller verification details by ID")
+    @Operation(summary = "Get detailed seller verification by ID including eKYC metrics and event history")
     @PreAuthorize("hasAuthority('SELLER_VERIFICATION_READ_ANY')")
-    public ResponseEntity<ApiResponse<SellerVerificationResponse>> getSellerVerificationById(
+    public ResponseEntity<ApiResponse<AdminSellerVerificationDetailResponse>> getSellerVerificationById(
             @PathVariable UUID id
     ) {
-        SellerVerificationResponse response = sellerVerificationService.getAdminVerificationById(id);
+        AdminSellerVerificationDetailResponse response = sellerVerificationService.getAdminVerificationById(id);
         return ResponseEntity.ok(ApiResponse.success("Get seller verification details successfully", response));
     }
 
     @PostMapping("/seller-verifications/{id}/approve")
-    @Operation(summary = "Approve seller verification and assign SELLER role")
+    @Operation(summary = "Approve seller verification in NEEDS_REVIEW status and assign SELLER role")
     @PreAuthorize("hasAuthority('SELLER_VERIFICATION_REVIEW')")
     public ResponseEntity<ApiResponse<SellerVerificationResponse>> approveSellerVerification(
             @AuthenticationPrincipal CustomUserDetails currentAdmin,
@@ -70,7 +79,7 @@ public class AdminSellerVerificationController {
     }
 
     @PostMapping("/seller-verifications/{id}/reject")
-    @Operation(summary = "Reject seller verification with rejection reason")
+    @Operation(summary = "Reject seller verification in NEEDS_REVIEW status with structured rejection reason")
     @PreAuthorize("hasAuthority('SELLER_VERIFICATION_REVIEW')")
     public ResponseEntity<ApiResponse<SellerVerificationResponse>> rejectSellerVerification(
             @AuthenticationPrincipal CustomUserDetails currentAdmin,
@@ -93,4 +102,3 @@ public class AdminSellerVerificationController {
                 .body(ApiResponse.success("Inspection Center account provisioned successfully", response));
     }
 }
-

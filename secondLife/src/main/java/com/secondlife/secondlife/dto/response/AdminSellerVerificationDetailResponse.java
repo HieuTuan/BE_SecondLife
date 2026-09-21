@@ -9,15 +9,16 @@ import com.secondlife.secondlife.enums.SellerVerificationStatus;
 import com.secondlife.secondlife.enums.VerificationType;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
-public record SellerVerificationResponse(
+public record AdminSellerVerificationDetailResponse(
         UUID id,
         UUID userId,
         String userEmail,
         String userFullName,
         VerificationType verificationType,
-        String documentNumber,
+        String documentNumberMasked,
         String documentFrontUrl,
         String documentBackUrl,
         String selfieUrl,
@@ -26,19 +27,30 @@ public record SellerVerificationResponse(
         RiskStatus riskStatus,
         ReviewSource reviewSource,
         ReasonCode reasonCode,
+        String providerName,
+        String providerReferenceId,
+        Double faceMatchScore,
+        Double livenessScore,
+        Double documentScore,
+        Double riskScore,
         int resubmissionCount,
         Instant submittedAt,
+        Instant ekycCompletedAt,
+        Instant riskEvaluatedAt,
         Instant reviewedAt,
         UUID reviewedBy,
-        String rejectionReason
+        String rejectionReason,
+        List<VerificationEventResponse> eventHistory
 ) {
-    public static SellerVerificationResponse from(SellerVerification sv) {
+    public static AdminSellerVerificationDetailResponse from(
+            SellerVerification sv,
+            List<VerificationEventResponse> eventHistory) {
         String email = sv.getUser() != null ? sv.getUser().getEmail() : null;
         String fullName = (sv.getUser() != null && sv.getUser().getProfile() != null)
                 ? sv.getUser().getProfile().getFullName() : null;
         UUID reviewerId = sv.getReviewedBy() != null ? sv.getReviewedBy().getId() : null;
 
-        return new SellerVerificationResponse(
+        return new AdminSellerVerificationDetailResponse(
                 sv.getId(),
                 sv.getUser() != null ? sv.getUser().getId() : null,
                 email,
@@ -53,11 +65,20 @@ public record SellerVerificationResponse(
                 sv.getRiskStatus(),
                 sv.getReviewSource(),
                 sv.getReasonCode(),
+                sv.getProviderName(),
+                sv.getProviderReferenceId(),
+                sv.getFaceMatchScore(),
+                sv.getLivenessScore(),
+                sv.getDocumentScore(),
+                sv.getRiskScore(),
                 sv.getResubmissionCount(),
                 sv.getSubmittedAt(),
+                sv.getEkycCompletedAt(),
+                sv.getRiskEvaluatedAt(),
                 sv.getReviewedAt(),
                 reviewerId,
-                sv.getRejectionReason()
+                sv.getRejectionReason(),
+                eventHistory
         );
     }
 }
