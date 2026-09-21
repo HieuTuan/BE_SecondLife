@@ -1,6 +1,5 @@
 package com.secondlife.secondlife.entity;
 
-/*
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -25,8 +24,17 @@ public class AiChatSession {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    @Column(name = "post_id")
+    private UUID postId; // Link to the draft post being created
+
     @Column(name = "title", length = 255)
     private String title;
+
+    @Column(name = "message_count", nullable = false)
+    private int messageCount = 0; // Each post allows up to 5 messages
+
+    @Column(name = "is_completed", nullable = false)
+    private boolean isCompleted = false;
 
     @Column(name = "created_at")
     private Instant createdAt;
@@ -38,4 +46,3 @@ public class AiChatSession {
         }
     }
 }
-*/

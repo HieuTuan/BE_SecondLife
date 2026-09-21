@@ -10,4 +10,6 @@ public class AiChatRequest {
     
     @NotBlank
     private String message;
+
+    private String base64Image; // Optional image for Llava vision processing
 }
