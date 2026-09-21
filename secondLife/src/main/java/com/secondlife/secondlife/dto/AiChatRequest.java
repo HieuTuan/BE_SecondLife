@@ -6,10 +6,11 @@ import java.util.UUID;
 
 @Data
 public class AiChatRequest {
-    private UUID sessionId; // null if it's a new session
+    private UUID sessionId; // null to start a new chat
+    private UUID postId; // required if starting a new chat
     
     @NotBlank
     private String message;
 
-    private String base64Image; // Optional image for Llava vision processing
+    private String base64Image; // Optional: for image analysis with llava
 }

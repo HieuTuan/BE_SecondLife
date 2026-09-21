@@ -66,7 +66,9 @@ public class AiChatServiceImpl implements AiChatService {
         } else {
             session = new AiChatSession();
             session.setUser(user);
-            session.setTitle("Chat " + Instant.now().toString());
+            session.setPostId(request.getPostId());
+            session.setMessageCount(0);
+            session.setCompleted(false);
             session = sessionRepository.save(session);
         }
 
