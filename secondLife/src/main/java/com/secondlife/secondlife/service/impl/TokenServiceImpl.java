@@ -12,6 +12,7 @@ import com.secondlife.secondlife.exception.UnauthorizedException;
 import com.secondlife.secondlife.repository.EmailVerificationTokenRepository;
 import com.secondlife.secondlife.repository.PasswordResetTokenRepository;
 import com.secondlife.secondlife.repository.RefreshTokenRepository;
+import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
 import com.secondlife.secondlife.service.TokenService;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.UUID;
@@ -35,7 +37,9 @@ public class TokenServiceImpl implements TokenService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final EmailVerificationTokenRepository emailVerificationTokenRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
+    private final UserRepository userRepository;
     private final JwtTokenProvider jwtTokenProvider;
+    private final SecureRandom secureRandom = new SecureRandom();
 
     @Value("${app.jwt.refresh-expiration-ms}")
     private long refreshExpirationMs;
@@ -125,61 +129,85 @@ public class TokenServiceImpl implements TokenService {
 
     @Override
     @Transactional
-    public String createEmailVerificationToken(User user) {
-        String rawToken = UUID.randomUUID().toString();
-        String hashedToken = hashToken(rawToken);
+    public String createEmailVerificationOtp(User user) {
+        // Invalidate old active OTP
+        emailVerificationTokenRepository.findTopByUserIdAndUsedAtIsNullOrderByCreatedAtDesc(user.getId())
+                .ifPresent(EmailVerificationToken::markAsUsed);
+
+        int code = 100000 + secureRandom.nextInt(900000);
+        String rawOtp = String.valueOf(code);
+        String hashedToken = hashToken(user.getId().toString() + ":" + rawOtp);
         Instant expiry = Instant.now().plusMillis(emailVerificationExpirationMs);
 
         EmailVerificationToken token = new EmailVerificationToken(user, hashedToken, expiry);
         emailVerificationTokenRepository.save(token);
-        return rawToken;
+        log.info("Generated 6-digit email verification OTP for user: {} [OTP: {}]", user.getEmail(), rawOtp);
+        return rawOtp;
     }
 
     @Override
     @Transactional
-    public User verifyEmailToken(String rawToken) {
-        String hashedToken = hashToken(rawToken);
+    public User verifyEmailOtp(String email, String rawOtp) {
+        if (email == null || email.isBlank() || rawOtp == null || rawOtp.isBlank()) {
+            throw new BadRequestException("Email và mã OTP là bắt buộc");
+        }
+
+        User user = userRepository.findByEmailIgnoreCase(email.trim().toLowerCase())
+                .orElseThrow(() -> new BadRequestException("Tài khoản không tồn tại hoặc mã OTP không chính xác"));
+
+        String hashedToken = hashToken(user.getId().toString() + ":" + rawOtp.trim());
         EmailVerificationToken token = emailVerificationTokenRepository.findByTokenHash(hashedToken)
-                .orElseThrow(() -> new BadRequestException("Invalid or expired email verification token"));
+                .orElseThrow(() -> new BadRequestException("Mã OTP không chính xác hoặc đã hết hạn"));
 
         if (!token.isValid()) {
-            throw new BadRequestException("Email verification token is already used or has expired");
+            throw new BadRequestException("Mã OTP đã được sử dụng hoặc đã hết hiệu lực");
         }
 
         token.markAsUsed();
         emailVerificationTokenRepository.save(token);
 
-        User user = token.getUser();
         user.setEmailVerified(true);
-        return user;
+        return userRepository.save(user);
     }
 
     @Override
     @Transactional
-    public String createPasswordResetToken(User user) {
-        String rawToken = UUID.randomUUID().toString();
-        String hashedToken = hashToken(rawToken);
+    public String createPasswordResetOtp(User user) {
+        // Invalidate old active OTP
+        passwordResetTokenRepository.findTopByUserIdAndUsedAtIsNullOrderByCreatedAtDesc(user.getId())
+                .ifPresent(PasswordResetToken::markAsUsed);
+
+        int code = 100000 + secureRandom.nextInt(900000);
+        String rawOtp = String.valueOf(code);
+        String hashedToken = hashToken(user.getId().toString() + ":" + rawOtp);
         Instant expiry = Instant.now().plusMillis(passwordResetExpirationMs);
 
         PasswordResetToken token = new PasswordResetToken(user, hashedToken, expiry);
         passwordResetTokenRepository.save(token);
-        return rawToken;
+        return rawOtp;
     }
 
     @Override
     @Transactional
-    public User verifyAndConsumePasswordResetToken(String rawToken) {
-        String hashedToken = hashToken(rawToken);
+    public User verifyAndConsumePasswordResetOtp(String email, String rawOtp) {
+        if (email == null || email.isBlank() || rawOtp == null || rawOtp.isBlank()) {
+            throw new BadRequestException("Email và mã OTP là bắt buộc");
+        }
+
+        User user = userRepository.findByEmailIgnoreCase(email.trim().toLowerCase())
+                .orElseThrow(() -> new BadRequestException("Tài khoản không tồn tại hoặc mã OTP không chính xác"));
+
+        String hashedToken = hashToken(user.getId().toString() + ":" + rawOtp.trim());
         PasswordResetToken token = passwordResetTokenRepository.findByTokenHash(hashedToken)
-                .orElseThrow(() -> new BadRequestException("Invalid or expired password reset token"));
+                .orElseThrow(() -> new BadRequestException("Mã OTP không chính xác hoặc đã hết hạn"));
 
         if (!token.isValid()) {
-            throw new BadRequestException("Password reset token is already used or has expired");
+            throw new BadRequestException("Mã OTP đã được sử dụng hoặc đã hết hiệu lực");
         }
 
         token.markAsUsed();
         passwordResetTokenRepository.save(token);
 
-        return token.getUser();
+        return user;
     }
 }

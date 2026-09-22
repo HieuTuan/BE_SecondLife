@@ -1,8 +1,11 @@
 package com.secondlife.secondlife.controller;
 
+import com.secondlife.secondlife.dto.request.GoogleLoginRequest;
 import com.secondlife.secondlife.dto.request.LoginRequest;
 import com.secondlife.secondlife.dto.request.RefreshTokenRequest;
 import com.secondlife.secondlife.dto.request.RegisterRequest;
+import com.secondlife.secondlife.dto.request.ResetPasswordRequest;
+import com.secondlife.secondlife.dto.request.VerifyEmailRequest;
 import com.secondlife.secondlife.dto.response.AuthResponse;
 import com.secondlife.secondlife.dto.response.TokenResponse;
 import com.secondlife.secondlife.dto.response.UserSummaryResponse;
@@ -24,7 +27,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -155,5 +158,67 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.accessToken").value("new-access-jwt"));
+    }
+
+    @Test
+    void googleLogin_WhenValid_ShouldReturn200WithAuthResponse() throws Exception {
+        UserSummaryResponse summary = new UserSummaryResponse(
+                UUID.randomUUID(), "google@example.com", "Google User", null, "http://avatar.jpg", AccountStatus.ACTIVE, true
+        );
+        AuthResponse authResponse = new AuthResponse("jwt-access", "raw-refresh", 900000L, summary, Set.of("BUYER"), Set.of("PROFILE_READ_SELF"));
+
+        when(authService.loginWithGoogle(any(GoogleLoginRequest.class))).thenReturn(authResponse);
+
+        String jsonBody = """
+                {
+                    "idToken": "valid-google-id-token"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.user.email").value("google@example.com"))
+                .andExpect(jsonPath("$.data.accessToken").value("jwt-access"));
+    }
+
+    @Test
+    void verifyEmail_WhenValid_ShouldReturn200() throws Exception {
+        doNothing().when(authService).verifyEmail(any(VerifyEmailRequest.class));
+
+        String jsonBody = """
+                {
+                    "email": "user@example.com",
+                    "otp": "123456"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/auth/verify-email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+    }
+
+    @Test
+    void resetPassword_WhenValid_ShouldReturn200() throws Exception {
+        doNothing().when(authService).resetPassword(any(ResetPasswordRequest.class));
+
+        String jsonBody = """
+                {
+                    "email": "user@example.com",
+                    "otp": "123456",
+                    "newPassword": "NewPassword@123",
+                    "confirmPassword": "NewPassword@123"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
     }
 }

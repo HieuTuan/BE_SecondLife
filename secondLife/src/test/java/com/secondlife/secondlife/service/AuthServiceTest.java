@@ -1,8 +1,11 @@
 package com.secondlife.secondlife.service;
 
+import com.secondlife.secondlife.dto.request.GoogleLoginRequest;
 import com.secondlife.secondlife.dto.request.LoginRequest;
 import com.secondlife.secondlife.dto.request.RegisterRequest;
 import com.secondlife.secondlife.dto.request.ResetPasswordRequest;
+import com.secondlife.secondlife.dto.request.VerifyEmailRequest;
+import com.secondlife.secondlife.dto.GoogleUserInfo;
 import com.secondlife.secondlife.dto.response.AuthResponse;
 import com.secondlife.secondlife.dto.response.TokenResponse;
 import com.secondlife.secondlife.dto.response.UserSummaryResponse;
@@ -57,10 +60,13 @@ class AuthServiceTest {
     private TokenService tokenService;
 
     @Mock
-    private EmailService emailService;
+    private NotificationService notificationService;
 
     @Mock
     private UserMapper userMapper;
+
+    @Mock
+    private GoogleAuthService googleAuthService;
 
     @InjectMocks
     private AuthServiceImpl authService;
@@ -87,7 +93,7 @@ class AuthServiceTest {
         when(roleRepository.findByCodeWithPermissions(RoleCode.BUYER.name())).thenReturn(Optional.of(buyerRole));
         when(passwordEncoder.encode(request.password())).thenReturn("encoded-pass");
         when(userRepository.save(any(User.class))).thenReturn(user);
-        when(tokenService.createEmailVerificationToken(any(User.class))).thenReturn("verify-token");
+        when(tokenService.createEmailVerificationOtp(any(User.class))).thenReturn("123456");
         when(tokenService.generateTokenPair(any(User.class))).thenReturn(new TokenResponse("access-jwt", "refresh-raw", 900000L));
 
         UserSummaryResponse summary = new UserSummaryResponse(userId, "new@example.com", "John Doe", "1234567890", null, AccountStatus.ACTIVE, false);
@@ -102,7 +108,7 @@ class AuthServiceTest {
         assertEquals("refresh-raw", response.refreshToken());
         assertTrue(response.roles().contains("BUYER"));
         verify(userRepository).save(any(User.class));
-        verify(emailService).sendVerificationEmail(anyString(), anyString(), anyString());
+        verify(notificationService).sendVerificationOtp(anyString(), anyString(), anyString());
     }
 
     @Test
@@ -177,16 +183,16 @@ class AuthServiceTest {
 
     @Test
     void resetPassword_WhenPasswordsDoNotMatch_ShouldThrowBadRequest() {
-        ResetPasswordRequest request = new ResetPasswordRequest("token-123", "Pass@1234", "Pass@5678");
+        ResetPasswordRequest request = new ResetPasswordRequest("buyer@example.com", "123456", "Pass@1234", "Pass@5678");
 
         assertThrows(BadRequestException.class, () -> authService.resetPassword(request));
     }
 
     @Test
     void resetPassword_WhenValid_ShouldUpdateHashAndRevokeAllSessions() {
-        ResetPasswordRequest request = new ResetPasswordRequest("token-123", "Pass@1234", "Pass@1234");
+        ResetPasswordRequest request = new ResetPasswordRequest("buyer@example.com", "123456", "Pass@1234", "Pass@1234");
 
-        when(tokenService.verifyAndConsumePasswordResetToken("token-123")).thenReturn(user);
+        when(tokenService.verifyAndConsumePasswordResetOtp("buyer@example.com", "123456")).thenReturn(user);
         when(passwordEncoder.encode("Pass@1234")).thenReturn("new-encoded-pass");
 
         authService.resetPassword(request);
@@ -194,5 +200,70 @@ class AuthServiceTest {
         assertEquals("new-encoded-pass", user.getPasswordHash());
         verify(userRepository).save(user);
         verify(tokenService).revokeAllUserRefreshTokens(userId);
+    }
+
+    @Test
+    void verifyEmail_WhenValidOtp_ShouldVerifyUser() {
+        VerifyEmailRequest request = new VerifyEmailRequest("buyer@example.com", "123456");
+        when(tokenService.verifyEmailOtp("buyer@example.com", "123456")).thenReturn(user);
+
+        authService.verifyEmail(request);
+
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void loginWithGoogle_WhenUserExists_ShouldReturnAuthResponse() {
+        GoogleLoginRequest request = new GoogleLoginRequest("valid-google-token");
+        GoogleUserInfo googleUser = new GoogleUserInfo("sub123", "buyer@example.com", true, "Buyer Name", "http://avatar.jpg");
+
+        when(googleAuthService.verifyToken("valid-google-token")).thenReturn(googleUser);
+        when(userRepository.findByEmailWithAuthoritiesIgnoreCase("buyer@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenReturn(user);
+        when(tokenService.generateTokenPair(user)).thenReturn(new TokenResponse("mock-access-token", "mock-refresh-token", 900000L));
+        when(userMapper.toSummaryResponse(user)).thenReturn(new UserSummaryResponse(userId, "buyer@example.com", "Buyer Name", null, null, AccountStatus.ACTIVE, true));
+        when(userMapper.extractRoleCodes(user)).thenReturn(Set.of("BUYER"));
+        when(userMapper.extractPermissionCodes(user)).thenReturn(Set.of("PROFILE_READ_SELF"));
+
+        AuthResponse response = authService.loginWithGoogle(request);
+
+        assertNotNull(response);
+        assertEquals("mock-access-token", response.accessToken());
+        assertEquals("buyer@example.com", response.user().email());
+        assertTrue(user.isEmailVerified());
+    }
+
+    @Test
+    void loginWithGoogle_WhenNewUser_ShouldAutoRegisterAndReturnAuthResponse() {
+        GoogleLoginRequest request = new GoogleLoginRequest("new-google-token");
+        GoogleUserInfo googleUser = new GoogleUserInfo("sub456", "new@example.com", true, "New Google User", "http://avatar.jpg");
+
+        when(googleAuthService.verifyToken("new-google-token")).thenReturn(googleUser);
+        when(userRepository.findByEmailWithAuthoritiesIgnoreCase("new@example.com")).thenReturn(Optional.empty());
+        when(roleRepository.findByCodeWithPermissions("BUYER")).thenReturn(Optional.of(buyerRole));
+        when(passwordEncoder.encode(anyString())).thenReturn("random-pass-hash");
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(tokenService.generateTokenPair(any(User.class))).thenReturn(new TokenResponse("mock-access-token", "mock-refresh-token", 900000L));
+        when(userMapper.toSummaryResponse(any(User.class))).thenReturn(new UserSummaryResponse(UUID.randomUUID(), "new@example.com", "New Google User", null, "http://avatar.jpg", AccountStatus.ACTIVE, true));
+        when(userMapper.extractRoleCodes(any(User.class))).thenReturn(Set.of("BUYER"));
+        when(userMapper.extractPermissionCodes(any(User.class))).thenReturn(Set.of("PROFILE_READ_SELF"));
+
+        AuthResponse response = authService.loginWithGoogle(request);
+
+        assertNotNull(response);
+        assertEquals("mock-access-token", response.accessToken());
+        assertEquals("new@example.com", response.user().email());
+    }
+
+    @Test
+    void loginWithGoogle_WhenAccountLocked_ShouldThrowForbidden() {
+        GoogleLoginRequest request = new GoogleLoginRequest("valid-google-token");
+        GoogleUserInfo googleUser = new GoogleUserInfo("sub123", "buyer@example.com", true, "Buyer Name", "http://avatar.jpg");
+
+        user.setAccountStatus(AccountStatus.LOCKED);
+        when(googleAuthService.verifyToken("valid-google-token")).thenReturn(googleUser);
+        when(userRepository.findByEmailWithAuthoritiesIgnoreCase("buyer@example.com")).thenReturn(Optional.of(user));
+
+        assertThrows(ForbiddenException.class, () -> authService.loginWithGoogle(request));
     }
 }

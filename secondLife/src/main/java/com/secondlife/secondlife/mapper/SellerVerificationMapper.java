@@ -1,35 +1,27 @@
 package com.secondlife.secondlife.mapper;
 
+import com.secondlife.secondlife.dto.response.AdminSellerVerificationDetailResponse;
 import com.secondlife.secondlife.dto.response.SellerVerificationResponse;
+import com.secondlife.secondlife.dto.response.VerificationEventResponse;
 import com.secondlife.secondlife.entity.SellerVerification;
+import com.secondlife.secondlife.entity.SellerVerificationEvent;
 import org.springframework.stereotype.Component;
+
+import java.util.List;
 
 @Component
 public class SellerVerificationMapper {
 
     public SellerVerificationResponse toResponse(SellerVerification sv) {
         if (sv == null) return null;
+        return SellerVerificationResponse.from(sv);
+    }
 
-        String userEmail = sv.getUser() != null ? sv.getUser().getEmail() : null;
-        String userFullName = (sv.getUser() != null && sv.getUser().getProfile() != null)
-                ? sv.getUser().getProfile().getFullName()
-                : null;
-        java.util.UUID reviewedById = sv.getReviewedBy() != null ? sv.getReviewedBy().getId() : null;
-
-        return new SellerVerificationResponse(
-                sv.getId(),
-                sv.getUser() != null ? sv.getUser().getId() : null,
-                userEmail,
-                userFullName,
-                sv.getVerificationType(),
-                sv.getDocumentNumber(),
-                sv.getDocumentFrontUrl(),
-                sv.getDocumentBackUrl(),
-                sv.getStatus(),
-                sv.getSubmittedAt(),
-                sv.getReviewedAt(),
-                reviewedById,
-                sv.getRejectionReason()
-        );
+    public AdminSellerVerificationDetailResponse toDetailResponse(SellerVerification sv, List<SellerVerificationEvent> events) {
+        if (sv == null) return null;
+        List<VerificationEventResponse> eventResponses = (events != null)
+                ? events.stream().map(VerificationEventResponse::from).toList()
+                : List.of();
+        return AdminSellerVerificationDetailResponse.from(sv, eventResponses);
     }
 }

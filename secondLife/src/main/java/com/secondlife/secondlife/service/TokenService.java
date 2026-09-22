@@ -17,11 +17,11 @@ public interface TokenService {
 
     void revokeAllUserRefreshTokens(UUID userId);
 
-    String createEmailVerificationToken(User user);
+    String createEmailVerificationOtp(User user);
 
-    User verifyEmailToken(String rawToken);
+    User verifyEmailOtp(String email, String rawOtp);
 
-    String createPasswordResetToken(User user);
+    String createPasswordResetOtp(User user);
 
-    User verifyAndConsumePasswordResetToken(String rawToken);
+    User verifyAndConsumePasswordResetOtp(String email, String rawOtp);
 }

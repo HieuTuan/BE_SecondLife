@@ -19,6 +19,7 @@ import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.TokenService;
 import com.secondlife.secondlife.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -41,6 +42,7 @@ public class UserServiceImpl implements UserService {
     private final PasswordEncoder passwordEncoder;
     private final TokenService tokenService;
     private final UserMapper userMapper;
+    private final NotificationService notificationService;
 
     @Override
     @Transactional(readOnly = true)
@@ -97,6 +99,8 @@ public class UserServiceImpl implements UserService {
         // Revoke all active sessions upon password change
         tokenService.revokeAllUserRefreshTokens(userId);
         log.info("Password changed and active sessions revoked for user: {}", user.getEmail());
+
+        notificationService.sendPasswordChangedAlert(user);
     }
 
     @Override
@@ -161,6 +165,9 @@ public class UserServiceImpl implements UserService {
         targetUser.setAccountStatus(request.status());
         User savedUser = userRepository.save(targetUser);
         log.info("Admin {} updated status of user {} to {}", currentAdminId, savedUser.getEmail(), request.status());
+
+        notificationService.sendAccountStatusChanged(savedUser, request.status());
+
         return userMapper.toAdminResponse(savedUser);
     }
 
@@ -186,6 +193,9 @@ public class UserServiceImpl implements UserService {
 
         User savedUser = userRepository.save(user);
         log.info("Admin created Inspection Center account: {}", savedUser.getEmail());
+
+        notificationService.sendInspectionCenterCreated(savedUser, request.password());
+
         return userMapper.toSummaryResponse(savedUser);
     }
 }
