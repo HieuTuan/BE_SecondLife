@@ -22,7 +22,7 @@ public class EmailNotificationChannel implements NotificationChannel {
     private final JavaMailSender mailSender;
     private final EmailTemplateBuilder templateBuilder;
 
-    @Value("${spring.mail.username:noreply.homeappliance@gmail.com}")
+    @Value("${app.mail.from}")
     private String fromEmail;
 
     @Override

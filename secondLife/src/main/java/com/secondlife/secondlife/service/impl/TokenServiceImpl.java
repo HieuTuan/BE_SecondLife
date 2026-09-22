@@ -141,6 +141,7 @@ public class TokenServiceImpl implements TokenService {
 
         EmailVerificationToken token = new EmailVerificationToken(user, hashedToken, expiry);
         emailVerificationTokenRepository.save(token);
+        log.info("Generated 6-digit email verification OTP for user: {} [OTP: {}]", user.getEmail(), rawOtp);
         return rawOtp;
     }
 

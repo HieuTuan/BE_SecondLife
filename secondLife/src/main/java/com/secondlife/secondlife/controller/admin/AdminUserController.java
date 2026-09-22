@@ -38,7 +38,7 @@ public class AdminUserController {
             @RequestParam(required = false) String email,
             @RequestParam(required = false) AccountStatus status,
             @RequestParam(required = false) String role,
-            @PageableDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
+            @org.springdoc.core.annotations.ParameterObject @PageableDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         PageResponse<UserAdminResponse> response = userService.getAdminUsers(email, status, role, pageable);
         return ResponseEntity.ok(ApiResponse.success("Get users successfully", response));

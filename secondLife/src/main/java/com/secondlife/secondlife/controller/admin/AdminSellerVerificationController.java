@@ -48,7 +48,7 @@ public class AdminSellerVerificationController {
             @RequestParam(required = false) EkycStatus ekycStatus,
             @RequestParam(required = false) RiskStatus riskStatus,
             @RequestParam(required = false) ReasonCode reasonCode,
-            @PageableDefault(sort = "submittedAt", direction = Sort.Direction.DESC) Pageable pageable
+            @org.springdoc.core.annotations.ParameterObject @PageableDefault(sort = "submittedAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         PageResponse<SellerVerificationResponse> response = sellerVerificationService.getAdminVerifications(
                 status, ekycStatus, riskStatus, reasonCode, pageable
