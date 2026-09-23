@@ -18,8 +18,8 @@ sequenceDiagram
     autonumber
     actor User as Người dùng (Buyer)
     participant FE as Màn hình Frontend
-    participant Cloud as Cloud Storage (S3 / Cloudinary / Firebase)
-    participant BE as Backend API (/api/v1)
+    participant BE as SecondLife Backend (/api/v1)
+    participant Cloud as Cloudinary Storage
 
     User->>FE: Bấm "Đăng ký trở thành Người bán"
     FE->>BE: GET /api/v1/seller-verifications/me
@@ -32,9 +32,12 @@ sequenceDiagram
     end
 
     User->>FE: Chụp 3 ảnh: Mặt trước, Mặt sau, Quét mặt
-    FE->>Cloud: Upload 3 file ảnh
-    Cloud-->>FE: Trả về 3 URL ảnh
-    FE->>BE: POST /api/v1/seller-verifications (kèm 3 URL)
+    FE->>BE: POST /api/v1/media/upload (hoặc /upload-multiple)
+    BE->>Cloud: Upload ảnh lên Cloudinary
+    Cloud-->>BE: Trả về Cloudinary CDN URLs
+    BE-->>FE: 201 Created (Trả về URL ảnh)
+    
+    FE->>BE: POST /api/v1/seller-verifications (kèm 3 URLs vừa nhận)
     BE-->>FE: 201 Created (Kèm status hồ sơ)
     
     alt status === "APPROVED"
@@ -55,6 +58,14 @@ sequenceDiagram
 Đội FE có thể copy trực tiếp các Interface sau vào dự án:
 
 ```typescript
+export interface MediaUploadResponse {
+  url: string;              // Link CDN Cloudinary (dùng để gửi vào API verification)
+  publicId: string;         // ID file trên Cloudinary
+  format: string;           // "jpg", "png", "webp"
+  bytes: number;            // Kích thước file (bytes)
+  originalFilename: string; // Tên file gốc
+}
+
 export type VerificationType = 'CITIZEN_ID' | 'PASSPORT';
 
 export type SellerVerificationStatus =
@@ -124,13 +135,63 @@ Khi người dùng bấm vào mục "Kênh người bán" hoặc "Đăng ký ng�
 
 ---
 
-### BƯỚC 2: Chụp ảnh & Upload lên Cloud Storage (Client-side)
-Trên giao diện, FE cung cấp 3 bước chụp với hướng dẫn trực quan:
-- **Bước 2.1**: Chụp CCCD mặt trước (yêu cầu rõ 4 góc, rõ số, không chói sáng).
-- **Bước 2.2**: Chụp CCCD mặt sau (yêu cầu rõ mã QR/chip, rõ phôi thẻ).
-- **Bước 2.3**: Quét khuôn mặt / Chụp Selfie (đưa mặt vào khung oval, đủ ánh sáng, không đeo kính râm/khẩu trang).
+### BƯỚC 2: Chụp ảnh & Upload trực tiếp lên Backend qua Cloudinary
 
-Sau khi có 3 file ảnh dạng `File` hoặc `Blob`, FE đẩy lên dịch vụ lưu trữ (ví dụ Cloudinary, Firebase, hoặc AWS S3) để lấy 3 link URL dạng `https://...`.
+Sau khi chụp 3 ảnh: Mặt trước, Mặt sau và Selfie, **FE không cần cấu hình Cloudinary**, chỉ cần gửi file lên Backend qua 1 trong 2 API sau:
+
+#### Cách A: Upload từng file lẻ (`POST /api/v1/media/upload`)
+- **Endpoint**: `POST /api/v1/media/upload`
+- **Content-Type**: `multipart/form-data`
+- **Body**: `file` (File binary ảnh), `folder` (tùy chọn, mặc định: `"secondlife/verifications"`)
+- **Code mẫu Axios**:
+```typescript
+async function uploadSingleImage(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('folder', 'secondlife/verifications');
+
+  const res = await axios.post('/api/v1/media/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  // Trả về URL ảnh: https://res.cloudinary.com/dmcodhbcc/image/upload/...
+  return res.data.data.url;
+}
+```
+
+#### Cách B (Khuyên dùng - Nhanh nhất): Upload cả 3 file cùng 1 lượt (`POST /api/v1/media/upload-multiple`)
+- **Endpoint**: `POST /api/v1/media/upload-multiple`
+- **Content-Type**: `multipart/form-data`
+- **Body**: `files` (Mảng chứa 3 file: frontFile, backFile, selfieFile)
+- **Code mẫu Axios**:
+```typescript
+async function uploadAllVerificationImages(frontFile: File, backFile: File, selfieFile: File) {
+  const formData = new FormData();
+  formData.append('files', frontFile);
+  formData.append('files', backFile);
+  formData.append('files', selfieFile);
+  formData.append('folder', 'secondlife/verifications');
+
+  const res = await axios.post('/api/v1/media/upload-multiple', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  // res.data.data là mảng 3 phần tử theo thứ tự: [front, back, selfie]
+  const [frontRes, backRes, selfieRes] = res.data.data;
+  return {
+    documentFrontUrl: frontRes.url,
+    documentBackUrl: backRes.url,
+    selfieUrl: selfieRes.url,
+  };
+}
+```
+
 
 ---
 
