@@ -28,6 +28,9 @@ public class Post {
     @Column(name = "category_id")
     private UUID categoryId;
 
+    @Column(name = "item_id")
+    private UUID itemId;
+
     @Column(name = "title", length = 255)
     private String title;
 

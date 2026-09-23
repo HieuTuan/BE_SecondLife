@@ -1,7 +1,7 @@
 package com.secondlife.secondlife.service.impl;
 
-import com.secondlife.secondlife.dto.AiChatRequest;
-import com.secondlife.secondlife.dto.AiChatResponse;
+import com.secondlife.secondlife.dto.request.AiChatRequest;
+import com.secondlife.secondlife.dto.response.AiChatResponse;
 import com.secondlife.secondlife.entity.AiChatMessage;
 import com.secondlife.secondlife.entity.AiChatSession;
 import com.secondlife.secondlife.entity.User;
@@ -27,18 +27,21 @@ import java.util.UUID;
 @Service
 public class AiChatServiceImpl implements AiChatService {
 
-    private final ChatClient chatClient;
+    private final ChatClient ollamaChatClient;
+    private final ChatClient googleChatClient;
     private final AiChatSessionRepository sessionRepository;
     private final AiChatMessageRepository messageRepository;
     private final UserRepository userRepository;
     private final com.secondlife.secondlife.service.CreditService creditService;
 
-    public AiChatServiceImpl(ChatClient.Builder chatClientBuilder,
+    public AiChatServiceImpl(@org.springframework.beans.factory.annotation.Qualifier("ollamaChatModel") org.springframework.ai.chat.model.ChatModel ollamaChatModel,
+            @org.springframework.beans.factory.annotation.Qualifier("googleGenAiChatModel") org.springframework.ai.chat.model.ChatModel googleChatModel,
             AiChatSessionRepository sessionRepository,
             AiChatMessageRepository messageRepository,
             UserRepository userRepository,
             com.secondlife.secondlife.service.CreditService creditService) {
-        this.chatClient = chatClientBuilder.build();
+        this.ollamaChatClient = ChatClient.builder(ollamaChatModel).build();
+        this.googleChatClient = ChatClient.builder(googleChatModel).build();
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
         this.userRepository = userRepository;
@@ -92,22 +95,19 @@ public class AiChatServiceImpl implements AiChatService {
             }
         }
 
-        // Handle image if provided
-        // Spring AI supports adding media to UserMessage, but requires base64/URL parsing.
-        // For simplicity and avoiding complex Media API if not needed, we'll route to llava if an image is provided.
-        // Assuming we pass image as text instructions or use the correct Media API when properly set up.
-        // For this task, we will configure the model dynamically.
-        String modelToUse = "gemma4:31b"; // default
-
         if (request.getBase64Image() != null && !request.getBase64Image().isEmpty()) {
-            modelToUse = "llava";
-            // In a real implementation with Spring AI, you would construct Media object:
-            // Media media = new Media(MimeTypeUtils.IMAGE_JPEG, request.getBase64Image());
-            // UserMessage userMsg = new UserMessage(request.getMessage(), List.of(media));
-            // But since Spring AI version might differ, we'll just set the model.
+            // Strip data:image/...;base64, prefix if it exists
+            String base64Data = request.getBase64Image();
+            if (base64Data.contains(",")) {
+                base64Data = base64Data.split(",")[1];
+            }
+            byte[] imageBytes = java.util.Base64.getDecoder().decode(base64Data);
+            org.springframework.core.io.ByteArrayResource resource = new org.springframework.core.io.ByteArrayResource(imageBytes);
+            org.springframework.ai.content.Media media = new org.springframework.ai.content.Media(org.springframework.util.MimeTypeUtils.IMAGE_JPEG, resource);
+            aiMessages.add(UserMessage.builder().text(request.getMessage()).media(java.util.List.of(media)).build());
+        } else {
+            aiMessages.add(new UserMessage(request.getMessage()));
         }
-
-        aiMessages.add(new UserMessage(request.getMessage()));
 
         // Save user message to DB
         AiChatMessage userDbMessage = new AiChatMessage();
@@ -119,9 +119,16 @@ public class AiChatServiceImpl implements AiChatService {
         session.setMessageCount(session.getMessageCount() + 1);
         sessionRepository.save(session);
 
-        // Call Ollama with dynamic model selection
-        Prompt prompt = new Prompt(aiMessages, OllamaChatOptions.builder().model(modelToUse).build());
-        String aiReply = chatClient.prompt(prompt).call().content();
+        String aiReply;
+        if (request.getBase64Image() != null && !request.getBase64Image().isEmpty()) {
+            // Use Google Gemini for image
+            Prompt prompt = new Prompt(aiMessages);
+            aiReply = googleChatClient.prompt(prompt).call().content();
+        } else {
+            // Use Ollama for text
+            Prompt prompt = new Prompt(aiMessages, org.springframework.ai.ollama.api.OllamaChatOptions.builder().model("gemma4:31b-cloud").build());
+            aiReply = ollamaChatClient.prompt(prompt).call().content();
+        }
 
         // Save AI response to DB
         AiChatMessage aiDbMessage = new AiChatMessage();
@@ -165,8 +172,8 @@ public class AiChatServiceImpl implements AiChatService {
         String finalizePrompt = "Dựa vào toàn bộ cuộc trò chuyện trên, hãy tổng hợp và viết ra một đoạn mô tả hoàn chỉnh, hấp dẫn cho sản phẩm này để đăng bán. Trả về đúng nội dung mô tả, không cần giải thích hay thêm bình luận gì khác.";
         aiMessages.add(new UserMessage(finalizePrompt));
 
-        Prompt prompt = new Prompt(aiMessages, org.springframework.ai.ollama.api.OllamaChatOptions.builder().model("gemma4:31b").build());
-        String finalDescription = chatClient.prompt(prompt).call().content();
+        Prompt prompt = new Prompt(aiMessages, org.springframework.ai.ollama.api.OllamaChatOptions.builder().model("gemma4:31b-cloud").build());
+        String finalDescription = ollamaChatClient.prompt(prompt).call().content();
 
         session.setCompleted(true);
         sessionRepository.save(session);

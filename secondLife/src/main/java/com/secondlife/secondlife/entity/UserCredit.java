@@ -22,6 +22,7 @@ public class UserCredit {
 
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false, unique = true)
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private User user;
 
     @Column(name = "post_credits", nullable = false)

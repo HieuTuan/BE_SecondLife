@@ -1,8 +1,8 @@
 package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.ApiResponse;
-import com.secondlife.secondlife.dto.AiChatRequest;
-import com.secondlife.secondlife.dto.AiChatResponse;
+import com.secondlife.secondlife.dto.request.AiChatRequest;
+import com.secondlife.secondlife.dto.response.AiChatResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.AiChatService;

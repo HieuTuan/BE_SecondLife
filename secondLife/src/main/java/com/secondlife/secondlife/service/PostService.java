@@ -1,7 +1,7 @@
 package com.secondlife.secondlife.service;
 
-import com.secondlife.secondlife.dto.PostInitRequest;
-import com.secondlife.secondlife.dto.PostInitResponse;
+import com.secondlife.secondlife.dto.request.PostInitRequest;
+import com.secondlife.secondlife.dto.response.PostInitResponse;
 
 import java.util.UUID;
 

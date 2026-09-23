@@ -1,4 +1,4 @@
-package com.secondlife.secondlife.dto;
+package com.secondlife.secondlife.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;

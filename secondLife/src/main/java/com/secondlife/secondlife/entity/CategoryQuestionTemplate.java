@@ -21,7 +21,10 @@ public class CategoryQuestionTemplate {
     private UUID id;
 
     @Column(name = "category_id", nullable = false)
-    private UUID categoryId; // Assuming category id is UUID. We can link to Category entity if it exists
+    private UUID categoryId;
+
+    @Column(name = "item_id")
+    private UUID itemId;
 
     @Column(name = "template_text", nullable = false, columnDefinition = "TEXT")
     private String templateText;

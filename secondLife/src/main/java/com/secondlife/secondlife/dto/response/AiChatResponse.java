@@ -1,4 +1,4 @@
-package com.secondlife.secondlife.dto;
+package com.secondlife.secondlife.dto.response;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
