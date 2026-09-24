@@ -29,7 +29,7 @@ public class AiChatController {
     @Operation(summary = "Send a message to the AI Chatbot")
     public ResponseEntity<ApiResponse<AiChatResponse>> chat(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @Valid @RequestBody AiChatRequest request
+            @Valid @ModelAttribute AiChatRequest request
     ) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         AiChatResponse response = aiChatService.processChat(request, userId);

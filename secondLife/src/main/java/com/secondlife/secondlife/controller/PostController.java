@@ -23,10 +23,18 @@ public class PostController {
         this.currentUserProvider = currentUserProvider;
     }
 
+    @GetMapping
+    public ResponseEntity<org.springframework.data.domain.Page<com.secondlife.secondlife.entity.Post>> getPublicPosts(
+            @RequestParam(required = false) UUID categoryId,
+            @RequestParam(required = false) UUID itemId,
+            org.springframework.data.domain.Pageable pageable) {
+        return ResponseEntity.ok(postService.getPublicPosts(categoryId, itemId, pageable));
+    }
+
     @PostMapping("/init")
     public ResponseEntity<PostInitResponse> initPost(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @RequestBody PostInitRequest request) {
+            @ModelAttribute PostInitRequest request) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(postService.initPost(userId, request));
     }

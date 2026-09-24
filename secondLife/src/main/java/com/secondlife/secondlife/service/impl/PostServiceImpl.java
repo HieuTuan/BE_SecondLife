@@ -33,6 +33,7 @@ public class PostServiceImpl implements PostService {
     private final CategoryRepository categoryRepository;
     private final ItemRepository itemRepository;
     private final ChatClient chatClient;
+    private final com.secondlife.secondlife.service.CloudinaryService cloudinaryService;
 
     public PostServiceImpl(PostRepository postRepository,
                            UserRepository userRepository,
@@ -42,7 +43,8 @@ public class PostServiceImpl implements PostService {
                            com.secondlife.secondlife.repository.AiChatSessionRepository sessionRepository,
                            CategoryRepository categoryRepository,
                            ItemRepository itemRepository,
-                           ChatClient.Builder chatClientBuilder) {
+                           ChatClient.Builder chatClientBuilder,
+                           com.secondlife.secondlife.service.CloudinaryService cloudinaryService) {
         this.postRepository = postRepository;
         this.userRepository = userRepository;
         this.creditService = creditService;
@@ -52,6 +54,7 @@ public class PostServiceImpl implements PostService {
         this.categoryRepository = categoryRepository;
         this.itemRepository = itemRepository;
         this.chatClient = chatClientBuilder.build();
+        this.cloudinaryService = cloudinaryService;
     }
 
     @Override
@@ -69,7 +72,16 @@ public class PostServiceImpl implements PostService {
         post.setCategoryId(request.getCategoryId());
         post.setItemId(request.getItemId());
         post.setStatus("DRAFT");
-        // could set imageUrl if it's uploaded to cloud storage, but here we have base64
+        
+        if (request.getImage() != null && !request.getImage().isEmpty()) {
+            try {
+                String imageUrl = cloudinaryService.uploadImage(request.getImage());
+                post.setImageUrl(imageUrl);
+            } catch (java.io.IOException e) {
+                throw new RuntimeException("Failed to upload image to Cloudinary", e);
+            }
+        }
+        
         post = postRepository.save(post);
 
         // 3. Call AI to analyze image
@@ -78,7 +90,7 @@ public class PostServiceImpl implements PostService {
         aiRequest.setPostId(post.getId());
         // Prompt for Llava to only describe the visual condition
         aiRequest.setMessage("Dựa vào hình ảnh được cung cấp, hãy chỉ nhận xét ngắn gọn về ngoại hình và tình trạng vật lý của sản phẩm này. Không cần thêm lời chào hay bình luận gì khác.");
-        aiRequest.setBase64Image(request.getBase64Image());
+        aiRequest.setImage(request.getImage());
 
         // This will deduct 1 chat credit if applicable, or we might say the first message doesn't cost a chat credit? 
         // User said: "Mỗi bài đăng đi kèm 5 lượt chat". So it might cost a chat credit. 
@@ -186,5 +198,36 @@ public class PostServiceImpl implements PostService {
         // We could also store the reject reason in the entity if there is a field for it
         // and potentially refund the post_credit to the user.
         postRepository.save(post);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<Post> getAdminPosts(String status, UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable) {
+        org.springframework.data.jpa.domain.Specification<Post> spec = org.springframework.data.jpa.domain.Specification.where((org.springframework.data.jpa.domain.Specification<Post>) null);
+        if (status != null && !status.isEmpty()) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), status));
+        }
+        if (categoryId != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("categoryId"), categoryId));
+        }
+        if (itemId != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("itemId"), itemId));
+        }
+        return postRepository.findAll(spec, pageable);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<Post> getPublicPosts(UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable) {
+        // Public posts should only return ACTIVE ones
+        org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> cb.equal(root.get("status"), "ACTIVE");
+        
+        if (categoryId != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("categoryId"), categoryId));
+        }
+        if (itemId != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("itemId"), itemId));
+        }
+        return postRepository.findAll(spec, pageable);
     }
 }

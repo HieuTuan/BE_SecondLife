@@ -95,13 +95,13 @@ public class AiChatServiceImpl implements AiChatService {
             }
         }
 
-        if (request.getBase64Image() != null && !request.getBase64Image().isEmpty()) {
-            // Strip data:image/...;base64, prefix if it exists
-            String base64Data = request.getBase64Image();
-            if (base64Data.contains(",")) {
-                base64Data = base64Data.split(",")[1];
+        if (request.getImage() != null && !request.getImage().isEmpty()) {
+            byte[] imageBytes = null;
+            try {
+                imageBytes = request.getImage().getBytes();
+            } catch (java.io.IOException e) {
+                throw new RuntimeException("Failed to read image file", e);
             }
-            byte[] imageBytes = java.util.Base64.getDecoder().decode(base64Data);
             org.springframework.core.io.ByteArrayResource resource = new org.springframework.core.io.ByteArrayResource(imageBytes);
             org.springframework.ai.content.Media media = new org.springframework.ai.content.Media(org.springframework.util.MimeTypeUtils.IMAGE_JPEG, resource);
             aiMessages.add(UserMessage.builder().text(request.getMessage()).media(java.util.List.of(media)).build());
@@ -120,7 +120,7 @@ public class AiChatServiceImpl implements AiChatService {
         sessionRepository.save(session);
 
         String aiReply;
-        if (request.getBase64Image() != null && !request.getBase64Image().isEmpty()) {
+        if (request.getImage() != null && !request.getImage().isEmpty()) {
             // Use Google Gemini for image
             Prompt prompt = new Prompt(aiMessages);
             aiReply = googleChatClient.prompt(prompt).call().content();
