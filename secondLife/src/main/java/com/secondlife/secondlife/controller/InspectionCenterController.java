@@ -10,6 +10,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -19,6 +20,7 @@ import java.util.UUID;
 @RequestMapping("/api/v1/inspector-center")
 @RequiredArgsConstructor
 @Tag(name = "Inspection Center Management", description = "APIs dành cho Inspection Center Manager quản lý nhân viên")
+@PreAuthorize("hasAuthority('INSPECTION_CENTER_ACCOUNT_MANAGE')")
 public class InspectionCenterController {
 
     private final InspectionService inspectionService;

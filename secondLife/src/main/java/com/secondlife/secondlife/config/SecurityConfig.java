@@ -27,7 +27,7 @@ import java.util.List;
 
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity(prePostEnabled = false) // Tạm thời tắt phân quyền để tiện test API
+@EnableMethodSecurity(prePostEnabled = true)
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -60,8 +60,10 @@ public class SecurityConfig {
                         // Public auth endpoints
                         .requestMatchers("/api/v1/auth/**").permitAll()
                         .requestMatchers("/error").permitAll()
-                        // Tạm thời cho phép tất cả các request để test API qua Swagger UI
-                        .anyRequest().permitAll()
+                        // Public post endpoints
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/posts").permitAll()
+                        // Require authentication for all other requests
+                        .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 

@@ -13,6 +13,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -22,6 +23,7 @@ import java.util.UUID;
 @RequestMapping("/api/v1/inspector")
 @RequiredArgsConstructor
 @Tag(name = "Inspection", description = "APIs dành cho Inspector và Inspection Center Manager")
+@PreAuthorize("hasRole('INSPECTION_CENTER')")
 public class InspectionController {
 
     private final InspectionService inspectionService;

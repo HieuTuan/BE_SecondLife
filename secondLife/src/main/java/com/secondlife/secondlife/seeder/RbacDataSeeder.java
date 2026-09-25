@@ -68,7 +68,10 @@ public class RbacDataSeeder implements ApplicationRunner {
                 Map.entry(PermissionCode.SELLER_VERIFICATION_READ_ANY, new String[]{"Read Any Seller Verification", "Allows viewing all seller verification requests"}),
                 Map.entry(PermissionCode.SELLER_VERIFICATION_REVIEW, new String[]{"Review Seller Verification", "Allows approving or rejecting seller verification requests"}),
                 Map.entry(PermissionCode.INSPECTION_CENTER_ACCOUNT_MANAGE, new String[]{"Manage Inspection Center Accounts", "Allows provisioning Inspection Center partner accounts"}),
-                Map.entry(PermissionCode.ROLE_READ, new String[]{"Read Roles", "Allows viewing available roles and permissions in the system"})
+                Map.entry(PermissionCode.ROLE_READ, new String[]{"Read Roles", "Allows viewing available roles and permissions in the system"}),
+                Map.entry(PermissionCode.POST_CREATE, new String[]{"Create Post", "Allows creating new marketplace posts"}),
+                Map.entry(PermissionCode.POST_UPDATE, new String[]{"Update Post", "Allows updating own marketplace posts"}),
+                Map.entry(PermissionCode.POST_DELETE, new String[]{"Delete Post", "Allows deleting own marketplace posts"})
         );
 
         for (Map.Entry<PermissionCode, String[]> entry : metadata.entrySet()) {
@@ -122,7 +125,10 @@ public class RbacDataSeeder implements ApplicationRunner {
                 permissions.get(PermissionCode.PROFILE_READ_SELF),
                 permissions.get(PermissionCode.PROFILE_UPDATE_SELF),
                 permissions.get(PermissionCode.PASSWORD_CHANGE_SELF),
-                permissions.get(PermissionCode.SELLER_VERIFICATION_READ_SELF)
+                permissions.get(PermissionCode.SELLER_VERIFICATION_READ_SELF),
+                permissions.get(PermissionCode.POST_CREATE),
+                permissions.get(PermissionCode.POST_UPDATE),
+                permissions.get(PermissionCode.POST_DELETE)
         ));
 
         // INSPECTION_CENTER

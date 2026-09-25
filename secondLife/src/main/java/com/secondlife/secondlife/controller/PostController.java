@@ -9,6 +9,7 @@ import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.PostService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -35,6 +36,7 @@ public class PostController {
     }
 
     @PostMapping("/init")
+    @PreAuthorize("hasAuthority('POST_CREATE')")
     public ResponseEntity<PostInitResponse> initPost(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @ModelAttribute PostInitRequest request) {
@@ -43,6 +45,7 @@ public class PostController {
     }
 
     @PostMapping("/finalize-chat/{sessionId}")
+    @PreAuthorize("hasAuthority('POST_CREATE')")
     public ResponseEntity<PostFinalizeResponse> finalizeChat(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID sessionId) {
@@ -52,6 +55,7 @@ public class PostController {
     }
 
     @PostMapping("/submit/{postId}")
+    @PreAuthorize("hasAuthority('POST_CREATE')")
     public ResponseEntity<PostSubmitResponse> submitPost(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID postId,
