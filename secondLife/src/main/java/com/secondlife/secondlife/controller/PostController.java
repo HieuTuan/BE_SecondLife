@@ -4,6 +4,7 @@ import com.secondlife.secondlife.dto.request.PostInitRequest;
 import com.secondlife.secondlife.dto.request.PostSubmitRequest;
 import com.secondlife.secondlife.dto.response.PostInitResponse;
 import com.secondlife.secondlife.dto.response.PostFinalizeResponse;
+import com.secondlife.secondlife.dto.response.PostSubmitResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.PostService;
@@ -51,12 +52,12 @@ public class PostController {
     }
 
     @PostMapping("/submit/{postId}")
-    public ResponseEntity<String> submitPost(
+    public ResponseEntity<PostSubmitResponse> submitPost(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID postId,
             @RequestBody @jakarta.validation.Valid PostSubmitRequest request) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        postService.submitPost(userId, postId, request);
-        return ResponseEntity.ok("Post submitted successfully");
+        PostSubmitResponse response = postService.submitPost(userId, postId, request);
+        return ResponseEntity.ok(response);
     }
 }

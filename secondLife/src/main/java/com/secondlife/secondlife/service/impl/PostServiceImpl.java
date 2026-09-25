@@ -4,11 +4,15 @@ import com.secondlife.secondlife.dto.request.AiChatRequest;
 import com.secondlife.secondlife.dto.request.PostInitRequest;
 import com.secondlife.secondlife.dto.response.AiChatResponse;
 import com.secondlife.secondlife.dto.response.PostInitResponse;
+import com.secondlife.secondlife.dto.response.PostSubmitResponse;
 import com.secondlife.secondlife.entity.CategoryQuestionTemplate;
+import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.entity.UserCredit;
 import com.secondlife.secondlife.repository.CategoryQuestionTemplateRepository;
 import com.secondlife.secondlife.repository.CategoryRepository;
+import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.ItemRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
@@ -16,13 +20,26 @@ import com.secondlife.secondlife.service.AiChatService;
 import com.secondlife.secondlife.service.CreditService;
 import com.secondlife.secondlife.service.PostService;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.UUID;
 
 @Service
 public class PostServiceImpl implements PostService {
+
+    @Value("${app.inspection.high-value-threshold:5000000}")
+    private BigDecimal highValueThreshold;
+
+    @Value("${app.inspection.inspection-fee:200000}")
+    private BigDecimal inspectionFee;
+
+    @Value("${app.inspection.shipping-fee:50000}")
+    private BigDecimal shippingFee;
 
     private final PostRepository postRepository;
     private final UserRepository userRepository;
@@ -34,6 +51,8 @@ public class PostServiceImpl implements PostService {
     private final ItemRepository itemRepository;
     private final ChatClient chatClient;
     private final com.secondlife.secondlife.service.CloudinaryService cloudinaryService;
+    private final InspectionOrderRepository inspectionOrderRepository;
+    private final org.springframework.ai.chat.model.ChatModel googleChatModel;
 
     public PostServiceImpl(PostRepository postRepository,
                            UserRepository userRepository,
@@ -44,7 +63,10 @@ public class PostServiceImpl implements PostService {
                            CategoryRepository categoryRepository,
                            ItemRepository itemRepository,
                            ChatClient.Builder chatClientBuilder,
-                           com.secondlife.secondlife.service.CloudinaryService cloudinaryService) {
+                           com.secondlife.secondlife.service.CloudinaryService cloudinaryService,
+                           InspectionOrderRepository inspectionOrderRepository,
+                           @org.springframework.beans.factory.annotation.Qualifier("googleGenAiChatModel")
+                           org.springframework.ai.chat.model.ChatModel googleChatModel) {
         this.postRepository = postRepository;
         this.userRepository = userRepository;
         this.creditService = creditService;
@@ -55,6 +77,8 @@ public class PostServiceImpl implements PostService {
         this.itemRepository = itemRepository;
         this.chatClient = chatClientBuilder.build();
         this.cloudinaryService = cloudinaryService;
+        this.inspectionOrderRepository = inspectionOrderRepository;
+        this.googleChatModel = googleChatModel;
     }
 
     @Override
@@ -165,19 +189,110 @@ public class PostServiceImpl implements PostService {
 
     @Override
     @Transactional
-    public void submitPost(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.PostSubmitRequest request) {
+    public PostSubmitResponse submitPost(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.PostSubmitRequest request) {
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new RuntimeException("Post not found"));
-        
+
         if (!post.getUser().getId().equals(userId)) {
             throw new RuntimeException("Unauthorized");
         }
-        
+
+        // Cập nhật thông tin người dùng chốt
         post.setTitle(request.getTitle());
         post.setDescription(request.getDescription());
         post.setPrice(request.getPrice());
-        post.setStatus("PENDING");
         postRepository.save(post);
+
+        // BƯỚC A: AI Scan bài đăng
+        String scanResult = aiScanPost(post);
+        if (scanResult.startsWith("REJECTED")) {
+            String reason = scanResult.contains(":") ? scanResult.substring(scanResult.indexOf(":") + 1).trim() : "Nội dung bài đăng không hợp lệ";
+            post.setStatus("REJECTED");
+            post.setRejectionReason("AI tự động từ chối: " + reason);
+            postRepository.save(post);
+            throw new RuntimeException("Bài đăng bị từ chối bởi hệ thống AI: " + reason);
+        }
+
+        // BƯỚC B: Kiểm tra ngưỡng giá
+        if (post.getPrice() != null && post.getPrice().compareTo(highValueThreshold) > 0) {
+            // Hàng giá trị cao → kiểm định
+            BigDecimal totalFee = inspectionFee.add(shippingFee);
+
+            // Kiểm tra credit của Seller
+            UserCredit userCredit = creditService.getUserCredit(userId);
+            // Dùng post_credits như một đơn vị tương đương tiền (1 credit = 1000 VNĐ)
+            // Nếu không đủ credit, trả về response kèm số tiền còn thiếu để FE hiển thị lựa chọn
+            long requiredCredits = totalFee.longValue() / 1000;
+            if (userCredit.getPostCredits() < requiredCredits) {
+                BigDecimal shortfall = totalFee.subtract(BigDecimal.valueOf(userCredit.getPostCredits() * 1000L));
+                return new PostSubmitResponse(
+                        "INSUFFICIENT_CREDIT",
+                        true,
+                        inspectionFee,
+                        shippingFee,
+                        "Không đủ credit để thanh toán phí kiểm định và vận chuyển. Vui lòng nạp thêm hoặc thanh toán trực tiếp qua chuyển khoản.",
+                        shortfall
+                );
+            }
+
+            // Trừ credit
+            userCredit.setPostCredits((int)(userCredit.getPostCredits() - requiredCredits));
+
+            // Tạo InspectionOrder
+            InspectionOrder order = new InspectionOrder();
+            order.setPost(post);
+            order.setInspectionFee(inspectionFee);
+            order.setShippingFee(shippingFee);
+            order.setStatus("PENDING");
+            inspectionOrderRepository.save(order);
+
+            post.setStatus("PENDING_INSPECTION");
+            postRepository.save(post);
+
+            return new PostSubmitResponse(
+                    "PENDING_INSPECTION",
+                    true,
+                    inspectionFee,
+                    shippingFee,
+                    "Sản phẩm có giá trị cao. Đã tạo đơn kiểm định. Vui lòng gửi sản phẩm đến trung tâm kiểm định theo hướng dẫn.",
+                    null
+            );
+        } else {
+            // Hàng giá thường → AI đã duyệt, đăng luôn
+            post.setStatus("ACTIVE");
+            postRepository.save(post);
+
+            return new PostSubmitResponse(
+                    "ACTIVE",
+                    false,
+                    null,
+                    null,
+                    "Bài đăng đã được AI duyệt và hiển thị trên sàn.",
+                    null
+            );
+        }
+    }
+
+    /**
+     * Gọi Google Gemini để scan bài đăng.
+     * Returns "APPROVED" hoặc "REJECTED:<reason>"
+     */
+    private String aiScanPost(Post post) {
+        ChatClient client = ChatClient.builder(googleChatModel).build();
+        String prompt = String.format(
+            "Bạn là hệ thống kiểm duyệt tự động của sàn mua bán đồ cũ SecondLife. " +
+            "Hãy đánh giá bài đăng sản phẩm sau có phù hợp để hiển thị trên sàn không? " +
+            "Kiểm tra: (1) Mô tả có khớp với loại sản phẩm, (2) Không có dấu hiệu lừa đảo, " +
+            "(3) Không vi phạm nội quy (hàng cấm, hàng giả, thông tin sai lệch). " +
+            "Tiêu đề: %s. Mô tả: %s. Giá: %s VNĐ. " +
+            "CHỈ trả về đúng một trong hai dạng sau, không giải thích thêm: " +
+            "APPROVED hoặc REJECTED:<lý do ngắn gọn bằng tiếng Việt>",
+            post.getTitle(), post.getDescription(), post.getPrice()
+        );
+        Prompt aiPrompt = new Prompt(new UserMessage(prompt));
+        ChatClient googleClient = ChatClient.builder(googleChatModel).build();
+        String result = googleClient.prompt(aiPrompt).call().content();
+        return result != null ? result.trim() : "APPROVED";
     }
 
     @Override
