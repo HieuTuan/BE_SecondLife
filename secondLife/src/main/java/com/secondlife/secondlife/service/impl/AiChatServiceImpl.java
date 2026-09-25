@@ -2,6 +2,7 @@ package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.dto.request.AiChatRequest;
 import com.secondlife.secondlife.dto.response.AiChatResponse;
+import com.secondlife.secondlife.dto.response.PostFinalizeResponse;
 import com.secondlife.secondlife.entity.AiChatMessage;
 import com.secondlife.secondlife.entity.AiChatSession;
 import com.secondlife.secondlife.entity.User;
@@ -145,7 +146,7 @@ public class AiChatServiceImpl implements AiChatService {
 
     @Override
     @Transactional
-    public String finalizeChat(UUID sessionId, UUID currentUserId) {
+    public PostFinalizeResponse finalizeChat(UUID sessionId, UUID currentUserId) {
         AiChatSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new RuntimeException("Session not found"));
         
@@ -175,9 +176,23 @@ public class AiChatServiceImpl implements AiChatService {
         Prompt prompt = new Prompt(aiMessages, org.springframework.ai.ollama.api.OllamaChatOptions.builder().model("gemma4:31b-cloud").build());
         String finalDescription = ollamaChatClient.prompt(prompt).call().content();
 
+        // Add prompt for price
+        String pricePrompt = "Dựa vào tình trạng và mô tả sản phẩm ở trên, hãy đưa ra một mức giá hợp lý (bằng số, đơn vị VNĐ) để bán sản phẩm này. Chỉ trả về một con số duy nhất, không có chữ hay dấu phẩy. Ví dụ: 500000";
+        aiMessages.add(new AssistantMessage(finalDescription));
+        aiMessages.add(new UserMessage(pricePrompt));
+        Prompt priceAiPrompt = new Prompt(aiMessages, org.springframework.ai.ollama.api.OllamaChatOptions.builder().model("gemma4:31b-cloud").build());
+        String suggestedPriceStr = ollamaChatClient.prompt(priceAiPrompt).call().content();
+        
+        java.math.BigDecimal suggestedPrice = java.math.BigDecimal.ZERO;
+        try {
+            suggestedPrice = new java.math.BigDecimal(suggestedPriceStr.replaceAll("[^0-9]", ""));
+        } catch (Exception e) {
+            // fallback if AI fails to return just number
+        }
+
         session.setCompleted(true);
         sessionRepository.save(session);
         
-        return finalDescription;
+        return new PostFinalizeResponse(finalDescription, suggestedPrice);
     }
 }

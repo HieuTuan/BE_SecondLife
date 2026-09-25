@@ -1,7 +1,9 @@
 package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.dto.request.PostInitRequest;
+import com.secondlife.secondlife.dto.request.PostSubmitRequest;
 import com.secondlife.secondlife.dto.response.PostInitResponse;
+import com.secondlife.secondlife.dto.response.PostFinalizeResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.PostService;
@@ -40,20 +42,21 @@ public class PostController {
     }
 
     @PostMapping("/finalize-chat/{sessionId}")
-    public ResponseEntity<String> finalizeChat(
+    public ResponseEntity<PostFinalizeResponse> finalizeChat(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID sessionId) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        String description = postService.finalizeChatAndDescription(userId, sessionId);
-        return ResponseEntity.ok(description);
+        PostFinalizeResponse response = postService.finalizeChatAndDescription(userId, sessionId);
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/submit/{postId}")
     public ResponseEntity<String> submitPost(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @PathVariable UUID postId) {
+            @PathVariable UUID postId,
+            @RequestBody @jakarta.validation.Valid PostSubmitRequest request) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        postService.submitPost(userId, postId);
+        postService.submitPost(userId, postId, request);
         return ResponseEntity.ok("Post submitted successfully");
     }
 }

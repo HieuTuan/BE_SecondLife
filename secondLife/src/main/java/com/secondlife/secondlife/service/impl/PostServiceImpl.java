@@ -98,8 +98,7 @@ public class PostServiceImpl implements PostService {
         AiChatResponse aiResponse = aiChatService.processChat(aiRequest, userId);
 
         // 4. Fetch or Generate Template
-        String templateText = templateRepository.findByCategoryIdAndItemId(request.getCategoryId(), request.getItemId())
-                .map(CategoryQuestionTemplate::getTemplateText)
+        CategoryQuestionTemplate template = templateRepository.findByCategoryIdAndItemId(request.getCategoryId(), request.getItemId())
                 .orElseGet(() -> {
                     // Generate new template
                     String categoryName = categoryRepository.findById(request.getCategoryId())
@@ -119,10 +118,16 @@ public class PostServiceImpl implements PostService {
                     newTemplate.setCategoryId(request.getCategoryId());
                     newTemplate.setItemId(request.getItemId());
                     newTemplate.setTemplateText(generatedTemplate);
-                    templateRepository.save(newTemplate);
-
-                    return generatedTemplate;
+                    return templateRepository.save(newTemplate);
                 });
+                
+        String templateText = template.getTemplateText();
+                
+        // Fetch session to set on post
+        com.secondlife.secondlife.entity.AiChatSession session = sessionRepository.findById(aiResponse.getSessionId()).orElse(null);
+        post.setAiChatSession(session);
+        post.setTemplate(template);
+        postRepository.save(post);
 
         String combinedResponse = aiResponse.getReply() + "\n\n" + templateText;
 
@@ -138,9 +143,9 @@ public class PostServiceImpl implements PostService {
 
     @Override
     @Transactional
-    public String finalizeChatAndDescription(UUID userId, UUID sessionId) {
+    public com.secondlife.secondlife.dto.response.PostFinalizeResponse finalizeChatAndDescription(UUID userId, UUID sessionId) {
         // 1. Tell AiChatService to summarize
-        String finalDescription = aiChatService.finalizeChat(sessionId, userId);
+        com.secondlife.secondlife.dto.response.PostFinalizeResponse finalizeResponse = aiChatService.finalizeChat(sessionId, userId);
 
         // 2. Fetch the session to get postId
         com.secondlife.secondlife.entity.AiChatSession session = sessionRepository.findById(sessionId)
@@ -149,16 +154,18 @@ public class PostServiceImpl implements PostService {
         if (session.getPostId() != null) {
             Post post = postRepository.findById(session.getPostId())
                     .orElseThrow(() -> new RuntimeException("Post not found"));
-            post.setDescription(finalDescription);
+            post.setAiDescription(finalizeResponse.getDescription());
+            post.setDescription(finalizeResponse.getDescription());
+            post.setAiSuggestedPrice(finalizeResponse.getSuggestedPrice());
             postRepository.save(post);
         }
         
-        return finalDescription;
+        return finalizeResponse;
     }
 
     @Override
     @Transactional
-    public void submitPost(UUID userId, UUID postId) {
+    public void submitPost(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.PostSubmitRequest request) {
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new RuntimeException("Post not found"));
         
@@ -166,6 +173,9 @@ public class PostServiceImpl implements PostService {
             throw new RuntimeException("Unauthorized");
         }
         
+        post.setTitle(request.getTitle());
+        post.setDescription(request.getDescription());
+        post.setPrice(request.getPrice());
         post.setStatus("PENDING");
         postRepository.save(post);
     }
@@ -195,8 +205,7 @@ public class PostServiceImpl implements PostService {
         }
         
         post.setStatus("REJECTED");
-        // We could also store the reject reason in the entity if there is a field for it
-        // and potentially refund the post_credit to the user.
+        post.setRejectionReason(reason);
         postRepository.save(post);
     }
 
