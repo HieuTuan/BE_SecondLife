@@ -66,6 +66,36 @@ class RbacAuthorizationTest {
     }
 
     @Test
+    void staffAuthorities_ShouldIncludeStaffRoleAndReviewPermissions_ButExcludeAdminManage() {
+        Role staffRole = new Role(RoleCode.STAFF.name(), "Staff", "Staff role");
+        staffRole.addPermission(new Permission(PermissionCode.PROFILE_READ_SELF.name(), "Read Own", ""));
+        staffRole.addPermission(new Permission(PermissionCode.USER_READ_ANY.name(), "Read Any", ""));
+        staffRole.addPermission(new Permission(PermissionCode.SELLER_VERIFICATION_READ_ANY.name(), "Read Seller Verifications", ""));
+        staffRole.addPermission(new Permission(PermissionCode.SELLER_VERIFICATION_REVIEW.name(), "Review", ""));
+        staffRole.addPermission(new Permission(PermissionCode.ROLE_READ.name(), "Role Read", ""));
+
+        User staff = new User("staff@example.com", "pass", AccountStatus.ACTIVE);
+        staff.addRole(staffRole);
+
+        CustomUserDetails userDetails = new CustomUserDetails(staff);
+        Set<String> authorities = userDetails.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .collect(Collectors.toSet());
+
+        assertTrue(authorities.contains("ROLE_STAFF"));
+        assertTrue(authorities.contains("PROFILE_READ_SELF"));
+        assertTrue(authorities.contains("USER_READ_ANY"));
+        assertTrue(authorities.contains("SELLER_VERIFICATION_READ_ANY"));
+        assertTrue(authorities.contains("SELLER_VERIFICATION_REVIEW"));
+        assertTrue(authorities.contains("ROLE_READ"));
+
+        // Must NOT have admin-only privileges
+        assertFalse(authorities.contains("ROLE_ADMIN"));
+        assertFalse(authorities.contains("USER_STATUS_UPDATE"));
+        assertFalse(authorities.contains("INSPECTION_CENTER_ACCOUNT_MANAGE"));
+    }
+
+    @Test
     void userStatus_WhenLocked_ShouldReportLocked() {
         User lockedUser = new User("locked@example.com", "pass", AccountStatus.LOCKED);
         CustomUserDetails userDetails = new CustomUserDetails(lockedUser);

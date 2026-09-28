@@ -21,7 +21,7 @@ import java.util.*;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "app.seeder.enabled", havingValue = "true", matchIfMissing = true)
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "app.seeder.enabled", havingValue = "true")
 public class RbacDataSeeder implements ApplicationRunner {
 
     private final RoleRepository roleRepository;
@@ -41,6 +41,18 @@ public class RbacDataSeeder implements ApplicationRunner {
     @Value("${app.seeder.admin.full-name}")
     private String adminFullName;
 
+    @Value("${app.seeder.seller.enabled}")
+    private boolean sellerSeederEnabled;
+
+    @Value("${app.seeder.seller.email}")
+    private String sellerEmail;
+
+    @Value("${app.seeder.seller.password}")
+    private String sellerPassword;
+
+    @Value("${app.seeder.seller.full-name}")
+    private String sellerFullName;
+
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
@@ -50,6 +62,7 @@ public class RbacDataSeeder implements ApplicationRunner {
         Map<RoleCode, Role> roles = seedRoles();
         seedRolePermissions(roles, permissions);
         seedAdminUser(roles.get(RoleCode.ADMIN));
+        seedSellerUser(roles.get(RoleCode.SELLER), roles.get(RoleCode.BUYER));
 
         log.info("RBAC and Initial Data Seeding completed successfully.");
     }
@@ -90,6 +103,7 @@ public class RbacDataSeeder implements ApplicationRunner {
         Map<RoleCode, String[]> roleMeta = Map.of(
                 RoleCode.BUYER, new String[]{"Buyer", "Standard marketplace buyer role"},
                 RoleCode.SELLER, new String[]{"Seller", "Verified seller role capable of listing items"},
+                RoleCode.STAFF, new String[]{"Staff", "Operations and moderation staff"},
                 RoleCode.INSPECTION_CENTER, new String[]{"Inspection Center", "Inspection & authentication partner account"},
                 RoleCode.ADMIN, new String[]{"Administrator", "Full system administrator"}
         );
@@ -125,6 +139,17 @@ public class RbacDataSeeder implements ApplicationRunner {
                 permissions.get(PermissionCode.SELLER_VERIFICATION_READ_SELF)
         ));
 
+        // STAFF
+        assignPermissionsIfMissing(roles.get(RoleCode.STAFF), List.of(
+                permissions.get(PermissionCode.PROFILE_READ_SELF),
+                permissions.get(PermissionCode.PROFILE_UPDATE_SELF),
+                permissions.get(PermissionCode.PASSWORD_CHANGE_SELF),
+                permissions.get(PermissionCode.USER_READ_ANY),
+                permissions.get(PermissionCode.SELLER_VERIFICATION_READ_ANY),
+                permissions.get(PermissionCode.SELLER_VERIFICATION_REVIEW),
+                permissions.get(PermissionCode.ROLE_READ)
+        ));
+
         // INSPECTION_CENTER
         assignPermissionsIfMissing(roles.get(RoleCode.INSPECTION_CENTER), List.of(
                 permissions.get(PermissionCode.PROFILE_READ_SELF),
@@ -157,19 +182,78 @@ public class RbacDataSeeder implements ApplicationRunner {
         }
 
         String normalizedAdminEmail = adminEmail.trim().toLowerCase();
-        if (userRepository.existsByEmailIgnoreCase(normalizedAdminEmail)) {
-            log.info("Admin user [{}] already exists, skipping initial creation.", normalizedAdminEmail);
+        User adminUser = userRepository.findByEmailIgnoreCase(normalizedAdminEmail).orElse(null);
+
+        if (adminUser != null) {
+            adminUser.setPasswordHash(passwordEncoder.encode(adminPassword));
+            adminUser.setAccountStatus(AccountStatus.ACTIVE);
+            adminUser.setEmailVerified(true);
+            if (adminRole != null) {
+                adminUser.addRole(adminRole);
+            }
+            if (adminUser.getProfile() == null) {
+                UserProfile profile = new UserProfile(adminUser, adminFullName, null, null);
+                adminUser.setProfile(profile);
+            }
+            userRepository.save(adminUser);
+            log.info("Admin user [{}] already exists, synchronized password and roles.", normalizedAdminEmail);
             return;
         }
 
-        User adminUser = new User(normalizedAdminEmail, passwordEncoder.encode(adminPassword), AccountStatus.ACTIVE);
+        adminUser = new User(normalizedAdminEmail, passwordEncoder.encode(adminPassword), AccountStatus.ACTIVE);
         adminUser.setEmailVerified(true);
 
         UserProfile profile = new UserProfile(adminUser, adminFullName, null, null);
         adminUser.setProfile(profile);
-        adminUser.addRole(adminRole);
+        if (adminRole != null) {
+            adminUser.addRole(adminRole);
+        }
 
         userRepository.save(adminUser);
         log.info("Successfully seeded default Admin user [{}] from environment variables.", normalizedAdminEmail);
+    }
+
+    private void seedSellerUser(Role sellerRole, Role buyerRole) {
+        if (!sellerSeederEnabled) {
+            log.info("Seller seeder is disabled by configuration (SEED_SELLER_ENABLED=false).");
+            return;
+        }
+
+        String normalizedSellerEmail = sellerEmail.trim().toLowerCase();
+        User sellerUser = userRepository.findByEmailIgnoreCase(normalizedSellerEmail).orElse(null);
+
+        if (sellerUser != null) {
+            sellerUser.setPasswordHash(passwordEncoder.encode(sellerPassword));
+            sellerUser.setAccountStatus(AccountStatus.ACTIVE);
+            sellerUser.setEmailVerified(true);
+            if (buyerRole != null) {
+                sellerUser.addRole(buyerRole);
+            }
+            if (sellerRole != null) {
+                sellerUser.addRole(sellerRole);
+            }
+            if (sellerUser.getProfile() == null) {
+                UserProfile profile = new UserProfile(sellerUser, sellerFullName, null, null);
+                sellerUser.setProfile(profile);
+            }
+            userRepository.save(sellerUser);
+            log.info("Seller user [{}] already exists, synchronized password and SELLER role.", normalizedSellerEmail);
+            return;
+        }
+
+        sellerUser = new User(normalizedSellerEmail, passwordEncoder.encode(sellerPassword), AccountStatus.ACTIVE);
+        sellerUser.setEmailVerified(true);
+
+        UserProfile profile = new UserProfile(sellerUser, sellerFullName, null, null);
+        sellerUser.setProfile(profile);
+        if (buyerRole != null) {
+            sellerUser.addRole(buyerRole);
+        }
+        if (sellerRole != null) {
+            sellerUser.addRole(sellerRole);
+        }
+
+        userRepository.save(sellerUser);
+        log.info("Successfully seeded default Seller user [{}] from environment variables.", normalizedSellerEmail);
     }
 }
