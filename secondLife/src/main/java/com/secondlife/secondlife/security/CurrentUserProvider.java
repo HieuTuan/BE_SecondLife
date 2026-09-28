@@ -6,6 +6,7 @@ import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -21,6 +22,9 @@ import java.util.UUID;
 public class CurrentUserProvider {
 
     private final UserRepository userRepository;
+
+    @Value("${app.seeder.admin.email}")
+    private String adminEmail;
 
     public UUID resolveUserId(CustomUserDetails userDetails) {
         if (userDetails != null && userDetails.getId() != null) {
@@ -38,7 +42,7 @@ public class CurrentUserProvider {
             return currentAdmin.getId();
         }
         log.warn("No authenticated admin details in request. Using fallback admin for unauthenticated API testing.");
-        return userRepository.findByEmailIgnoreCase("admin@secondlife.com")
+        return userRepository.findByEmailIgnoreCase(adminEmail)
                 .map(User::getId)
                 .or(() -> userRepository.findAll().stream().findFirst().map(User::getId))
                 .orElseThrow(() -> new UnauthorizedException("No admin user found in database. Please seed initial admin data."));

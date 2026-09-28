@@ -17,6 +17,9 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
 
     boolean existsByEmailIgnoreCase(String email);
 
+
+
+
     @Query("SELECT DISTINCT u FROM User u " +
            "LEFT JOIN FETCH u.profile " +
            "LEFT JOIN FETCH u.userRoles ur " +

@@ -20,7 +20,7 @@ import java.util.Collections;
 @Service
 public class GoogleAuthServiceImpl implements GoogleAuthService {
 
-    @Value("${app.google.client-id:}")
+    @Value("${app.google.client-id}")
     private String googleClientId;
 
     private GoogleIdTokenVerifier verifier;
