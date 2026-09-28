@@ -9,6 +9,6 @@ import java.util.UUID;
 public class PostInitRequest {
     private UUID categoryId;
     private UUID itemId;
-    private String base64Image;
+    private MultipartFile image;
     // Optional: title, description if the user provides them early
 }

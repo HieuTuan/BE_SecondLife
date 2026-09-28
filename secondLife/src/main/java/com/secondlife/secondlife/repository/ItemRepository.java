@@ -8,4 +8,5 @@ import java.util.UUID;
 
 @Repository
 public interface ItemRepository extends JpaRepository<Item, UUID> {
+    java.util.List<Item> findByCategoryId(UUID categoryId);
 }

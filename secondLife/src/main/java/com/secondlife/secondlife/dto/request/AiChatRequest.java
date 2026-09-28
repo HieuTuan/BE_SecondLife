@@ -12,5 +12,5 @@ public class AiChatRequest {
     @NotBlank
     private String message;
 
-    private String base64Image; // Optional: for image analysis with llava
+    private org.springframework.web.multipart.MultipartFile image; // Optional: for image analysis with llava
 }

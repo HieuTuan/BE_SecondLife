@@ -4,11 +4,15 @@ import com.secondlife.secondlife.dto.request.AiChatRequest;
 import com.secondlife.secondlife.dto.request.PostInitRequest;
 import com.secondlife.secondlife.dto.response.AiChatResponse;
 import com.secondlife.secondlife.dto.response.PostInitResponse;
+import com.secondlife.secondlife.dto.response.PostSubmitResponse;
 import com.secondlife.secondlife.entity.CategoryQuestionTemplate;
+import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.entity.UserCredit;
 import com.secondlife.secondlife.repository.CategoryQuestionTemplateRepository;
 import com.secondlife.secondlife.repository.CategoryRepository;
+import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.ItemRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
@@ -16,13 +20,26 @@ import com.secondlife.secondlife.service.AiChatService;
 import com.secondlife.secondlife.service.CreditService;
 import com.secondlife.secondlife.service.PostService;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.UUID;
 
 @Service
 public class PostServiceImpl implements PostService {
+
+    @Value("${app.inspection.high-value-threshold:5000000}")
+    private BigDecimal highValueThreshold;
+
+    @Value("${app.inspection.inspection-fee:200000}")
+    private BigDecimal inspectionFee;
+
+    @Value("${app.inspection.shipping-fee:50000}")
+    private BigDecimal shippingFee;
 
     private final PostRepository postRepository;
     private final UserRepository userRepository;
@@ -33,6 +50,9 @@ public class PostServiceImpl implements PostService {
     private final CategoryRepository categoryRepository;
     private final ItemRepository itemRepository;
     private final ChatClient chatClient;
+    private final com.secondlife.secondlife.service.CloudinaryService cloudinaryService;
+    private final InspectionOrderRepository inspectionOrderRepository;
+    private final org.springframework.ai.chat.model.ChatModel googleChatModel;
 
     public PostServiceImpl(PostRepository postRepository,
                            UserRepository userRepository,
@@ -42,7 +62,11 @@ public class PostServiceImpl implements PostService {
                            com.secondlife.secondlife.repository.AiChatSessionRepository sessionRepository,
                            CategoryRepository categoryRepository,
                            ItemRepository itemRepository,
-                           ChatClient.Builder chatClientBuilder) {
+                           ChatClient.Builder chatClientBuilder,
+                           com.secondlife.secondlife.service.CloudinaryService cloudinaryService,
+                           InspectionOrderRepository inspectionOrderRepository,
+                           @org.springframework.beans.factory.annotation.Qualifier("googleGenAiChatModel")
+                           org.springframework.ai.chat.model.ChatModel googleChatModel) {
         this.postRepository = postRepository;
         this.userRepository = userRepository;
         this.creditService = creditService;
@@ -52,6 +76,9 @@ public class PostServiceImpl implements PostService {
         this.categoryRepository = categoryRepository;
         this.itemRepository = itemRepository;
         this.chatClient = chatClientBuilder.build();
+        this.cloudinaryService = cloudinaryService;
+        this.inspectionOrderRepository = inspectionOrderRepository;
+        this.googleChatModel = googleChatModel;
     }
 
     @Override
@@ -69,7 +96,16 @@ public class PostServiceImpl implements PostService {
         post.setCategoryId(request.getCategoryId());
         post.setItemId(request.getItemId());
         post.setStatus("DRAFT");
-        // could set imageUrl if it's uploaded to cloud storage, but here we have base64
+        
+        if (request.getImage() != null && !request.getImage().isEmpty()) {
+            try {
+                String imageUrl = cloudinaryService.uploadImage(request.getImage());
+                post.setImageUrl(imageUrl);
+            } catch (java.io.IOException e) {
+                throw new RuntimeException("Failed to upload image to Cloudinary", e);
+            }
+        }
+        
         post = postRepository.save(post);
 
         // 3. Call AI to analyze image
@@ -78,7 +114,7 @@ public class PostServiceImpl implements PostService {
         aiRequest.setPostId(post.getId());
         // Prompt for Llava to only describe the visual condition
         aiRequest.setMessage("Dựa vào hình ảnh được cung cấp, hãy chỉ nhận xét ngắn gọn về ngoại hình và tình trạng vật lý của sản phẩm này. Không cần thêm lời chào hay bình luận gì khác.");
-        aiRequest.setBase64Image(request.getBase64Image());
+        aiRequest.setImage(request.getImage());
 
         // This will deduct 1 chat credit if applicable, or we might say the first message doesn't cost a chat credit? 
         // User said: "Mỗi bài đăng đi kèm 5 lượt chat". So it might cost a chat credit. 
@@ -86,8 +122,7 @@ public class PostServiceImpl implements PostService {
         AiChatResponse aiResponse = aiChatService.processChat(aiRequest, userId);
 
         // 4. Fetch or Generate Template
-        String templateText = templateRepository.findByCategoryIdAndItemId(request.getCategoryId(), request.getItemId())
-                .map(CategoryQuestionTemplate::getTemplateText)
+        CategoryQuestionTemplate template = templateRepository.findByCategoryIdAndItemId(request.getCategoryId(), request.getItemId())
                 .orElseGet(() -> {
                     // Generate new template
                     String categoryName = categoryRepository.findById(request.getCategoryId())
@@ -107,10 +142,16 @@ public class PostServiceImpl implements PostService {
                     newTemplate.setCategoryId(request.getCategoryId());
                     newTemplate.setItemId(request.getItemId());
                     newTemplate.setTemplateText(generatedTemplate);
-                    templateRepository.save(newTemplate);
-
-                    return generatedTemplate;
+                    return templateRepository.save(newTemplate);
                 });
+                
+        String templateText = template.getTemplateText();
+                
+        // Fetch session to set on post
+        com.secondlife.secondlife.entity.AiChatSession session = sessionRepository.findById(aiResponse.getSessionId()).orElse(null);
+        post.setAiChatSession(session);
+        post.setTemplate(template);
+        postRepository.save(post);
 
         String combinedResponse = aiResponse.getReply() + "\n\n" + templateText;
 
@@ -126,9 +167,9 @@ public class PostServiceImpl implements PostService {
 
     @Override
     @Transactional
-    public String finalizeChatAndDescription(UUID userId, UUID sessionId) {
+    public com.secondlife.secondlife.dto.response.PostFinalizeResponse finalizeChatAndDescription(UUID userId, UUID sessionId) {
         // 1. Tell AiChatService to summarize
-        String finalDescription = aiChatService.finalizeChat(sessionId, userId);
+        com.secondlife.secondlife.dto.response.PostFinalizeResponse finalizeResponse = aiChatService.finalizeChat(sessionId, userId);
 
         // 2. Fetch the session to get postId
         com.secondlife.secondlife.entity.AiChatSession session = sessionRepository.findById(sessionId)
@@ -137,25 +178,121 @@ public class PostServiceImpl implements PostService {
         if (session.getPostId() != null) {
             Post post = postRepository.findById(session.getPostId())
                     .orElseThrow(() -> new RuntimeException("Post not found"));
-            post.setDescription(finalDescription);
+            post.setAiDescription(finalizeResponse.getDescription());
+            post.setDescription(finalizeResponse.getDescription());
+            post.setAiSuggestedPrice(finalizeResponse.getSuggestedPrice());
             postRepository.save(post);
         }
         
-        return finalDescription;
+        return finalizeResponse;
     }
 
     @Override
     @Transactional
-    public void submitPost(UUID userId, UUID postId) {
+    public PostSubmitResponse submitPost(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.PostSubmitRequest request) {
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new RuntimeException("Post not found"));
-        
+
         if (!post.getUser().getId().equals(userId)) {
             throw new RuntimeException("Unauthorized");
         }
-        
-        post.setStatus("PENDING");
+
+        // Cập nhật thông tin người dùng chốt
+        post.setTitle(request.getTitle());
+        post.setDescription(request.getDescription());
+        post.setPrice(request.getPrice());
         postRepository.save(post);
+
+        // BƯỚC A: AI Scan bài đăng
+        String scanResult = aiScanPost(post);
+        if (scanResult.startsWith("REJECTED")) {
+            String reason = scanResult.contains(":") ? scanResult.substring(scanResult.indexOf(":") + 1).trim() : "Nội dung bài đăng không hợp lệ";
+            post.setStatus("REJECTED");
+            post.setRejectionReason("AI tự động từ chối: " + reason);
+            postRepository.save(post);
+            throw new RuntimeException("Bài đăng bị từ chối bởi hệ thống AI: " + reason);
+        }
+
+        // BƯỚC B: Kiểm tra ngưỡng giá
+        if (post.getPrice() != null && post.getPrice().compareTo(highValueThreshold) > 0) {
+            // Hàng giá trị cao → kiểm định
+            BigDecimal totalFee = inspectionFee.add(shippingFee);
+
+            // Kiểm tra credit của Seller
+            UserCredit userCredit = creditService.getUserCredit(userId);
+            // Dùng post_credits như một đơn vị tương đương tiền (1 credit = 1000 VNĐ)
+            // Nếu không đủ credit, trả về response kèm số tiền còn thiếu để FE hiển thị lựa chọn
+            long requiredCredits = totalFee.longValue() / 1000;
+            if (userCredit.getPostCredits() < requiredCredits) {
+                BigDecimal shortfall = totalFee.subtract(BigDecimal.valueOf(userCredit.getPostCredits() * 1000L));
+                return new PostSubmitResponse(
+                        "INSUFFICIENT_CREDIT",
+                        true,
+                        inspectionFee,
+                        shippingFee,
+                        "Không đủ credit để thanh toán phí kiểm định và vận chuyển. Vui lòng nạp thêm hoặc thanh toán trực tiếp qua chuyển khoản.",
+                        shortfall
+                );
+            }
+
+            // Trừ credit
+            userCredit.setPostCredits((int)(userCredit.getPostCredits() - requiredCredits));
+
+            // Tạo InspectionOrder
+            InspectionOrder order = new InspectionOrder();
+            order.setPost(post);
+            order.setInspectionFee(inspectionFee);
+            order.setShippingFee(shippingFee);
+            order.setStatus("PENDING");
+            inspectionOrderRepository.save(order);
+
+            post.setStatus("PENDING_INSPECTION");
+            postRepository.save(post);
+
+            return new PostSubmitResponse(
+                    "PENDING_INSPECTION",
+                    true,
+                    inspectionFee,
+                    shippingFee,
+                    "Sản phẩm có giá trị cao. Đã tạo đơn kiểm định. Vui lòng gửi sản phẩm đến trung tâm kiểm định theo hướng dẫn.",
+                    null
+            );
+        } else {
+            // Hàng giá thường → AI đã duyệt, đăng luôn
+            post.setStatus("ACTIVE");
+            postRepository.save(post);
+
+            return new PostSubmitResponse(
+                    "ACTIVE",
+                    false,
+                    null,
+                    null,
+                    "Bài đăng đã được AI duyệt và hiển thị trên sàn.",
+                    null
+            );
+        }
+    }
+
+    /**
+     * Gọi Google Gemini để scan bài đăng.
+     * Returns "APPROVED" hoặc "REJECTED:<reason>"
+     */
+    private String aiScanPost(Post post) {
+        ChatClient client = ChatClient.builder(googleChatModel).build();
+        String prompt = String.format(
+            "Bạn là hệ thống kiểm duyệt tự động của sàn mua bán đồ cũ SecondLife. " +
+            "Hãy đánh giá bài đăng sản phẩm sau có phù hợp để hiển thị trên sàn không? " +
+            "Kiểm tra: (1) Mô tả có khớp với loại sản phẩm, (2) Không có dấu hiệu lừa đảo, " +
+            "(3) Không vi phạm nội quy (hàng cấm, hàng giả, thông tin sai lệch). " +
+            "Tiêu đề: %s. Mô tả: %s. Giá: %s VNĐ. " +
+            "CHỈ trả về đúng một trong hai dạng sau, không giải thích thêm: " +
+            "APPROVED hoặc REJECTED:<lý do ngắn gọn bằng tiếng Việt>",
+            post.getTitle(), post.getDescription(), post.getPrice()
+        );
+        Prompt aiPrompt = new Prompt(new UserMessage(prompt));
+        ChatClient googleClient = ChatClient.builder(googleChatModel).build();
+        String result = googleClient.prompt(aiPrompt).call().content();
+        return result != null ? result.trim() : "APPROVED";
     }
 
     @Override
@@ -183,8 +320,38 @@ public class PostServiceImpl implements PostService {
         }
         
         post.setStatus("REJECTED");
-        // We could also store the reject reason in the entity if there is a field for it
-        // and potentially refund the post_credit to the user.
+        post.setRejectionReason(reason);
         postRepository.save(post);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<Post> getAdminPosts(String status, UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable) {
+        org.springframework.data.jpa.domain.Specification<Post> spec = org.springframework.data.jpa.domain.Specification.where((org.springframework.data.jpa.domain.Specification<Post>) null);
+        if (status != null && !status.isEmpty()) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), status));
+        }
+        if (categoryId != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("categoryId"), categoryId));
+        }
+        if (itemId != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("itemId"), itemId));
+        }
+        return postRepository.findAll(spec, pageable);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<Post> getPublicPosts(UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable) {
+        // Public posts should only return ACTIVE ones
+        org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> cb.equal(root.get("status"), "ACTIVE");
+        
+        if (categoryId != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("categoryId"), categoryId));
+        }
+        if (itemId != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("itemId"), itemId));
+        }
+        return postRepository.findAll(spec, pageable);
     }
 }

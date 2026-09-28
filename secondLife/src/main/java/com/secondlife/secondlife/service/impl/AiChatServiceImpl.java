@@ -2,6 +2,7 @@ package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.dto.request.AiChatRequest;
 import com.secondlife.secondlife.dto.response.AiChatResponse;
+import com.secondlife.secondlife.dto.response.PostFinalizeResponse;
 import com.secondlife.secondlife.entity.AiChatMessage;
 import com.secondlife.secondlife.entity.AiChatSession;
 import com.secondlife.secondlife.entity.User;
@@ -95,13 +96,13 @@ public class AiChatServiceImpl implements AiChatService {
             }
         }
 
-        if (request.getBase64Image() != null && !request.getBase64Image().isEmpty()) {
-            // Strip data:image/...;base64, prefix if it exists
-            String base64Data = request.getBase64Image();
-            if (base64Data.contains(",")) {
-                base64Data = base64Data.split(",")[1];
+        if (request.getImage() != null && !request.getImage().isEmpty()) {
+            byte[] imageBytes = null;
+            try {
+                imageBytes = request.getImage().getBytes();
+            } catch (java.io.IOException e) {
+                throw new RuntimeException("Failed to read image file", e);
             }
-            byte[] imageBytes = java.util.Base64.getDecoder().decode(base64Data);
             org.springframework.core.io.ByteArrayResource resource = new org.springframework.core.io.ByteArrayResource(imageBytes);
             org.springframework.ai.content.Media media = new org.springframework.ai.content.Media(org.springframework.util.MimeTypeUtils.IMAGE_JPEG, resource);
             aiMessages.add(UserMessage.builder().text(request.getMessage()).media(java.util.List.of(media)).build());
@@ -120,7 +121,7 @@ public class AiChatServiceImpl implements AiChatService {
         sessionRepository.save(session);
 
         String aiReply;
-        if (request.getBase64Image() != null && !request.getBase64Image().isEmpty()) {
+        if (request.getImage() != null && !request.getImage().isEmpty()) {
             // Use Google Gemini for image
             Prompt prompt = new Prompt(aiMessages);
             aiReply = googleChatClient.prompt(prompt).call().content();
@@ -145,7 +146,7 @@ public class AiChatServiceImpl implements AiChatService {
 
     @Override
     @Transactional
-    public String finalizeChat(UUID sessionId, UUID currentUserId) {
+    public PostFinalizeResponse finalizeChat(UUID sessionId, UUID currentUserId) {
         AiChatSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new RuntimeException("Session not found"));
         
@@ -175,9 +176,23 @@ public class AiChatServiceImpl implements AiChatService {
         Prompt prompt = new Prompt(aiMessages, org.springframework.ai.ollama.api.OllamaChatOptions.builder().model("gemma4:31b-cloud").build());
         String finalDescription = ollamaChatClient.prompt(prompt).call().content();
 
+        // Add prompt for price
+        String pricePrompt = "Dựa vào tình trạng và mô tả sản phẩm ở trên, hãy đưa ra một mức giá hợp lý (bằng số, đơn vị VNĐ) để bán sản phẩm này. Chỉ trả về một con số duy nhất, không có chữ hay dấu phẩy. Ví dụ: 500000";
+        aiMessages.add(new AssistantMessage(finalDescription));
+        aiMessages.add(new UserMessage(pricePrompt));
+        Prompt priceAiPrompt = new Prompt(aiMessages, org.springframework.ai.ollama.api.OllamaChatOptions.builder().model("gemma4:31b-cloud").build());
+        String suggestedPriceStr = ollamaChatClient.prompt(priceAiPrompt).call().content();
+        
+        java.math.BigDecimal suggestedPrice = java.math.BigDecimal.ZERO;
+        try {
+            suggestedPrice = new java.math.BigDecimal(suggestedPriceStr.replaceAll("[^0-9]", ""));
+        } catch (Exception e) {
+            // fallback if AI fails to return just number
+        }
+
         session.setCompleted(true);
         sessionRepository.save(session);
         
-        return finalDescription;
+        return new PostFinalizeResponse(finalDescription, suggestedPrice);
     }
 }
