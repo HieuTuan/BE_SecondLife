@@ -46,6 +46,9 @@ public class User {
     @Column(name = "last_login_at")
     private Instant lastLoginAt;
 
+    @Column(name = "token_version", nullable = false)
+    private long tokenVersion = 0;
+
     @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     private UserProfile profile;
 
@@ -83,6 +86,10 @@ public class User {
     public boolean hasRole(String roleCode) {
         return userRoles.stream()
                 .anyMatch(ur -> ur.getRole().getCode().equalsIgnoreCase(roleCode));
+    }
+
+    public void bumpTokenVersion() {
+        this.tokenVersion = Math.addExact(this.tokenVersion, 1);
     }
 
     @PrePersist

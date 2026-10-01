@@ -21,6 +21,7 @@ public class CustomUserDetails implements UserDetails {
     private final String password;
     private final AccountStatus accountStatus;
     private final boolean emailVerified;
+    private final long tokenVersion;
     private final Collection<? extends GrantedAuthority> authorities;
 
     public CustomUserDetails(User user) {
@@ -29,6 +30,7 @@ public class CustomUserDetails implements UserDetails {
         this.password = user.getPasswordHash();
         this.accountStatus = user.getAccountStatus();
         this.emailVerified = user.isEmailVerified();
+        this.tokenVersion = user.getTokenVersion();
 
         Set<GrantedAuthority> auths = new HashSet<>();
         if (user.getRoles() != null) {

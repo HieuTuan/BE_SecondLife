@@ -53,6 +53,12 @@ public class SellerVerification {
     @Column(name = "selfie_url", length = 1024)
     private String selfieUrl;
 
+    @Column(name = "vnpt_client_session", length = 255)
+    private String vnptClientSession;
+
+    @Column(name = "vnpt_request_token", length = 255)
+    private String vnptRequestToken;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
     private SellerVerificationStatus status = SellerVerificationStatus.SUBMITTED;
@@ -93,6 +99,15 @@ public class SellerVerification {
 
     @Column(name = "resubmission_count", nullable = false)
     private int resubmissionCount = 0;
+
+    @Column(name = "recovery_attempts", nullable = false)
+    private int recoveryAttempts = 0;
+
+    @Column(name = "next_retry_at")
+    private Instant nextRetryAt;
+
+    @Column(name = "last_retried_at")
+    private Instant lastRetriedAt;
 
     @Column(name = "submitted_at", nullable = false, updatable = false)
     private Instant submittedAt;
@@ -146,6 +161,10 @@ public class SellerVerification {
             ));
         }
         this.status = targetStatus;
+        if (targetStatus == SellerVerificationStatus.APPROVED
+                || targetStatus == SellerVerificationStatus.REJECTED) {
+            this.documentNumber = null;
+        }
     }
 
     @PrePersist

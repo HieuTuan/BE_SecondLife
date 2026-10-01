@@ -94,6 +94,7 @@ public class UserServiceImpl implements UserService {
         }
 
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        user.bumpTokenVersion();
         userRepository.save(user);
 
         // Revoke all active sessions upon password change

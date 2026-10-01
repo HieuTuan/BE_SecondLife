@@ -11,7 +11,6 @@ import org.springframework.stereotype.Component;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.HexFormat;
 import java.util.UUID;
@@ -20,30 +19,31 @@ import java.util.UUID;
 @Component
 public class JwtTokenProvider {
 
-    private final String jwtSecret;
+    private final SecretKey signingKey;
     private final long accessExpirationMs;
 
     public JwtTokenProvider(
             @Value("${app.jwt.secret}") String jwtSecret,
             @Value("${app.jwt.access-expiration-ms}") long accessExpirationMs
     ) {
-        this.jwtSecret = jwtSecret;
+        if (jwtSecret == null || jwtSecret.isBlank()) {
+            throw new IllegalArgumentException("JWT secret must be configured");
+        }
+        byte[] keyBytes;
+        if (jwtSecret.matches("^[0-9a-fA-F]+$") && jwtSecret.length() % 2 == 0) {
+            keyBytes = HexFormat.of().parseHex(jwtSecret);
+        } else {
+            keyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
+        }
+        if (keyBytes.length < 32) {
+            throw new IllegalArgumentException("JWT secret must contain at least 256 bits");
+        }
+        this.signingKey = Keys.hmacShaKeyFor(keyBytes);
         this.accessExpirationMs = accessExpirationMs;
     }
 
     private SecretKey getSigningKey() {
-        byte[] keyBytes;
-        if (jwtSecret.matches("^[0-9a-fA-F]+$") && jwtSecret.length() >= 64) {
-            keyBytes = HexFormat.of().parseHex(jwtSecret);
-        } else {
-            byte[] rawBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
-            if (rawBytes.length < 32) {
-                keyBytes = Arrays.copyOf(rawBytes, 32);
-            } else {
-                keyBytes = rawBytes;
-            }
-        }
-        return Keys.hmacShaKeyFor(keyBytes);
+        return signingKey;
     }
 
     public String generateAccessToken(User user) {
@@ -54,6 +54,7 @@ public class JwtTokenProvider {
                 .subject(user.getId().toString())
                 .claim("email", user.getEmail())
                 .claim("type", "ACCESS")
+                .claim("tokenVersion", user.getTokenVersion())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiry))
                 .signWith(getSigningKey(), Jwts.SIG.HS256)
@@ -70,19 +71,24 @@ public class JwtTokenProvider {
         return claims.get("email", String.class);
     }
 
+    public long getTokenVersionFromToken(String token) {
+        Number version = getClaims(token).get("tokenVersion", Number.class);
+        return version == null ? 0 : version.longValue();
+    }
+
     public boolean validateToken(String token) {
         try {
             Claims claims = getClaims(token);
             String type = claims.get("type", String.class);
             return "ACCESS".equals(type);
         } catch (SecurityException | MalformedJwtException e) {
-            log.warn("Invalid JWT signature: {}", e.getMessage());
+            log.warn("Invalid JWT signature");
         } catch (ExpiredJwtException e) {
-            log.warn("JWT token is expired: {}", e.getMessage());
+            log.warn("JWT token is expired");
         } catch (UnsupportedJwtException e) {
-            log.warn("JWT token is unsupported: {}", e.getMessage());
+            log.warn("JWT token is unsupported");
         } catch (IllegalArgumentException e) {
-            log.warn("JWT claims string is empty: {}", e.getMessage());
+            log.warn("JWT claims string is empty");
         }
         return false;
     }

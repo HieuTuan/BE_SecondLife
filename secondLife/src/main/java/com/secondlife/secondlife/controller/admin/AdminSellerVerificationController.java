@@ -31,7 +31,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/v1/admin")
+@RequestMapping("/api/admin")
 @RequiredArgsConstructor
 @Tag(name = "Admin - Seller Verifications", description = "Admin seller verification review and Inspection Center provisioning APIs")
 public class AdminSellerVerificationController {
@@ -42,7 +42,7 @@ public class AdminSellerVerificationController {
 
     @GetMapping("/seller-verifications")
     @Operation(summary = "Get seller verifications with filters (status, ekycStatus, riskStatus, reasonCode) and pagination")
-    @PreAuthorize("hasAuthority('SELLER_VERIFICATION_READ_ANY')")
+    @PreAuthorize("hasRole('ADMIN') and hasAuthority('SELLER_VERIFICATION_READ_ANY')")
     public ResponseEntity<ApiResponse<PageResponse<SellerVerificationResponse>>> getSellerVerifications(
             @RequestParam(required = false) SellerVerificationStatus status,
             @RequestParam(required = false) EkycStatus ekycStatus,
@@ -58,7 +58,7 @@ public class AdminSellerVerificationController {
 
     @GetMapping("/seller-verifications/{id}")
     @Operation(summary = "Get detailed seller verification by ID including eKYC metrics and event history")
-    @PreAuthorize("hasAuthority('SELLER_VERIFICATION_READ_ANY')")
+    @PreAuthorize("hasRole('ADMIN') and hasAuthority('SELLER_VERIFICATION_READ_ANY')")
     public ResponseEntity<ApiResponse<AdminSellerVerificationDetailResponse>> getSellerVerificationById(
             @PathVariable UUID id
     ) {
@@ -68,7 +68,7 @@ public class AdminSellerVerificationController {
 
     @PostMapping("/seller-verifications/{id}/approve")
     @Operation(summary = "Approve seller verification in NEEDS_REVIEW status and assign SELLER role")
-    @PreAuthorize("hasAuthority('SELLER_VERIFICATION_REVIEW')")
+    @PreAuthorize("hasRole('ADMIN') and hasAuthority('SELLER_VERIFICATION_REVIEW')")
     public ResponseEntity<ApiResponse<SellerVerificationResponse>> approveSellerVerification(
             @AuthenticationPrincipal CustomUserDetails currentAdmin,
             @PathVariable UUID id
@@ -80,7 +80,7 @@ public class AdminSellerVerificationController {
 
     @PostMapping("/seller-verifications/{id}/reject")
     @Operation(summary = "Reject seller verification in NEEDS_REVIEW status with structured rejection reason")
-    @PreAuthorize("hasAuthority('SELLER_VERIFICATION_REVIEW')")
+    @PreAuthorize("hasRole('ADMIN') and hasAuthority('SELLER_VERIFICATION_REVIEW')")
     public ResponseEntity<ApiResponse<SellerVerificationResponse>> rejectSellerVerification(
             @AuthenticationPrincipal CustomUserDetails currentAdmin,
             @PathVariable UUID id,
@@ -89,6 +89,18 @@ public class AdminSellerVerificationController {
         UUID adminId = currentUserProvider.resolveAdminId(currentAdmin);
         SellerVerificationResponse response = sellerVerificationService.rejectVerification(adminId, id, request);
         return ResponseEntity.ok(ApiResponse.success("Seller verification rejected", response));
+    }
+
+    @PostMapping("/seller-verifications/{id}/retry-ekyc")
+    @Operation(summary = "Retry eKYC for a pending verification after a provider error")
+    @PreAuthorize("hasRole('ADMIN') and hasAuthority('SELLER_VERIFICATION_REVIEW')")
+    public ResponseEntity<ApiResponse<SellerVerificationResponse>> retrySellerVerification(
+            @AuthenticationPrincipal CustomUserDetails currentAdmin,
+            @PathVariable UUID id
+    ) {
+        UUID adminId = currentUserProvider.resolveAdminId(currentAdmin);
+        SellerVerificationResponse response = sellerVerificationService.retryPendingVerification(adminId, id);
+        return ResponseEntity.ok(ApiResponse.success("Seller verification eKYC retried", response));
     }
 
     @PostMapping("/inspection-center-accounts")

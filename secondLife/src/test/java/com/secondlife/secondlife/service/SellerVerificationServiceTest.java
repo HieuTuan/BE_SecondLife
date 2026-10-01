@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.dto.ekyc.EkycResult;
+import com.secondlife.secondlife.config.EkycRecoveryProperties;
 import com.secondlife.secondlife.dto.request.SellerVerificationRequest;
 import com.secondlife.secondlife.dto.request.SellerVerificationResubmitRequest;
 import com.secondlife.secondlife.dto.request.SellerVerificationReviewRequest;
@@ -13,7 +14,6 @@ import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.mapper.SellerVerificationMapper;
-import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.SellerVerificationEventRepository;
 import com.secondlife.secondlife.repository.SellerVerificationRepository;
 import com.secondlife.secondlife.repository.UserRepository;
@@ -27,8 +27,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.lang.reflect.Field;
 import java.util.List;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import org.mockito.ArgumentCaptor;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -47,7 +49,7 @@ class SellerVerificationServiceTest {
     private UserRepository userRepository;
 
     @Mock
-    private RoleRepository roleRepository;
+    private RoleAssignmentService roleAssignmentService;
 
     @Mock
     private EkycService ekycService;
@@ -76,11 +78,12 @@ class SellerVerificationServiceTest {
                 sellerVerificationRepository,
                 sellerVerificationEventRepository,
                 userRepository,
-                roleRepository,
+                roleAssignmentService,
                 ekycService,
                 sellerRiskService,
                 sellerVerificationMapper,
                 notificationService,
+                new EkycRecoveryProperties(false, 60000, 1000, 3, 10),
                 3 // maxResubmissions
         );
 
@@ -115,7 +118,6 @@ class SellerVerificationServiceTest {
         when(userRepository.findByIdWithAuthorities(buyerId)).thenReturn(Optional.of(buyer));
         when(sellerVerificationRepository.existsByUserIdAndStatusIn(eq(buyerId), anyCollection())).thenReturn(false);
         when(sellerVerificationRepository.save(any(SellerVerification.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(roleRepository.findByCodeWithPermissions(RoleCode.SELLER.name())).thenReturn(Optional.of(sellerRole));
 
         when(ekycService.verifyIdentity(any())).thenReturn(
                 EkycResult.pass("MOCK", "REF1", 0.98, 0.99, 0.95)
@@ -131,7 +133,7 @@ class SellerVerificationServiceTest {
         assertEquals(EkycStatus.PASSED, response.ekycStatus());
         assertEquals(RiskStatus.CLEAR, response.riskStatus());
         assertEquals(ReviewSource.SYSTEM, response.reviewSource());
-        assertTrue(buyer.hasRole(RoleCode.SELLER.name()));
+        verify(roleAssignmentService).grantRole(buyerId, RoleCode.SELLER);
 
         verify(notificationService).sendSellerVerificationApproved(buyer);
     }
@@ -161,7 +163,7 @@ class SellerVerificationServiceTest {
         assertEquals(EkycStatus.PASSED, response.ekycStatus());
         assertEquals(RiskStatus.REVIEW, response.riskStatus());
         assertFalse(buyer.hasRole(RoleCode.SELLER.name()));
-        verify(roleRepository, never()).findByCodeWithPermissions(any());
+        verify(roleAssignmentService, never()).grantRole(any(), any());
         verify(notificationService, never()).sendSellerVerificationApproved(any());
     }
 
@@ -310,14 +312,71 @@ class SellerVerificationServiceTest {
     }
 
     @Test
+    void providerRequestRejectedKeepsPendingWithoutAutomaticRetry() {
+        UUID buyerId = buyer.getId();
+        SellerVerificationRequest request = new SellerVerificationRequest(
+                VerificationType.CITIZEN_ID, "012345678901",
+                "https://cloudinary.com/front.jpg", "https://cloudinary.com/back.jpg",
+                "https://cloudinary.com/selfie.jpg",
+                "session-token", "request-token"
+        );
+        when(userRepository.findByIdWithAuthorities(buyerId)).thenReturn(Optional.of(buyer));
+        when(sellerVerificationRepository.existsByUserIdAndStatusIn(eq(buyerId), any())).thenReturn(false);
+        when(sellerRiskService.checkIdentityRestriction(any())).thenReturn(Optional.empty());
+        when(sellerVerificationRepository.save(any(SellerVerification.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(ekycService.verifyIdentity(any())).thenReturn(
+                EkycResult.providerError(ReasonCode.PROVIDER_REQUEST_REJECTED, "VNPT", "REF1", "rejected")
+        );
+
+        SellerVerificationResponse response = service.submitVerification(buyerId, request);
+
+        assertEquals(SellerVerificationStatus.EKYC_PENDING, response.status());
+        assertEquals(EkycStatus.PROVIDER_ERROR, response.ekycStatus());
+        assertEquals(ReasonCode.PROVIDER_REQUEST_REJECTED, response.reasonCode());
+        ArgumentCaptor<SellerVerification> captor = ArgumentCaptor.forClass(SellerVerification.class);
+        verify(sellerVerificationRepository, atLeastOnce()).save(captor.capture());
+        assertNull(captor.getValue().getNextRetryAt());
+    }
+
+    @Test
+    void adminCanRetryPendingProviderErrorAfterCredentialsAreFixed() {
+        SellerVerification sv = new SellerVerification(buyer, VerificationType.CITIZEN_ID,
+                "012345678901", "front", "back", "selfie");
+        sv.setStatus(SellerVerificationStatus.EKYC_PENDING);
+        sv.setEkycStatus(EkycStatus.PROVIDER_ERROR);
+        sv.setReasonCode(ReasonCode.PROVIDER_AUTH_FAILED);
+        when(sellerVerificationRepository.findByIdForUpdate(verificationId)).thenReturn(Optional.of(sv));
+        when(userRepository.findById(adminId)).thenReturn(Optional.of(admin));
+        when(ekycService.verifyIdentity(any())).thenReturn(EkycResult.pass("VNPT", "REF1", 0.96, null, null));
+        when(sellerRiskService.evaluateRisk(eq(buyer), eq(sv), any())).thenReturn(SellerRiskResult.clear());
+        when(sellerVerificationRepository.save(any(SellerVerification.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        SellerVerificationResponse response = service.retryPendingVerification(adminId, verificationId);
+
+        assertEquals(SellerVerificationStatus.APPROVED, response.status());
+        verify(roleAssignmentService).grantRole(buyerId, RoleCode.SELLER);
+        verify(ekycService, times(1)).verifyIdentity(any());
+    }
+
+    @Test
+    void retryRejectsVerificationWithoutPendingProviderError() {
+        SellerVerification sv = new SellerVerification(buyer, VerificationType.CITIZEN_ID,
+                "012345678901", "front", "back", "selfie");
+        sv.setStatus(SellerVerificationStatus.NEEDS_REVIEW);
+        when(sellerVerificationRepository.findByIdForUpdate(verificationId)).thenReturn(Optional.of(sv));
+
+        assertThrows(ConflictException.class, () -> service.retryPendingVerification(adminId, verificationId));
+        verifyNoInteractions(ekycService);
+    }
+
+    @Test
     @DisplayName("CASE J: Admin approves NEEDS_REVIEW -> APPROVED, ReviewSource.ADMIN, SELLER assigned")
     void testCaseJ_AdminApprovesNeedsReview_ShouldApproveAndAssignSeller() {
         SellerVerification sv = new SellerVerification(buyer, VerificationType.CITIZEN_ID, "123", "f", "b");
         sv.setStatus(SellerVerificationStatus.NEEDS_REVIEW);
 
-        when(sellerVerificationRepository.findByIdWithDetails(verificationId)).thenReturn(Optional.of(sv));
+        when(sellerVerificationRepository.findByIdForUpdate(verificationId)).thenReturn(Optional.of(sv));
         when(userRepository.findById(adminId)).thenReturn(Optional.of(admin));
-        when(roleRepository.findByCodeWithPermissions(RoleCode.SELLER.name())).thenReturn(Optional.of(sellerRole));
         when(sellerVerificationRepository.save(any(SellerVerification.class))).thenReturn(sv);
 
         SellerVerificationResponse response = service.approveVerification(adminId, verificationId);
@@ -325,7 +384,7 @@ class SellerVerificationServiceTest {
         assertEquals(SellerVerificationStatus.APPROVED, sv.getStatus());
         assertEquals(ReviewSource.ADMIN, sv.getReviewSource());
         assertEquals(admin, sv.getReviewedBy());
-        assertTrue(buyer.hasRole(RoleCode.SELLER.name()));
+        verify(roleAssignmentService).grantRole(buyerId, RoleCode.SELLER);
         verify(notificationService).sendSellerVerificationApproved(buyer);
     }
 
@@ -336,7 +395,7 @@ class SellerVerificationServiceTest {
         sv.setStatus(SellerVerificationStatus.NEEDS_REVIEW);
         SellerVerificationReviewRequest reviewReq = new SellerVerificationReviewRequest("Documents are unreadable");
 
-        when(sellerVerificationRepository.findByIdWithDetails(verificationId)).thenReturn(Optional.of(sv));
+        when(sellerVerificationRepository.findByIdForUpdate(verificationId)).thenReturn(Optional.of(sv));
         when(userRepository.findById(adminId)).thenReturn(Optional.of(admin));
         when(sellerVerificationRepository.save(any(SellerVerification.class))).thenReturn(sv);
 
@@ -355,7 +414,7 @@ class SellerVerificationServiceTest {
         SellerVerification sv = new SellerVerification(buyer, VerificationType.CITIZEN_ID, "123", "f", "b");
         sv.setStatus(SellerVerificationStatus.APPROVED);
 
-        when(sellerVerificationRepository.findByIdWithDetails(verificationId)).thenReturn(Optional.of(sv));
+        when(sellerVerificationRepository.findByIdForUpdate(verificationId)).thenReturn(Optional.of(sv));
 
         SellerVerificationResubmitRequest resubmitReq = new SellerVerificationResubmitRequest("http://f2", "http://b2");
 
@@ -399,5 +458,81 @@ class SellerVerificationServiceTest {
         assertEquals(SellerVerificationStatus.NEEDS_REVIEW, response.status());
         assertEquals(ReasonCode.DUPLICATE_IDENTITY, response.reasonCode());
         assertFalse(buyer.hasRole(RoleCode.SELLER.name()));
+    }
+
+    @Test
+    void permanentIdentityRestrictionRejectsBeforeProviderCall() {
+        SellerVerificationRequest request = new SellerVerificationRequest(
+                VerificationType.CITIZEN_ID, "0123-4567 8901", "http://f", "http://b");
+        when(userRepository.findByIdWithAuthorities(buyerId)).thenReturn(Optional.of(buyer));
+        when(sellerVerificationRepository.save(any(SellerVerification.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(sellerRiskService.checkIdentityRestriction(any())).thenReturn(Optional.of(
+                SellerRiskResult.block(List.of(ReasonCode.PERMANENT_SELLER_BAN), "Restricted identity")));
+
+        SellerVerificationResponse response = service.submitVerification(buyerId, request);
+
+        assertEquals(SellerVerificationStatus.REJECTED, response.status());
+        assertEquals(RiskStatus.BLOCK, response.riskStatus());
+        assertEquals(EkycStatus.NOT_STARTED, response.ekycStatus());
+        assertEquals("********8901", response.documentNumber());
+        verifyNoInteractions(ekycService, roleAssignmentService);
+    }
+
+    @Test
+    void adminCannotApproveWhileIdentityRestrictionIsActive() {
+        SellerVerification sv = new SellerVerification(buyer, VerificationType.CITIZEN_ID,
+                "012345678901", "front", "back");
+        sv.setStatus(SellerVerificationStatus.NEEDS_REVIEW);
+        sv.setDocumentNumberHash("hash");
+        when(sellerVerificationRepository.findByIdForUpdate(verificationId)).thenReturn(Optional.of(sv));
+        when(userRepository.findById(adminId)).thenReturn(Optional.of(admin));
+        when(sellerRiskService.checkIdentityRestriction(sv)).thenReturn(Optional.of(
+                SellerRiskResult.review(List.of(ReasonCode.MANUAL_REVIEW_REQUIRED), 0.0,
+                        "Restricted identity")));
+
+        assertThrows(ConflictException.class, () -> service.approveVerification(adminId, verificationId));
+        verifyNoInteractions(roleAssignmentService);
+    }
+
+    @Test
+    void backgroundRetryRecoversProviderErrorAndGrantsSeller() {
+        SellerVerification sv = new SellerVerification(buyer, VerificationType.CITIZEN_ID,
+                "012345678901", "front", "back", "selfie");
+        sv.setStatus(SellerVerificationStatus.EKYC_PENDING);
+        sv.setEkycStatus(EkycStatus.PROVIDER_ERROR);
+        sv.setNextRetryAt(Instant.now().minusSeconds(1));
+        when(sellerVerificationRepository.findByIdForUpdate(verificationId)).thenReturn(Optional.of(sv));
+        when(sellerVerificationRepository.save(any(SellerVerification.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(ekycService.verifyIdentity(any())).thenReturn(EkycResult.pass("MOCK", "REF1", 0.98, 0.99, 0.95));
+        when(sellerRiskService.evaluateRisk(eq(buyer), eq(sv), any())).thenReturn(SellerRiskResult.clear());
+
+        SellerVerificationResponse result = service.retryPendingVerificationSystem(verificationId);
+
+        assertEquals(SellerVerificationStatus.APPROVED, result.status());
+        assertEquals(1, sv.getRecoveryAttempts());
+        assertNotNull(sv.getLastRetriedAt());
+        assertNull(sv.getNextRetryAt());
+        verify(roleAssignmentService).grantRole(buyerId, RoleCode.SELLER);
+    }
+
+    @Test
+    void exhaustedBackgroundRetryKeepsPendingForManualRecovery() {
+        SellerVerification sv = new SellerVerification(buyer, VerificationType.CITIZEN_ID,
+                "012345678901", "front", "back", "selfie");
+        sv.setStatus(SellerVerificationStatus.EKYC_PENDING);
+        sv.setEkycStatus(EkycStatus.PROVIDER_ERROR);
+        sv.setRecoveryAttempts(2);
+        sv.setNextRetryAt(Instant.now().minusSeconds(1));
+        when(sellerVerificationRepository.findByIdForUpdate(verificationId)).thenReturn(Optional.of(sv));
+        when(sellerVerificationRepository.save(any(SellerVerification.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(ekycService.verifyIdentity(any())).thenReturn(EkycResult.providerError(
+                ReasonCode.PROVIDER_UNAVAILABLE, "MOCK", "REF1", "unavailable"));
+
+        SellerVerificationResponse result = service.retryPendingVerificationSystem(verificationId);
+
+        assertEquals(SellerVerificationStatus.EKYC_PENDING, result.status());
+        assertEquals(3, sv.getRecoveryAttempts());
+        assertNull(sv.getNextRetryAt());
+        verifyNoInteractions(roleAssignmentService);
     }
 }

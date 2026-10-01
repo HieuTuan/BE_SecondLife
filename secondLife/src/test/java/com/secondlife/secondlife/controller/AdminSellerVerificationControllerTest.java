@@ -108,7 +108,7 @@ class AdminSellerVerificationControllerTest {
         when(sellerVerificationService.getAdminVerifications(any(), any(), any(), any(), any()))
                 .thenReturn(pageResponse);
 
-        mockMvc.perform(get("/api/v1/admin/seller-verifications?status=NEEDS_REVIEW"))
+        mockMvc.perform(get("/api/admin/seller-verifications?status=NEEDS_REVIEW"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.items[0].documentNumber").value("********9988"))
@@ -136,7 +136,7 @@ class AdminSellerVerificationControllerTest {
         when(sellerVerificationService.getAdminVerificationById(verificationId))
                 .thenReturn(detailResponse);
 
-        mockMvc.perform(get("/api/v1/admin/seller-verifications/" + verificationId))
+        mockMvc.perform(get("/api/admin/seller-verifications/" + verificationId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.documentNumberMasked").value("********1122"))
@@ -160,7 +160,7 @@ class AdminSellerVerificationControllerTest {
         when(sellerVerificationService.approveVerification(adminId, verificationId))
                 .thenReturn(response);
 
-        mockMvc.perform(post("/api/v1/admin/seller-verifications/" + verificationId + "/approve"))
+        mockMvc.perform(post("/api/admin/seller-verifications/" + verificationId + "/approve"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.status").value("APPROVED"))
@@ -174,7 +174,7 @@ class AdminSellerVerificationControllerTest {
         when(sellerVerificationService.approveVerification(adminId, verificationId))
                 .thenThrow(new ConflictException("Chỉ hồ sơ ở trạng thái NEEDS_REVIEW mới có thể phê duyệt"));
 
-        mockMvc.perform(post("/api/v1/admin/seller-verifications/" + verificationId + "/approve"))
+        mockMvc.perform(post("/api/admin/seller-verifications/" + verificationId + "/approve"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.success").value(false));
     }
@@ -201,7 +201,7 @@ class AdminSellerVerificationControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/admin/seller-verifications/" + verificationId + "/reject")
+        mockMvc.perform(post("/api/admin/seller-verifications/" + verificationId + "/reject")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(jsonBody))
                 .andExpect(status().isOk())
@@ -223,7 +223,7 @@ class AdminSellerVerificationControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/admin/seller-verifications/" + verificationId + "/reject")
+        mockMvc.perform(post("/api/admin/seller-verifications/" + verificationId + "/reject")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(jsonBody))
                 .andExpect(status().isConflict())

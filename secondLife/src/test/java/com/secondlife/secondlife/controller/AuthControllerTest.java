@@ -67,7 +67,7 @@ class AuthControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/auth/register")
+        mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(jsonBody))
                 .andExpect(status().isCreated())
@@ -87,7 +87,7 @@ class AuthControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/auth/register")
+        mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(jsonBody))
                 .andExpect(status().isBadRequest())
@@ -109,7 +109,7 @@ class AuthControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/auth/register")
+        mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(jsonBody))
                 .andExpect(status().isConflict())
@@ -133,7 +133,7 @@ class AuthControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/auth/login")
+        mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(jsonBody))
                 .andExpect(status().isOk())
@@ -152,7 +152,7 @@ class AuthControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/auth/refresh")
+        mockMvc.perform(post("/api/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(jsonBody))
                 .andExpect(status().isOk())
@@ -175,7 +175,7 @@ class AuthControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/auth/google")
+        mockMvc.perform(post("/api/auth/google")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(jsonBody))
                 .andExpect(status().isOk())
@@ -195,7 +195,7 @@ class AuthControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/auth/verify-email")
+        mockMvc.perform(post("/api/auth/email-verification/confirm")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(jsonBody))
                 .andExpect(status().isOk())
@@ -215,7 +215,7 @@ class AuthControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/auth/reset-password")
+        mockMvc.perform(post("/api/auth/reset-password")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(jsonBody))
                 .andExpect(status().isOk())

@@ -39,6 +39,7 @@ class JwtTokenProviderTest {
         assertTrue(jwtTokenProvider.validateToken(token));
         assertEquals(testUserId, jwtTokenProvider.getUserIdFromToken(token));
         assertEquals("buyer@secondlife.com", jwtTokenProvider.getEmailFromToken(token));
+        assertEquals(0, jwtTokenProvider.getTokenVersionFromToken(token));
     }
 
     @Test
@@ -64,5 +65,10 @@ class JwtTokenProviderTest {
         String token = otherProvider.generateAccessToken(testUser);
 
         assertFalse(jwtTokenProvider.validateToken(token));
+    }
+
+    @Test
+    void weakSecretFailsInsteadOfBeingPadded() {
+        assertThrows(IllegalArgumentException.class, () -> new JwtTokenProvider("short", EXPIRATION_MS));
     }
 }

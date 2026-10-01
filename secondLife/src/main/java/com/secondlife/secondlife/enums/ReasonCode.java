@@ -10,7 +10,9 @@ public enum ReasonCode {
     CONFIRMED_IDENTITY_MISMATCH("Thông tin định danh xác nhận không khớp"),
 
     // User-Fixable Uncertain Cases
+    EKYC_CONTEXT_MISSING("Missing VNPT client session or request token; submit the documents again."),
     IMAGE_TOO_BLURRY("Ảnh chụp bị mờ, không rõ nét. Vui lòng chụp lại rõ ràng hơn."),
+    IMAGE_NOT_ACCESSIBLE("Không tải được ảnh xác thực. Vui lòng tải ảnh lên lại."),
     IMAGE_GLARE("Ảnh chụp bị lóa sáng hoặc phản chiếu ánh đèn. Vui lòng chụp ở góc đủ sáng, không lóa."),
     DOCUMENT_NOT_FULLY_VISIBLE("Giấy tờ không hiển thị trọn vẹn trong khung hình. Vui lòng chụp rõ toàn bộ 4 góc."),
     SELFIE_QUALITY_LOW("Chất lượng ảnh chân dung không đạt yêu cầu. Vui lòng chụp lại ảnh chân dung rõ mặt."),
@@ -28,6 +30,9 @@ public enum ReasonCode {
     // Provider Operational Issues
     PROVIDER_TIMEOUT("Hệ thống kết nối đến cổng eKYC quá thời gian phản hồi"),
     PROVIDER_UNAVAILABLE("Cổng xác thực danh tính tạm thời gián đoạn hoạt động"),
+    PROVIDER_AUTH_FAILED("Không xác thực được với cổng eKYC; cần kiểm tra cấu hình nhà cung cấp"),
+
+    PROVIDER_REQUEST_REJECTED("VNPT eKYC từ chối yêu cầu; cần kiểm tra ảnh và cấu hình tích hợp"),
 
     // Risk Engine Reasons
     DUPLICATE_IDENTITY("Số giấy tờ tùy thân đã được liên kết với một tài khoản khác"),
@@ -52,6 +57,8 @@ public enum ReasonCode {
     public boolean isUserFixable() {
         return switch (this) {
             case IMAGE_TOO_BLURRY,
+                 IMAGE_NOT_ACCESSIBLE,
+                 EKYC_CONTEXT_MISSING,
                  IMAGE_GLARE,
                  DOCUMENT_NOT_FULLY_VISIBLE,
                  SELFIE_QUALITY_LOW,

@@ -13,9 +13,15 @@ public record SellerVerificationResubmitRequest(
         String documentBackUrl,
 
         @Size(max = 1024, message = "Selfie URL is too long")
-        String selfieUrl
+        String selfieUrl,
+        @Size(max = 255) String clientSession,
+        @Size(max = 255) String token
 ) {
     public SellerVerificationResubmitRequest(String documentFrontUrl, String documentBackUrl) {
-        this(documentFrontUrl, documentBackUrl, null);
+        this(documentFrontUrl, documentBackUrl, null, null, null);
+    }
+
+    public SellerVerificationResubmitRequest(String documentFrontUrl, String documentBackUrl, String selfieUrl) {
+        this(documentFrontUrl, documentBackUrl, selfieUrl, null, null);
     }
 }

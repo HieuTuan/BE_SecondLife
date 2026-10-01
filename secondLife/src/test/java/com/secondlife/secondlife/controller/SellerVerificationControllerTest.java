@@ -106,7 +106,7 @@ class SellerVerificationControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/seller-verifications")
+        mockMvc.perform(post("/api/seller-verifications")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(jsonBody))
                 .andExpect(status().isCreated())
@@ -130,7 +130,7 @@ class SellerVerificationControllerTest {
 
         when(sellerVerificationService.getCurrentVerification(userId)).thenReturn(response);
 
-        mockMvc.perform(get("/api/v1/seller-verifications/me"))
+        mockMvc.perform(get("/api/seller-verifications/me"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.documentNumber").value("********5678"))
@@ -158,7 +158,7 @@ class SellerVerificationControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/seller-verifications/" + verificationId + "/resubmit")
+        mockMvc.perform(post("/api/seller-verifications/" + verificationId + "/resubmit")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(jsonBody))
                 .andExpect(status().isOk())
@@ -178,7 +178,7 @@ class SellerVerificationControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/seller-verifications/" + verificationId + "/resubmit")
+        mockMvc.perform(post("/api/seller-verifications/" + verificationId + "/resubmit")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(jsonBody))
                 .andExpect(status().isConflict())

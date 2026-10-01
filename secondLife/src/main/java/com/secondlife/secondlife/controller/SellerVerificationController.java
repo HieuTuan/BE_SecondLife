@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/v1/seller-verifications")
+@RequestMapping("/api/seller-verifications")
 @RequiredArgsConstructor
 @Tag(name = "Seller Verification", description = "Seller identity verification submission and status APIs")
 public class SellerVerificationController {

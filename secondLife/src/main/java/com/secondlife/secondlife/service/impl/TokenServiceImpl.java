@@ -77,7 +77,7 @@ public class TokenServiceImpl implements TokenService {
     }
 
     @Override
-    @Transactional
+    @Transactional(noRollbackFor = UnauthorizedException.class)
     public TokenResponse rotateRefreshToken(String rawRefreshToken) {
         String hashedToken = hashToken(rawRefreshToken);
 
@@ -141,7 +141,7 @@ public class TokenServiceImpl implements TokenService {
 
         EmailVerificationToken token = new EmailVerificationToken(user, hashedToken, expiry);
         emailVerificationTokenRepository.save(token);
-        log.info("Generated 6-digit email verification OTP for user: {} [OTP: {}]", user.getEmail(), rawOtp);
+        log.info("Generated email verification OTP for user ID: {}", user.getId());
         return rawOtp;
     }
 

@@ -2,6 +2,14 @@
 
 Tài liệu này mô tả chi tiết toàn bộ vòng đời, luồng gọi API theo thứ tự, trạng thái xử lý và ma trận 8 trường hợp (Case 1 - 8) của hệ thống xác thực người bán (eKYC) trong dự án **SecondLife**.
 
+## Cấu hình VNPT thật
+
+Trong `.env` của Backend, đặt `VNPT_EKYC_PROVIDER=VNPT`, `VNPT_BASE_URL=https://api.idg.vnpt.vn`, `VNPT_CLIENT_ID`, `VNPT_CLIENT_SECRET`, `VNPT_TOKEN_ID`, `VNPT_TOKEN_KEY` và tùy chọn `VNPT_MAC_ADDRESS=TEST1`. Backend lấy OAuth access token qua `/auth/oauth/token`, cache và làm mới tự động. `Token-id` và `Token-key` là cặp key VNPT cấp riêng, không suy ra từ client ID/secret. Các tên `VNPT_EKYC_SERVER_CLIENT_ID`, `VNPT_EKYC_SERVER_CLIENT_SECRET`, `VNPT_EKYC_TOKEN_ID`, `VNPT_EKYC_TOKEN_KEY` cũ được chấp nhận làm fallback. `VNPT_EKYC_ACCESS_TOKEN` và `VNPT_EKYC_TOKEN_URL` không còn được dùng. Không gửi thông tin này cho FE hoặc commit `.env`.
+
+Backend tải ảnh từ tài khoản Cloudinary đã cấu hình, upload từng ảnh sang `/file-service/v1/addFile` để lấy hash, rồi gọi OCR web, card liveness web, face liveness 2D, mask face web và face compare web bằng hash. FE gửi thêm `clientSession` và `token` (chuỗi định danh request theo tài liệu VNPT) trong yêu cầu nộp hoặc nộp lại hồ sơ; backend lưu chúng để retry cùng hồ sơ. Nếu hồ sơ cũ thiếu hai trường này, backend yêu cầu nộp lại. Phản hồi từ VNPT được kiểm tra trước khi hồ sơ có thể chuyển sang `PASSED`. Với `VNPT_EKYC_RECOVERY_ENABLED=true`, backend tự retry hồ sơ `EKYC_PENDING` có `ekycStatus=PROVIDER_ERROR` theo `VNPT_EKYC_RECOVERY_INTERVAL_MS`, `VNPT_EKYC_RECOVERY_DELAY_MS`, `VNPT_EKYC_RECOVERY_MAX_ATTEMPTS` và `VNPT_EKYC_RECOVERY_BATCH_SIZE`. Khi hết lượt, hồ sơ vẫn pending để Admin retry thủ công qua `POST /api/admin/seller-verifications/{id}/retry-ekyc`. Chỉ Admin có quyền `SELLER_VERIFICATION_REVIEW` mới gọi được API này.
+
+Nếu upload lên VNPT trả HTTP 400, xem log Backend để biết endpoint và mã lỗi VNPT (nếu có). Kiểm tra Client ID/Secret, Token ID/Key thuộc đúng tài khoản VNPT và ba ảnh là JPEG/PNG thật, rồi khởi động lại Backend sau khi sửa `.env`. HTTP 400 không được tự gọi lại vì cùng một request lỗi sẽ tiếp tục bị từ chối.
+
 ---
 
 ## 1. Tổng quan Kiến trúc & Vòng đời trạng thái
@@ -44,7 +52,7 @@ stateDiagram-v2
 ### GIAI ĐOẠN 1: Chuẩn bị tài khoản & Đăng nhập
 
 #### API 1: Đăng nhập tài khoản Người dùng (Buyer)
-- **Phương thức & Endpoint**: `POST /api/v1/auth/login`
+- **Phương thức & Endpoint**: `POST /api/auth/login`
 - **Mục đích**: Lấy JWT `accessToken` của tài khoản cần nâng cấp lên Người bán.
 - **Request Body**:
 ```json
@@ -61,7 +69,7 @@ stateDiagram-v2
 ### GIAI ĐOẠN 2: Người dùng nộp hồ sơ xác thực
 
 #### API 2: Nộp hồ sơ eKYC
-- **Phương thức & Endpoint**: `POST /api/v1/seller-verifications`
+- **Phương thức & Endpoint**: `POST /api/seller-verifications`
 - **Quyền yêu cầu**: `SELLER_VERIFICATION_SUBMIT` (tài khoản `BUYER` mặc định đã có).
 - **Điều kiện ràng buộc**:
   1. Tài khoản chưa có vai trò `SELLER`.
@@ -71,9 +79,9 @@ stateDiagram-v2
 {
   "verificationType": "CITIZEN_ID",
   "documentNumber": "037094012351",
-  "documentFrontUrl": "https://storage.googleapis.com/.../cccd_mat_truoc.jpg",
-  "documentBackUrl": "https://storage.googleapis.com/.../cccd_mat_sau.jpg",
-  "selfieUrl": "https://storage.googleapis.com/.../anh_chuan_dung_selfie.jpg"
+  "documentFrontUrl": "https://res.cloudinary.com/<cloud-name>/image/upload/.../cccd_mat_truoc.jpg",
+  "documentBackUrl": "https://res.cloudinary.com/<cloud-name>/image/upload/.../cccd_mat_sau.jpg",
+  "selfieUrl": "https://res.cloudinary.com/<cloud-name>/image/upload/.../anh_chuan_dung_selfie.jpg"
 }
 ```
 - **Xử lý bên dưới**:
@@ -86,7 +94,7 @@ stateDiagram-v2
 ### GIAI ĐOẠN 3: Người dùng theo dõi tiến độ hồ sơ
 
 #### API 3: Tra cứu trạng thái hồ sơ của chính mình
-- **Phương thức & Endpoint**: `GET /api/v1/seller-verifications/me`
+- **Phương thức & Endpoint**: `GET /api/seller-verifications/me`
 - **Quyền yêu cầu**: `SELLER_VERIFICATION_READ_SELF`
 - **Response**:
 ```json
@@ -98,10 +106,9 @@ stateDiagram-v2
     "ekycStatus": "PASSED",
     "riskStatus": "CLEAR",
     "reviewSource": "SYSTEM",
-    "documentNumberMasked": "037******351",
-    "faceMatchScore": 0.98,
-    "livenessScore": 0.99,
-    "documentScore": 0.95,
+    "documentNumber": "********2351",
+    "reasonCode": "NONE",
+    "resubmissionCount": 0,
     "rejectionReason": null
   }
 }
@@ -112,7 +119,7 @@ stateDiagram-v2
 ### GIAI ĐOẠN 4: Người dùng nộp lại ảnh (Nếu trạng thái là `RESUBMIT_REQUIRED`)
 
 #### API 4: Nộp lại chứng từ rõ nét hơn
-- **Phương thức & Endpoint**: `POST /api/v1/seller-verifications/{verificationId}/resubmit`
+- **Phương thức & Endpoint**: `POST /api/seller-verifications/{verificationId}/resubmit`
 - **Quyền yêu cầu**: `SELLER_VERIFICATION_SUBMIT`
 - **Điều kiện**: Hồ sơ phải đang ở trạng thái `RESUBMIT_REQUIRED`.
 - **Giới hạn**: Tối đa 3 lần (`app.ekyc.max-resubmissions = 3`). Nếu nộp lại lần thứ 4, hệ thống tự động đưa hồ sơ về `NEEDS_REVIEW`.
@@ -130,7 +137,7 @@ stateDiagram-v2
 ### GIAI ĐOẠN 5: Quản trị viên xử lý hồ sơ (Nếu trạng thái là `NEEDS_REVIEW`)
 
 #### API 5: Quản trị viên đăng nhập
-- **Phương thức & Endpoint**: `POST /api/v1/auth/login`
+- **Phương thức & Endpoint**: `POST /api/auth/login`
 - **Tài khoản Admin mặc định**:
   - `email`: `admin@secondlife.com`
   - `password`: `AdminPass@123456`
@@ -138,16 +145,17 @@ stateDiagram-v2
   `Authorization: Bearer <accessToken_của_admin>`
 
 #### API 6: Admin lọc danh sách hồ sơ cần thẩm định
-- **Phương thức & Endpoint**: `GET /api/v1/admin/seller-verifications?status=NEEDS_REVIEW&page=0&size=20`
+- **Phương thức & Endpoint**: `GET /api/admin/seller-verifications?status=NEEDS_REVIEW&page=0&size=20`
 - **Quyền yêu cầu**: `SELLER_VERIFICATION_READ_ANY`
 - **Chức năng**: Xem danh sách toàn bộ hồ sơ đang chờ duyệt, thông tin người nộp, điểm rủi ro, và lý do nghi vấn.
 
 #### API 7: Admin xem chi tiết hồ sơ & lịch sử sự kiện
-- **Phương thức & Endpoint**: `GET /api/v1/admin/seller-verifications/{id}`
+- **Phương thức & Endpoint**: `GET /api/admin/seller-verifications/{id}`
 - **Response**: Trả về link ảnh, số điểm Face match / Liveness / OCR chi tiết và **danh sách tất cả sự kiện chuyển trạng thái (Event History Timeline)** từ lúc khởi tạo.
+- `GET /api/seller-verifications/me` chỉ trả số giấy tờ đã che; các điểm eKYC chi tiết thuộc API Admin này.
 
 #### API 8a: Admin Phê duyệt hồ sơ
-- **Phương thức & Endpoint**: `POST /api/v1/admin/seller-verifications/{id}/approve`
+- **Phương thức & Endpoint**: `POST /api/admin/seller-verifications/{id}/approve`
 - **Quyền yêu cầu**: `SELLER_VERIFICATION_REVIEW`
 - **Hành động hệ thống**:
   1. Chuyển trạng thái sang `APPROVED` (ReviewSource: `ADMIN`).
@@ -155,7 +163,7 @@ stateDiagram-v2
   3. Gửi thông báo phê duyệt tới người dùng.
 
 #### API 8b: Admin Từ chối hồ sơ
-- **Phương thức & Endpoint**: `POST /api/v1/admin/seller-verifications/{id}/reject`
+- **Phương thức & Endpoint**: `POST /api/admin/seller-verifications/{id}/reject`
 - **Quyền yêu cầu**: `SELLER_VERIFICATION_REVIEW`
 - **Request Body**:
 ```json

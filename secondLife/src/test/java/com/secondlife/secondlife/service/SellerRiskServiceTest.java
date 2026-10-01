@@ -3,9 +3,11 @@ package com.secondlife.secondlife.service;
 import com.secondlife.secondlife.dto.ekyc.EkycResult;
 import com.secondlife.secondlife.dto.risk.SellerRiskResult;
 import com.secondlife.secondlife.entity.SellerVerification;
+import com.secondlife.secondlife.entity.IdentityRestriction;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.repository.SellerVerificationRepository;
+import com.secondlife.secondlife.repository.IdentityRestrictionRepository;
 import com.secondlife.secondlife.service.impl.SellerRiskServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.lang.reflect.Field;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -26,6 +29,9 @@ class SellerRiskServiceTest {
     @Mock
     private SellerVerificationRepository sellerVerificationRepository;
 
+    @Mock
+    private IdentityRestrictionRepository identityRestrictionRepository;
+
     private SellerRiskServiceImpl sellerRiskService;
 
     private User user;
@@ -34,7 +40,8 @@ class SellerRiskServiceTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        sellerRiskService = new SellerRiskServiceImpl(sellerVerificationRepository, true, 70.0);
+        sellerRiskService = new SellerRiskServiceImpl(
+                sellerVerificationRepository, identityRestrictionRepository, true, 70.0);
 
         userId = UUID.randomUUID();
         user = new User("user@example.com", "pass", AccountStatus.ACTIVE);
@@ -123,5 +130,45 @@ class SellerRiskServiceTest {
 
         assertEquals(RiskStatus.REVIEW, result.status());
         assertTrue(result.reasonCodes().contains(ReasonCode.FACE_MATCH_BORDERLINE));
+    }
+
+    @Test
+    void vnptWebCompareMatchDoesNotUseCompareGeneralThreshold() {
+        when(sellerVerificationRepository.findByDocumentNumberHash("hashed_1234")).thenReturn(List.of());
+        when(sellerVerificationRepository.countByUserIdAndEkycStatus(userId, EkycStatus.FAILED)).thenReturn(0L);
+        EkycResult ekycResult = EkycResult.pass("VNPT_EKYC", "REF1", 0.71, null, null);
+
+        SellerRiskResult result = sellerRiskService.evaluateRisk(user, verification, ekycResult);
+
+        assertEquals(RiskStatus.CLEAR, result.status());
+    }
+
+    @Test
+    void activePermanentIdentityRestrictionBlocksRisk() {
+        IdentityRestriction restriction = new IdentityRestriction();
+        restriction.setReasonCode(ReasonCode.PERMANENT_SELLER_BAN.name());
+        when(identityRestrictionRepository.findActiveByDocumentHash(
+                org.mockito.ArgumentMatchers.eq("hashed_1234"), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(List.of(restriction));
+
+        SellerRiskResult result = sellerRiskService.evaluateRisk(user, verification,
+                EkycResult.pass("MOCK", "REF1", 0.95, 0.99, 0.98));
+
+        assertEquals(RiskStatus.BLOCK, result.status());
+        assertEquals(ReasonCode.PERMANENT_SELLER_BAN, result.reasonCodes().getFirst());
+    }
+
+    @Test
+    void otherActiveIdentityRestrictionRequiresReview() {
+        IdentityRestriction restriction = new IdentityRestriction();
+        restriction.setReasonCode(ReasonCode.MANUAL_REVIEW_REQUIRED.name());
+        when(identityRestrictionRepository.findActiveByDocumentHash(
+                org.mockito.ArgumentMatchers.eq("hashed_1234"), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(List.of(restriction));
+
+        Optional<SellerRiskResult> result = sellerRiskService.checkIdentityRestriction(verification);
+
+        assertTrue(result.isPresent());
+        assertEquals(RiskStatus.REVIEW, result.orElseThrow().status());
     }
 }

@@ -6,6 +6,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.util.Objects;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 @Entity
@@ -27,6 +29,12 @@ public class Permission {
 
     @Column(length = 255)
     private String description;
+
+    // Built-in permissions use the fixed policy in AdminRbacServiceImpl.
+    @ElementCollection
+    @CollectionTable(name = "permission_assignable_roles", joinColumns = @JoinColumn(name = "permission_id"))
+    @Column(name = "role_code", nullable = false, length = 50)
+    private Set<String> assignableRoles = new HashSet<>();
 
     public Permission(String code, String name, String description) {
         this.code = code;

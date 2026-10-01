@@ -55,9 +55,6 @@ public class DotenvEnvironmentPostProcessor implements EnvironmentPostProcessor 
 
                     envMap.put(key, value);
 
-                    if (System.getProperty(key) == null) {
-                        System.setProperty(key, value);
-                    }
                 }
             }
         } catch (IOException e) {
@@ -65,7 +62,7 @@ public class DotenvEnvironmentPostProcessor implements EnvironmentPostProcessor 
         }
 
         if (!envMap.isEmpty()) {
-            environment.getPropertySources().addFirst(new MapPropertySource(PROPERTY_SOURCE_NAME, envMap));
+            environment.getPropertySources().addAfter("systemEnvironment", new MapPropertySource(PROPERTY_SOURCE_NAME, envMap));
         }
     }
 
