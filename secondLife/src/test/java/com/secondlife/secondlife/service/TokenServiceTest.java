@@ -1,0 +1,219 @@
+package com.secondlife.secondlife.service;
+
+import com.secondlife.secondlife.dto.response.TokenResponse;
+import com.secondlife.secondlife.entity.EmailVerificationToken;
+import com.secondlife.secondlife.entity.PasswordResetToken;
+import com.secondlife.secondlife.entity.RefreshToken;
+import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.enums.AccountStatus;
+import com.secondlife.secondlife.exception.BadRequestException;
+import com.secondlife.secondlife.exception.UnauthorizedException;
+import com.secondlife.secondlife.repository.EmailVerificationTokenRepository;
+import com.secondlife.secondlife.repository.PasswordResetTokenRepository;
+import com.secondlife.secondlife.repository.RefreshTokenRepository;
+import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
+import com.secondlife.secondlife.service.impl.TokenServiceImpl;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import java.lang.reflect.Field;
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+class TokenServiceTest {
+
+    @Mock
+    private RefreshTokenRepository refreshTokenRepository;
+
+    @Mock
+    private EmailVerificationTokenRepository emailVerificationTokenRepository;
+
+    @Mock
+    private PasswordResetTokenRepository passwordResetTokenRepository;
+
+    @Mock
+    private UserRepository userRepository;
+
+    @Mock
+    private JwtTokenProvider jwtTokenProvider;
+
+    @InjectMocks
+    private TokenServiceImpl tokenService;
+
+    private User user;
+    private UUID userId;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        ReflectionTestUtils.setField(tokenService, "refreshExpirationMs", 604800000L);
+        ReflectionTestUtils.setField(tokenService, "emailVerificationExpirationMs", 86400000L);
+        ReflectionTestUtils.setField(tokenService, "passwordResetExpirationMs", 3600000L);
+
+        userId = UUID.randomUUID();
+        user = new User("user@example.com", "hash", AccountStatus.ACTIVE);
+        Field idField = User.class.getDeclaredField("id");
+        idField.setAccessible(true);
+        idField.set(user, userId);
+    }
+
+    @Test
+    void hashToken_ShouldProduceConsistentSha256Hex() {
+        String token = "my-secret-token";
+        String hash1 = tokenService.hashToken(token);
+        String hash2 = tokenService.hashToken(token);
+
+        assertNotNull(hash1);
+        assertEquals(hash1, hash2);
+        assertEquals(64, hash1.length()); // 256 bits = 64 hex chars
+    }
+
+    @Test
+    void pendingAccountCannotRefreshItsSession() {
+        String rawToken = "pending-token";
+        user.setAccountStatus(AccountStatus.PENDING_VERIFICATION);
+        RefreshToken token = new RefreshToken(user, tokenService.hashToken(rawToken), Instant.now().plusSeconds(3600));
+        when(refreshTokenRepository.findByTokenHash(tokenService.hashToken(rawToken))).thenReturn(Optional.of(token));
+        assertThrows(com.secondlife.secondlife.exception.ForbiddenException.class, () -> tokenService.rotateRefreshToken(rawToken));
+        verify(refreshTokenRepository, never()).save(any());
+        verifyNoInteractions(jwtTokenProvider);
+    }
+
+    @Test
+    void generateTokenPair_ShouldSaveHashedTokenAndReturnRaw() {
+        when(jwtTokenProvider.generateAccessToken(user)).thenReturn("access-token-jwt");
+        when(jwtTokenProvider.getAccessExpirationMs()).thenReturn(900000L);
+
+        TokenResponse response = tokenService.generateTokenPair(user);
+
+        assertNotNull(response);
+        assertEquals("access-token-jwt", response.accessToken());
+        assertNotNull(response.refreshToken());
+        verify(refreshTokenRepository).save(any(RefreshToken.class));
+    }
+
+    @Test
+    void rotateRefreshToken_WhenValid_ShouldRevokeOldAndGenerateNew() {
+        String rawToken = "raw-refresh-token";
+        String hash = tokenService.hashToken(rawToken);
+
+        RefreshToken oldToken = new RefreshToken(user, hash, Instant.now().plusSeconds(3600));
+        when(refreshTokenRepository.findByTokenHash(hash)).thenReturn(Optional.of(oldToken));
+        when(jwtTokenProvider.generateAccessToken(user)).thenReturn("new-access-jwt");
+        when(jwtTokenProvider.getAccessExpirationMs()).thenReturn(900000L);
+
+        TokenResponse response = tokenService.rotateRefreshToken(rawToken);
+
+        assertNotNull(response);
+        assertTrue(oldToken.isRevoked());
+        verify(refreshTokenRepository, atLeastOnce()).save(oldToken);
+    }
+
+    @Test
+    void rotateRefreshToken_WhenAlreadyRevoked_ShouldTriggerReplayDetection() {
+        String rawToken = "replayed-token";
+        String hash = tokenService.hashToken(rawToken);
+
+        RefreshToken revokedToken = new RefreshToken(user, hash, Instant.now().plusSeconds(3600));
+        revokedToken.revoke();
+
+        when(refreshTokenRepository.findByTokenHash(hash)).thenReturn(Optional.of(revokedToken));
+
+        UnauthorizedException ex = assertThrows(UnauthorizedException.class, () ->
+                tokenService.rotateRefreshToken(rawToken)
+        );
+
+        assertTrue(ex.getMessage().contains("revoked"));
+        verify(refreshTokenRepository).revokeAllActiveByUserId(userId);
+    }
+
+    @Test
+    void rotateRefreshToken_WhenExpired_ShouldThrowUnauthorized() {
+        String rawToken = "expired-token";
+        String hash = tokenService.hashToken(rawToken);
+
+        RefreshToken expiredToken = new RefreshToken(user, hash, Instant.now().minusSeconds(3600));
+        when(refreshTokenRepository.findByTokenHash(hash)).thenReturn(Optional.of(expiredToken));
+
+        UnauthorizedException ex = assertThrows(UnauthorizedException.class, () ->
+                tokenService.rotateRefreshToken(rawToken)
+        );
+
+        assertTrue(ex.getMessage().contains("expired"));
+    }
+
+    @Test
+    void createEmailVerificationOtp_ShouldReturn6Digits() {
+        String otp = tokenService.createEmailVerificationOtp(user);
+        assertNotNull(otp);
+        assertEquals(6, otp.length());
+        assertTrue(otp.matches("^[0-9]{6}$"));
+        verify(emailVerificationTokenRepository).save(any(EmailVerificationToken.class));
+    }
+
+    @Test
+    void verifyEmailOtp_WhenValid_ShouldMarkUsedAndSetEmailVerified() {
+        String rawOtp = "123456";
+        String hash = tokenService.hashToken(userId.toString() + ":" + rawOtp);
+
+        EmailVerificationToken token = new EmailVerificationToken(user, hash, Instant.now().plusSeconds(3600));
+        when(userRepository.findByEmailIgnoreCase("user@example.com")).thenReturn(Optional.of(user));
+        when(emailVerificationTokenRepository.findByTokenHash(hash)).thenReturn(Optional.of(token));
+        when(userRepository.save(user)).thenReturn(user);
+
+        User verifiedUser = tokenService.verifyEmailOtp("user@example.com", rawOtp);
+
+        assertTrue(verifiedUser.isEmailVerified());
+        assertTrue(token.isUsed());
+        verify(emailVerificationTokenRepository).save(token);
+    }
+
+    @Test
+    void verifyEmailOtp_WhenAlreadyUsed_ShouldThrowBadRequest() {
+        String rawOtp = "654321";
+        String hash = tokenService.hashToken(userId.toString() + ":" + rawOtp);
+
+        EmailVerificationToken token = new EmailVerificationToken(user, hash, Instant.now().plusSeconds(3600));
+        token.markAsUsed();
+        when(userRepository.findByEmailIgnoreCase("user@example.com")).thenReturn(Optional.of(user));
+        when(emailVerificationTokenRepository.findByTokenHash(hash)).thenReturn(Optional.of(token));
+
+        assertThrows(BadRequestException.class, () -> tokenService.verifyEmailOtp("user@example.com", rawOtp));
+    }
+
+    @Test
+    void createPasswordResetOtp_ShouldReturn6Digits() {
+        String otp = tokenService.createPasswordResetOtp(user);
+        assertNotNull(otp);
+        assertEquals(6, otp.length());
+        assertTrue(otp.matches("^[0-9]{6}$"));
+        verify(passwordResetTokenRepository).save(any(PasswordResetToken.class));
+    }
+
+    @Test
+    void verifyAndConsumePasswordResetOtp_WhenValid_ShouldMarkUsedAndReturnUser() {
+        String rawOtp = "123456";
+        String hash = tokenService.hashToken(userId.toString() + ":" + rawOtp);
+
+        PasswordResetToken token = new PasswordResetToken(user, hash, Instant.now().plusSeconds(3600));
+        when(userRepository.findByEmailIgnoreCase("user@example.com")).thenReturn(Optional.of(user));
+        when(passwordResetTokenRepository.findByTokenHash(hash)).thenReturn(Optional.of(token));
+
+        User resetUser = tokenService.verifyAndConsumePasswordResetOtp("user@example.com", rawOtp);
+
+        assertEquals(user.getEmail(), resetUser.getEmail());
+        assertTrue(token.isUsed());
+        verify(passwordResetTokenRepository).save(token);
+    }
+}

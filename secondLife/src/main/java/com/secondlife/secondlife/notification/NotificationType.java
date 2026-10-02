@@ -1,0 +1,11 @@
+package com.secondlife.secondlife.notification;
+
+public enum NotificationType {
+    VERIFICATION_OTP,
+    PASSWORD_RESET_OTP,
+    SELLER_VERIFICATION_APPROVED,
+    SELLER_VERIFICATION_REJECTED,
+    PASSWORD_CHANGED,
+    ACCOUNT_STATUS_CHANGED,
+    INSPECTION_CENTER_CREATED
+}
