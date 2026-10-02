@@ -47,15 +47,15 @@ public class DepositServiceImpl implements DepositService {
         DepositRequest depositRequest = new DepositRequest();
         depositRequest.setUser(user);
         depositRequest.setAmount(requestDTO.getAmount());
-        
+
         // Generate a unique 6-digit code with prefix "SL"
         String code;
         SecureRandom random = new SecureRandom();
         do {
             int num = 100000 + random.nextInt(900000);
-            code = "SL" + num;
+            code = "SCL" + num;
         } while (depositRequestRepository.existsByCode(code));
-        
+
         depositRequest.setCode(code);
         depositRequestRepository.save(depositRequest);
 
@@ -110,8 +110,7 @@ public class DepositServiceImpl implements DepositService {
         walletService.deposit(
                 depositRequest.getUser().getId(),
                 webhookDTO.getTransferAmount(),
-                depositRequest.getId()
-        );
+                depositRequest.getId());
 
         depositRequest.setStatus(DepositStatus.COMPLETED);
         depositRequest.setSepayTransactionId(webhookDTO.getId());

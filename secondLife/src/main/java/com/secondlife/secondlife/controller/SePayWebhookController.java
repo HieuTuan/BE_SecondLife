@@ -25,9 +25,21 @@ public class SePayWebhookController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody SePayWebhookDTO webhookDTO) {
             
-        // Check API Token
-        if (authorization == null || !authorization.equals("Bearer " + sepayApiToken)) {
-            log.warn("Invalid or missing SePay API Token");
+        // Check API Token robustly
+        String expectedToken = sepayApiToken.trim();
+        if (authorization == null) {
+            log.warn("Missing SePay API Token (Authorization header is null)");
+            return ResponseEntity.status(401).body(Map.of("success", false));
+        }
+        
+        String receivedToken = authorization.replace("Bearer ", "")
+                                            .replace("Apikey ", "")
+                                            .replace("Bearer", "")
+                                            .replace("Apikey", "")
+                                            .trim();
+        
+        if (!receivedToken.equals(expectedToken)) {
+            log.warn("Invalid SePay API Token. Received: '{}', Expected: '{}'", receivedToken, expectedToken);
             return ResponseEntity.status(401).body(Map.of("success", false));
         }
             

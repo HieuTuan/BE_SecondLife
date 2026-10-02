@@ -156,7 +156,7 @@ public class NegotiationServiceImpl implements NegotiationService {
 
     @Override
     public Page<NegotiationResponseDTO> getSellerNegotiations(UUID sellerId, Pageable pageable) {
-        return negotiationRepository.findBySellerId(sellerId, pageable).map(this::mapToDTO);
+        return negotiationRepository.findByPostUserId(sellerId, pageable).map(this::mapToDTO);
     }
 
     private NegotiationResponseDTO mapToDTO(Negotiation negotiation) {

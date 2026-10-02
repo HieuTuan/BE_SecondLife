@@ -25,5 +25,5 @@ public interface NegotiationRepository extends JpaRepository<Negotiation, UUID> 
 
     org.springframework.data.domain.Page<Negotiation> findByBuyerId(UUID buyerId, org.springframework.data.domain.Pageable pageable);
 
-    org.springframework.data.domain.Page<Negotiation> findBySellerId(UUID sellerId, org.springframework.data.domain.Pageable pageable);
+    org.springframework.data.domain.Page<Negotiation> findByPostUserId(UUID sellerId, org.springframework.data.domain.Pageable pageable);
 }

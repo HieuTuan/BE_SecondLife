@@ -61,6 +61,7 @@ public class SecurityConfig {
                         // Public auth endpoints
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/health").permitAll()
+                        .requestMatchers("/api/v1/webhooks/sepay").permitAll()
                         .requestMatchers("/error").permitAll()
                         // Administrative role assignment is also guarded at the filter boundary.
                         .requestMatchers("/api/admin/permissions", "/api/admin/permissions/**",
