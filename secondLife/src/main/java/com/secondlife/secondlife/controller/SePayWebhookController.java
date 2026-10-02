@@ -17,10 +17,20 @@ public class SePayWebhookController {
 
     private final DepositService depositService;
 
-    // SePay supports passing a static API key in headers to secure the webhook.
-    // For now we assume network security or you can add a simple token check here.
+    @org.springframework.beans.factory.annotation.Value("${app.sepay.api-token}")
+    private String sepayApiToken;
+
     @PostMapping
-    public ResponseEntity<Map<String, Boolean>> handleWebhook(@RequestBody SePayWebhookDTO webhookDTO) {
+    public ResponseEntity<Map<String, Boolean>> handleWebhook(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody SePayWebhookDTO webhookDTO) {
+            
+        // Check API Token
+        if (authorization == null || !authorization.equals("Bearer " + sepayApiToken)) {
+            log.warn("Invalid or missing SePay API Token");
+            return ResponseEntity.status(401).body(Map.of("success", false));
+        }
+            
         log.info("Received SePay webhook for transaction ID: {}", webhookDTO.getId());
         
         try {

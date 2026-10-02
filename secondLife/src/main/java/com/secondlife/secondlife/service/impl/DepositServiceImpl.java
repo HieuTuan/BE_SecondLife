@@ -29,9 +29,14 @@ public class DepositServiceImpl implements DepositService {
     private final UserRepository userRepository;
     private final WalletService walletService;
 
-    private static final String BANK_ACCOUNT_NAME = "CONG TY SECONDLIFE";
-    private static final String BANK_ACCOUNT_NUMBER = "1017588888"; // Replace with your actual
-    private static final String BANK_NAME = "Vietcombank";
+    @org.springframework.beans.factory.annotation.Value("${app.sepay.bank-account-name}")
+    private String bankAccountName;
+
+    @org.springframework.beans.factory.annotation.Value("${app.sepay.bank-account-number}")
+    private String bankAccountNumber;
+
+    @org.springframework.beans.factory.annotation.Value("${app.sepay.bank-name}")
+    private String bankName;
 
     @Override
     @Transactional
@@ -59,9 +64,9 @@ public class DepositServiceImpl implements DepositService {
         response.setAmount(depositRequest.getAmount());
         response.setCode(depositRequest.getCode());
         response.setStatus(depositRequest.getStatus());
-        response.setBankAccountName(BANK_ACCOUNT_NAME);
-        response.setBankAccountNumber(BANK_ACCOUNT_NUMBER);
-        response.setBankName(BANK_NAME);
+        response.setBankAccountName(bankAccountName);
+        response.setBankAccountNumber(bankAccountNumber);
+        response.setBankName(bankName);
         response.setCreatedAt(depositRequest.getCreatedAt());
 
         return response;
