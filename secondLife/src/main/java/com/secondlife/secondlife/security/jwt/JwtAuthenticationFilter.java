@@ -43,11 +43,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 // Load fresh user and authorities from DB
                 CustomUserDetails userDetails = (CustomUserDetails) userDetailsService.loadUserById(userId);
 
-                // Deny if locked or disabled
-                if (userDetails.getAccountStatus() == AccountStatus.LOCKED ||
-                    userDetails.getAccountStatus() == AccountStatus.DISABLED) {
-                    log.warn("Access attempt by non-active user: {} (status: {})",
-                            userDetails.getEmail(), userDetails.getAccountStatus());
+                if (tokenProvider.getTokenVersionFromToken(jwt) != userDetails.getTokenVersion()) {
+                    SecurityContextHolder.clearContext();
+                } else if (userDetails.getAccountStatus() != AccountStatus.ACTIVE) {
+                    // Match UserDetails.isEnabled(): only ACTIVE accounts may authenticate.
+                    log.warn("Access attempt by non-active user ID: {} (status: {})",
+                            userDetails.getId(), userDetails.getAccountStatus());
                     SecurityContextHolder.clearContext();
                 } else {
                     UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
@@ -60,7 +61,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
             }
         } catch (Exception ex) {
-            log.error("Could not set user authentication in security context: {}", ex.getMessage());
+            SecurityContextHolder.clearContext();
+            log.warn("Could not set user authentication in security context ({})", ex.getClass().getSimpleName());
         }
 
         filterChain.doFilter(request, response);

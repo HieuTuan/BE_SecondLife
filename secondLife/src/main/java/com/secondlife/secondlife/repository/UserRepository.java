@@ -3,12 +3,15 @@ package com.secondlife.secondlife.repository;
 import com.secondlife.secondlife.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
 import java.util.UUID;
+
+import jakarta.persistence.LockModeType;
 
 @Repository
 public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificationExecutor<User> {
@@ -37,6 +40,10 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
            "LEFT JOIN FETCH rp.permission " +
            "WHERE u.id = :id")
     Optional<User> findByIdWithAuthorities(@Param("id") UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM User u WHERE u.id = :id")
+    Optional<User> findByIdForRoleUpdate(@Param("id") UUID id);
 
     @Query("SELECT COUNT(DISTINCT u) FROM User u " +
            "JOIN u.userRoles ur " +

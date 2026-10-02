@@ -70,6 +70,45 @@ class EkycServiceTest {
     }
 
     @Test
+    void vnptProviderErrorDoesNotUploadImagesAgainWithinOneRequest() {
+        EkycRequest req = new EkycRequest(VerificationType.CITIZEN_ID, "001", "f", "b", "s");
+        when(ekycProviderClient.getProviderName()).thenReturn("VNPT_EKYC");
+        when(ekycProviderClient.verify(req)).thenReturn(EkycResult.providerError(
+                ReasonCode.PROVIDER_UNAVAILABLE, "VNPT_EKYC", "REF1", "unavailable"));
+
+        EkycResult result = ekycService.verifyIdentity(req);
+
+        assertEquals(EkycStatus.PROVIDER_ERROR, result.status());
+        verify(ekycProviderClient, times(1)).verify(req);
+    }
+
+    @Test
+    void verifyIdentity_WhenProviderAuthenticationFails_ShouldNotRetry() {
+        EkycRequest req = new EkycRequest(VerificationType.CITIZEN_ID, "001", "f", "b", "s");
+        EkycResult errResult = EkycResult.providerError(
+                ReasonCode.PROVIDER_AUTH_FAILED, "VNPT", "REF1", "authentication failed");
+        when(ekycProviderClient.verify(req)).thenReturn(errResult);
+
+        EkycResult result = ekycService.verifyIdentity(req);
+
+        assertEquals(ReasonCode.PROVIDER_AUTH_FAILED, result.reasonCode());
+        verify(ekycProviderClient, times(1)).verify(req);
+    }
+
+    @Test
+    void verifyIdentity_WhenProviderRejectsRequest_ShouldNotRetry() {
+        EkycRequest req = new EkycRequest(VerificationType.CITIZEN_ID, "001", "f", "b", "s");
+        EkycResult errResult = EkycResult.providerError(
+                ReasonCode.PROVIDER_REQUEST_REJECTED, "VNPT", "REF1", "bad request");
+        when(ekycProviderClient.verify(req)).thenReturn(errResult);
+
+        EkycResult result = ekycService.verifyIdentity(req);
+
+        assertEquals(ReasonCode.PROVIDER_REQUEST_REJECTED, result.reasonCode());
+        verify(ekycProviderClient, times(1)).verify(req);
+    }
+
+    @Test
     void verifyIdentity_WhenExceptionThrown_ShouldRetryAndReturnProviderError() {
         EkycRequest req = new EkycRequest(VerificationType.CITIZEN_ID, "001", "f", "b", "s");
 

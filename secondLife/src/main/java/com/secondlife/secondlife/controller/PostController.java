@@ -2,9 +2,10 @@ package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.dto.request.PostInitRequest;
 import com.secondlife.secondlife.dto.request.PostSubmitRequest;
-import com.secondlife.secondlife.dto.response.PostInitResponse;
 import com.secondlife.secondlife.dto.response.PostFinalizeResponse;
 import com.secondlife.secondlife.dto.response.PostSubmitResponse;
+import jakarta.validation.Valid;
+import com.secondlife.secondlife.dto.response.PostInitResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.PostService;
@@ -27,41 +28,31 @@ public class PostController {
         this.currentUserProvider = currentUserProvider;
     }
 
-    @GetMapping
-    public ResponseEntity<org.springframework.data.domain.Page<com.secondlife.secondlife.entity.Post>> getPublicPosts(
-            @RequestParam(required = false) UUID categoryId,
-            @RequestParam(required = false) UUID itemId,
-            org.springframework.data.domain.Pageable pageable) {
-        return ResponseEntity.ok(postService.getPublicPosts(categoryId, itemId, pageable));
-    }
-
     @PostMapping("/init")
-    @PreAuthorize("hasAuthority('POST_CREATE')")
+    @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
     public ResponseEntity<PostInitResponse> initPost(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @ModelAttribute PostInitRequest request) {
+            @RequestBody PostInitRequest request) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(postService.initPost(userId, request));
     }
 
     @PostMapping("/finalize-chat/{sessionId}")
-    @PreAuthorize("hasAuthority('POST_CREATE')")
+    @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
     public ResponseEntity<PostFinalizeResponse> finalizeChat(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID sessionId) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        PostFinalizeResponse response = postService.finalizeChatAndDescription(userId, sessionId);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(postService.finalizeChatAndDescription(userId, sessionId));
     }
 
     @PostMapping("/submit/{postId}")
-    @PreAuthorize("hasAuthority('POST_CREATE')")
+    @PreAuthorize("hasAuthority('LISTING_PUBLISH_SELF')")
     public ResponseEntity<PostSubmitResponse> submitPost(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID postId,
-            @RequestBody @jakarta.validation.Valid PostSubmitRequest request) {
+            @Valid @RequestBody PostSubmitRequest request) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        PostSubmitResponse response = postService.submitPost(userId, postId, request);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(postService.submitPost(userId, postId, request));
     }
 }

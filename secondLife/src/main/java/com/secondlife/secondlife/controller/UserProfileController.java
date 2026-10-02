@@ -1,7 +1,6 @@
 package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.ApiResponse;
-import com.secondlife.secondlife.dto.request.ChangePasswordRequest;
 import com.secondlife.secondlife.dto.request.UpdateProfileRequest;
 import com.secondlife.secondlife.dto.response.UserProfileResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
@@ -19,9 +18,9 @@ import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/v1/me")
+@RequestMapping("/api/users/me")
 @RequiredArgsConstructor
-@Tag(name = "User Profile", description = "User profile and password management APIs")
+@Tag(name = "User Profile", description = "User profile APIs")
 public class UserProfileController {
 
     private final UserService userService;
@@ -48,18 +47,6 @@ public class UserProfileController {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         UserProfileResponse response = userService.updateProfile(userId, request);
         return ResponseEntity.ok(ApiResponse.success("Profile updated successfully", response));
-    }
-
-    @PostMapping("/change-password")
-    @Operation(summary = "Change own password and revoke active sessions")
-    @PreAuthorize("hasAuthority('PASSWORD_CHANGE_SELF')")
-    public ResponseEntity<ApiResponse<Void>> changeMyPassword(
-            @AuthenticationPrincipal CustomUserDetails userDetails,
-            @Valid @RequestBody ChangePasswordRequest request
-    ) {
-        UUID userId = currentUserProvider.resolveUserId(userDetails);
-        userService.changePassword(userId, request);
-        return ResponseEntity.ok(ApiResponse.success("Password changed successfully. All active sessions revoked."));
     }
 }
 

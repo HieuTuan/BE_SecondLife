@@ -2,6 +2,7 @@ package com.secondlife.secondlife.controller.admin;
 
 import com.secondlife.secondlife.service.PostService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -17,6 +18,7 @@ public class AdminPostController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('POST_REVIEW')")
     public ResponseEntity<org.springframework.data.domain.Page<com.secondlife.secondlife.entity.Post>> getAdminPosts(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) UUID categoryId,
@@ -26,12 +28,14 @@ public class AdminPostController {
     }
 
     @PostMapping("/{postId}/approve")
+    @PreAuthorize("hasAuthority('POST_REVIEW')")
     public ResponseEntity<String> approvePost(@PathVariable UUID postId) {
         postService.approvePost(postId);
         return ResponseEntity.ok("Post approved successfully");
     }
 
     @PostMapping("/{postId}/reject")
+    @PreAuthorize("hasAuthority('POST_REVIEW')")
     public ResponseEntity<String> rejectPost(
             @PathVariable UUID postId,
             @RequestParam(required = false) String reason) {

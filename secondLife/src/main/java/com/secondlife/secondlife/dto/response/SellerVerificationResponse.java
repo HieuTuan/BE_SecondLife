@@ -44,7 +44,7 @@ public record SellerVerificationResponse(
                 email,
                 fullName,
                 sv.getVerificationType(),
-                sv.getDocumentNumberMasked() != null ? sv.getDocumentNumberMasked() : sv.getDocumentNumber(),
+                sv.getDocumentNumberMasked(),
                 sv.getDocumentFrontUrl(),
                 sv.getDocumentBackUrl(),
                 sv.getSelfieUrl(),

@@ -38,4 +38,8 @@ public interface SellerVerificationService {
     SellerVerificationResponse approveVerification(UUID adminId, UUID verificationId);
 
     SellerVerificationResponse rejectVerification(UUID adminId, UUID verificationId, SellerVerificationReviewRequest request);
+
+    SellerVerificationResponse retryPendingVerification(UUID adminId, UUID verificationId);
+
+    SellerVerificationResponse retryPendingVerificationSystem(UUID verificationId);
 }

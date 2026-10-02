@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.common.PageResponse;
+import com.secondlife.secondlife.config.EkycRecoveryProperties;
 import com.secondlife.secondlife.dto.ekyc.EkycRequest;
 import com.secondlife.secondlife.dto.ekyc.EkycResult;
 import com.secondlife.secondlife.dto.request.SellerVerificationRequest;
@@ -9,7 +10,6 @@ import com.secondlife.secondlife.dto.request.SellerVerificationReviewRequest;
 import com.secondlife.secondlife.dto.response.AdminSellerVerificationDetailResponse;
 import com.secondlife.secondlife.dto.response.SellerVerificationResponse;
 import com.secondlife.secondlife.dto.risk.SellerRiskResult;
-import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.SellerVerification;
 import com.secondlife.secondlife.entity.SellerVerificationEvent;
 import com.secondlife.secondlife.entity.User;
@@ -21,15 +21,16 @@ import com.secondlife.secondlife.enums.RoleCode;
 import com.secondlife.secondlife.enums.SellerVerificationStatus;
 import com.secondlife.secondlife.enums.VerificationEventType;
 import com.secondlife.secondlife.exception.BadRequestException;
+import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.SellerVerificationMapper;
-import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.SellerVerificationEventRepository;
 import com.secondlife.secondlife.repository.SellerVerificationRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.EkycService;
 import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.service.RoleAssignmentService;
 import com.secondlife.secondlife.service.SellerRiskService;
 import com.secondlife.secondlife.service.SellerVerificationService;
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +45,8 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -61,31 +64,34 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
     private final SellerVerificationRepository sellerVerificationRepository;
     private final SellerVerificationEventRepository sellerVerificationEventRepository;
     private final UserRepository userRepository;
-    private final RoleRepository roleRepository;
+    private final RoleAssignmentService roleAssignmentService;
     private final EkycService ekycService;
     private final SellerRiskService sellerRiskService;
     private final SellerVerificationMapper sellerVerificationMapper;
     private final NotificationService notificationService;
+    private final EkycRecoveryProperties recoveryProperties;
     private final int maxResubmissions;
 
     public SellerVerificationServiceImpl(
             SellerVerificationRepository sellerVerificationRepository,
             SellerVerificationEventRepository sellerVerificationEventRepository,
             UserRepository userRepository,
-            RoleRepository roleRepository,
+            RoleAssignmentService roleAssignmentService,
             EkycService ekycService,
             SellerRiskService sellerRiskService,
             SellerVerificationMapper sellerVerificationMapper,
             NotificationService notificationService,
+            EkycRecoveryProperties recoveryProperties,
             @Value("${app.ekyc.max-resubmissions}") int maxResubmissions) {
         this.sellerVerificationRepository = sellerVerificationRepository;
         this.sellerVerificationEventRepository = sellerVerificationEventRepository;
         this.userRepository = userRepository;
-        this.roleRepository = roleRepository;
+        this.roleAssignmentService = roleAssignmentService;
         this.ekycService = ekycService;
         this.sellerRiskService = sellerRiskService;
         this.sellerVerificationMapper = sellerVerificationMapper;
         this.notificationService = notificationService;
+        this.recoveryProperties = recoveryProperties;
         this.maxResubmissions = maxResubmissions;
     }
 
@@ -118,13 +124,15 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
         );
         verification.setDocumentNumberHash(docHash);
         verification.setDocumentNumberMasked(docMasked);
+        verification.setVnptClientSession(request.clientSession());
+        verification.setVnptRequestToken(request.token());
         verification.setStatus(SellerVerificationStatus.SUBMITTED);
 
         SellerVerification saved = sellerVerificationRepository.save(verification);
         recordEvent(saved, VerificationEventType.SUBMITTED, null, SellerVerificationStatus.SUBMITTED,
                 null, "USER", user, "Hồ sơ đăng ký người bán đã được khởi tạo");
 
-        log.info("Seller verification application created for user: {}, id: {}", user.getEmail(), saved.getId());
+        log.info("Seller verification application created for user ID: {}, id: {}", user.getId(), saved.getId());
 
         // Process through automated eKYC & Risk Decision Pipeline
         return executeDecisionPipeline(saved, user, rawDocNumber, "USER");
@@ -141,11 +149,11 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
     @Override
     @Transactional
     public SellerVerificationResponse resubmitVerification(UUID userId, UUID verificationId, SellerVerificationResubmitRequest request) {
-        SellerVerification verification = sellerVerificationRepository.findByIdWithDetails(verificationId)
+        SellerVerification verification = sellerVerificationRepository.findByIdForUpdate(verificationId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy hồ sơ xác thực với id: " + verificationId));
 
         if (!verification.getUser().getId().equals(userId)) {
-            throw new BadRequestException("Hồ sơ xác thực này không thuộc tài khoản hiện tại");
+            throw new ForbiddenException("Hồ sơ xác thực này không thuộc tài khoản hiện tại");
         }
 
         if (verification.getStatus() != SellerVerificationStatus.RESUBMIT_REQUIRED) {
@@ -172,6 +180,12 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
         verification.setDocumentBackUrl(request.documentBackUrl().trim());
         if (request.selfieUrl() != null && !request.selfieUrl().isBlank()) {
             verification.setSelfieUrl(request.selfieUrl().trim());
+        }
+        if (request.clientSession() != null && !request.clientSession().isBlank()) {
+            verification.setVnptClientSession(request.clientSession().trim());
+        }
+        if (request.token() != null && !request.token().isBlank()) {
+            verification.setVnptRequestToken(request.token().trim());
         }
         verification.setResubmissionCount(verification.getResubmissionCount() + 1);
 
@@ -219,7 +233,7 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
     @Override
     @Transactional
     public SellerVerificationResponse approveVerification(UUID adminId, UUID verificationId) {
-        SellerVerification verification = sellerVerificationRepository.findByIdWithDetails(verificationId)
+        SellerVerification verification = sellerVerificationRepository.findByIdForUpdate(verificationId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy hồ sơ xác thực với id: " + verificationId));
 
         if (verification.getStatus() != SellerVerificationStatus.NEEDS_REVIEW) {
@@ -234,6 +248,10 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
 
         User targetUser = verification.getUser();
 
+        if (sellerRiskService.checkIdentityRestriction(verification).isPresent()) {
+            throw new ConflictException("Danh tính đang bị hạn chế; không thể phê duyệt hồ sơ");
+        }
+
         // Transition atomically to APPROVED
         SellerVerificationStatus fromStatus = verification.getStatus();
         verification.transitionTo(SellerVerificationStatus.APPROVED);
@@ -242,14 +260,14 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
         verification.setReviewedAt(Instant.now());
         verification.setRejectionReason(null);
 
-        grantSellerRole(targetUser);
+        roleAssignmentService.grantRole(targetUser.getId(), RoleCode.SELLER);
 
         SellerVerification saved = sellerVerificationRepository.save(verification);
         recordEvent(saved, VerificationEventType.ADMIN_APPROVED, fromStatus, SellerVerificationStatus.APPROVED,
                 verification.getReasonCode(), "ADMIN", admin, "Quản trị viên đã phê duyệt hồ sơ người bán");
 
         log.info("Admin {} explicitly APPROVED seller verification {} for user {}",
-                admin.getEmail(), verificationId, targetUser.getEmail());
+                admin.getId(), verificationId, targetUser.getId());
 
         notificationService.sendSellerVerificationApproved(targetUser);
 
@@ -259,7 +277,7 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
     @Override
     @Transactional
     public SellerVerificationResponse rejectVerification(UUID adminId, UUID verificationId, SellerVerificationReviewRequest request) {
-        SellerVerification verification = sellerVerificationRepository.findByIdWithDetails(verificationId)
+        SellerVerification verification = sellerVerificationRepository.findByIdForUpdate(verificationId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy hồ sơ xác thực với id: " + verificationId));
 
         if (verification.getStatus() != SellerVerificationStatus.NEEDS_REVIEW) {
@@ -285,11 +303,53 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
                 "Quản trị viên từ chối hồ sơ: " + request.rejectionReason().trim());
 
         log.info("Admin {} explicitly REJECTED seller verification {} for user {}",
-                admin.getEmail(), verificationId, verification.getUser().getEmail());
+                admin.getId(), verificationId, verification.getUser().getId());
 
         notificationService.sendSellerVerificationRejected(verification.getUser(), request.rejectionReason().trim());
 
         return sellerVerificationMapper.toResponse(saved);
+    }
+
+    @Override
+    @Transactional
+    public SellerVerificationResponse retryPendingVerification(UUID adminId, UUID verificationId) {
+        SellerVerification verification = sellerVerificationRepository.findByIdForUpdate(verificationId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy hồ sơ xác thực với id: " + verificationId));
+        if (verification.getStatus() != SellerVerificationStatus.EKYC_PENDING
+                || verification.getEkycStatus() != EkycStatus.PROVIDER_ERROR) {
+            throw new ConflictException("Chỉ được thử lại hồ sơ EKYC_PENDING có lỗi nhà cung cấp");
+        }
+        User admin = userRepository.findById(adminId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy thông tin Quản trị viên với id: " + adminId));
+        recordEvent(verification, VerificationEventType.EKYC_RETRY_REQUESTED,
+                SellerVerificationStatus.EKYC_PENDING, SellerVerificationStatus.EKYC_PENDING,
+                verification.getReasonCode(), "ADMIN", admin,
+                "Quản trị viên yêu cầu thử lại eKYC sau lỗi nhà cung cấp");
+        log.info("Admin {} requested eKYC retry for verification {}", adminId, verificationId);
+        return executeDecisionPipeline(verification, verification.getUser(), verification.getDocumentNumber(), "ADMIN");
+    }
+
+    @Override
+    @Transactional
+    public SellerVerificationResponse retryPendingVerificationSystem(UUID verificationId) {
+        SellerVerification verification = sellerVerificationRepository.findByIdForUpdate(verificationId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy hồ sơ xác thực với id: " + verificationId));
+        Instant now = Instant.now();
+        if (verification.getStatus() != SellerVerificationStatus.EKYC_PENDING
+                || verification.getEkycStatus() != EkycStatus.PROVIDER_ERROR
+                || verification.getNextRetryAt() == null
+                || verification.getNextRetryAt().isAfter(now)
+                || verification.getRecoveryAttempts() >= recoveryProperties.maxAttempts()) {
+            return sellerVerificationMapper.toResponse(verification);
+        }
+        verification.setRecoveryAttempts(verification.getRecoveryAttempts() + 1);
+        verification.setLastRetriedAt(now);
+        verification.setNextRetryAt(null);
+        recordEvent(verification, VerificationEventType.EKYC_RETRY_REQUESTED,
+                SellerVerificationStatus.EKYC_PENDING, SellerVerificationStatus.EKYC_PENDING,
+                verification.getReasonCode(), "SYSTEM", null,
+                "Hệ thống tự động thử lại eKYC sau lỗi nhà cung cấp");
+        return executeDecisionPipeline(verification, verification.getUser(), verification.getDocumentNumber(), "SYSTEM");
     }
 
     /**
@@ -301,6 +361,28 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
             String rawDocNumber,
             String actorType) {
 
+        Optional<SellerRiskResult> restriction = sellerRiskService.checkIdentityRestriction(verification);
+        if (restriction.isPresent() && restriction.get().status() == RiskStatus.BLOCK) {
+            SellerRiskResult result = restriction.get();
+            SellerVerificationStatus previousStatus = verification.getStatus();
+            verification.transitionTo(SellerVerificationStatus.REJECTED);
+            verification.setRiskStatus(RiskStatus.BLOCK);
+            verification.setRiskScore(result.riskScore());
+            verification.setRiskEvaluatedAt(Instant.now());
+            verification.setReasonCode(ReasonCode.PERMANENT_SELLER_BAN);
+            verification.setReviewSource(ReviewSource.SYSTEM);
+            verification.setReviewedAt(Instant.now());
+            verification.setRejectionReason(result.summary());
+            verification.setNextRetryAt(null);
+            recordEvent(verification, VerificationEventType.SYSTEM_REJECTED, previousStatus,
+                    SellerVerificationStatus.REJECTED, ReasonCode.PERMANENT_SELLER_BAN,
+                    "SYSTEM", null, "Hồ sơ bị từ chối do hạn chế danh tính còn hiệu lực");
+            notificationService.sendSellerVerificationRejected(user, result.summary());
+            return sellerVerificationMapper.toResponse(sellerVerificationRepository.save(verification));
+        }
+
+        // A retry/resubmission must not keep the previous attempt's user-facing error.
+        verification.setRejectionReason(null);
         SellerVerificationStatus currentStatus = verification.getStatus();
         verification.transitionTo(SellerVerificationStatus.EKYC_PENDING);
         recordEvent(verification, VerificationEventType.EKYC_STARTED, currentStatus,
@@ -312,7 +394,9 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
                 rawDocNumber,
                 verification.getDocumentFrontUrl(),
                 verification.getDocumentBackUrl(),
-                verification.getSelfieUrl()
+                verification.getSelfieUrl(),
+                verification.getVnptClientSession(),
+                verification.getVnptRequestToken()
         );
         EkycResult ekycResult = ekycService.verifyIdentity(ekycRequest);
 
@@ -324,6 +408,9 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
         verification.setLivenessScore(ekycResult.livenessScore());
         verification.setDocumentScore(ekycResult.documentScore());
         verification.setEkycCompletedAt(Instant.now());
+        if (ekycResult.status() != EkycStatus.PROVIDER_ERROR) {
+            verification.setNextRetryAt(null);
+        }
 
         // 2. Apply Decision Rules according to Section 24
         switch (ekycResult.status()) {
@@ -341,12 +428,12 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
                 switch (riskResult.status()) {
                     case CLEAR -> {
                         // CASE 1: eKYC PASS + Risk CLEAR => AUTO APPROVE + Grant SELLER role
-                        log.info("CASE 1: Auto-approving verification for user: {}", user.getEmail());
+                        log.info("CASE 1: Auto-approving verification for user ID: {}", user.getId());
                         verification.transitionTo(SellerVerificationStatus.APPROVED);
                         verification.setReviewSource(ReviewSource.SYSTEM);
                         verification.setReviewedAt(Instant.now());
                         verification.setRejectionReason(null);
-                        grantSellerRole(user);
+                        roleAssignmentService.grantRole(user.getId(), RoleCode.SELLER);
                         recordEvent(verification, VerificationEventType.SYSTEM_APPROVED,
                                 SellerVerificationStatus.EKYC_PENDING, SellerVerificationStatus.APPROVED,
                                 ReasonCode.NONE, "SYSTEM", null, "Hệ thống tự động phê duyệt hồ sơ người bán");
@@ -354,7 +441,7 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
                     }
                     case REVIEW -> {
                         // CASE 2: eKYC PASS + Risk REVIEW => NEEDS_REVIEW
-                        log.info("CASE 2: Escalating verification to Admin review for user: {}", user.getEmail());
+                        log.info("CASE 2: Escalating verification to Admin review for user ID: {}", user.getId());
                         verification.transitionTo(SellerVerificationStatus.NEEDS_REVIEW);
                         ReasonCode primaryReason = !riskResult.reasonCodes().isEmpty()
                                 ? riskResult.reasonCodes().get(0)
@@ -366,7 +453,7 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
                     }
                     case BLOCK -> {
                         // CASE 3: eKYC PASS + Risk BLOCK => AUTO REJECT
-                        log.warn("CASE 3: Auto-rejecting verification due to BLOCK risk for user: {}", user.getEmail());
+                        log.warn("CASE 3: Auto-rejecting verification due to BLOCK risk for user ID: {}", user.getId());
                         verification.transitionTo(SellerVerificationStatus.REJECTED);
                         verification.setReviewSource(ReviewSource.SYSTEM);
                         verification.setReviewedAt(Instant.now());
@@ -383,12 +470,17 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
                     case NOT_EVALUATED -> {
                         log.error("Unexpected risk evaluation status NOT_EVALUATED after evaluation");
                         verification.transitionTo(SellerVerificationStatus.NEEDS_REVIEW);
+                        verification.setReasonCode(ReasonCode.MANUAL_REVIEW_REQUIRED);
+                        recordEvent(verification, VerificationEventType.RISK_REVIEW_REQUIRED,
+                                SellerVerificationStatus.EKYC_PENDING, SellerVerificationStatus.NEEDS_REVIEW,
+                                ReasonCode.MANUAL_REVIEW_REQUIRED, "SYSTEM", null,
+                                "Không xác định được mức rủi ro; chuyển hồ sơ sang thẩm định thủ công");
                     }
                 }
             }
             case FAILED -> {
                 // CASE 4: Hard eKYC Failure => AUTO REJECT
-                log.warn("CASE 4: eKYC Hard failure for user: {}, reason: {}", user.getEmail(), ekycResult.reasonCode());
+                log.warn("CASE 4: eKYC Hard failure for user ID: {}, reason: {}", user.getId(), ekycResult.reasonCode());
                 verification.transitionTo(SellerVerificationStatus.REJECTED);
                 verification.setReviewSource(ReviewSource.SYSTEM);
                 verification.setReviewedAt(Instant.now());
@@ -406,7 +498,7 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
                 if (isUserFixable && verification.getResubmissionCount() < maxResubmissions) {
                     // CASE 5: User-fixable UNCERTAIN => RESUBMIT_REQUIRED
                     log.info("CASE 5: User-fixable eKYC uncertain for user: {}, reason: {}",
-                            user.getEmail(), ekycResult.reasonCode());
+                            user.getId(), ekycResult.reasonCode());
                     verification.transitionTo(SellerVerificationStatus.RESUBMIT_REQUIRED);
                     verification.setReviewSource(ReviewSource.SYSTEM);
                     verification.setRejectionReason(ekycResult.userMessage());
@@ -417,7 +509,7 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
                 } else {
                     // CASE 6: Non-user-fixable UNCERTAIN or exceeded resubmissions => NEEDS_REVIEW
                     log.info("CASE 6: Uncertain eKYC requiring Admin review for user: {}, reason: {}",
-                            user.getEmail(), ekycResult.reasonCode());
+                            user.getId(), ekycResult.reasonCode());
                     verification.transitionTo(SellerVerificationStatus.NEEDS_REVIEW);
                     recordEvent(verification, VerificationEventType.RISK_REVIEW_REQUIRED,
                             SellerVerificationStatus.EKYC_PENDING, SellerVerificationStatus.NEEDS_REVIEW,
@@ -428,12 +520,17 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
             case PROVIDER_ERROR -> {
                 // CASE 7 & 8: Provider Timeout / Unavailable => DO NOT REJECT, keep recoverable in EKYC_PENDING
                 log.warn("CASE 7 & 8: eKYC Provider Error for user: {}. Keeping verification in EKYC_PENDING",
-                        user.getEmail());
-                // Remains in EKYC_PENDING state for future background retry/recovery
+                        user.getId());
+                boolean isRecoverable = ekycResult.reasonCode() != ReasonCode.PROVIDER_REQUEST_REJECTED
+                        && ekycResult.reasonCode() != ReasonCode.PROVIDER_AUTH_FAILED;
+                verification.setNextRetryAt(isRecoverable && verification.getRecoveryAttempts() < recoveryProperties.maxAttempts()
+                        ? Instant.now().plusMillis(recoveryProperties.delayMs()) : null);
                 recordEvent(verification, VerificationEventType.EKYC_STARTED,
                         SellerVerificationStatus.EKYC_PENDING, SellerVerificationStatus.EKYC_PENDING,
                         ekycResult.reasonCode(), "SYSTEM", null,
-                        "Cổng eKYC gián đoạn hoặc quá thời gian phản hồi. Giữ trạng thái EKYC_PENDING để tự động phục hồi.");
+                        isRecoverable
+                                ? "Cổng eKYC gián đoạn hoặc quá thời gian phản hồi. Giữ trạng thái EKYC_PENDING để tự động phục hồi."
+                                : "Cổng eKYC từ chối yêu cầu (" + ekycResult.reasonCode() + "). Không tự động phục hồi.");
             }
             case NOT_STARTED, PENDING -> {
                 log.debug("Verification state pending/not-started");
@@ -442,17 +539,6 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
 
         SellerVerification finalSaved = sellerVerificationRepository.save(verification);
         return sellerVerificationMapper.toResponse(finalSaved);
-    }
-
-    private void grantSellerRole(User user) {
-        Role sellerRole = roleRepository.findByCodeWithPermissions(RoleCode.SELLER.name())
-                .orElseThrow(() -> new IllegalStateException("SELLER role not found in database"));
-
-        if (!user.hasRole(RoleCode.SELLER.name())) {
-            user.addRole(sellerRole);
-            userRepository.save(user);
-            log.info("Successfully granted SELLER role to user: {}", user.getEmail());
-        }
     }
 
     private void recordEvent(
@@ -478,10 +564,10 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
     }
 
     private String hashDocumentNumber(String documentNumber) {
-        if (documentNumber == null) return null;
+        String normalized = normalizeDocumentNumber(documentNumber);
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] encodedhash = digest.digest(documentNumber.trim().toUpperCase().getBytes(StandardCharsets.UTF_8));
+            byte[] encodedhash = digest.digest(normalized.getBytes(StandardCharsets.UTF_8));
             StringBuilder hexString = new StringBuilder(2 * encodedhash.length);
             for (byte b : encodedhash) {
                 String hex = Integer.toHexString(0xff & b);
@@ -497,13 +583,21 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
     }
 
     private String maskDocumentNumber(String documentNumber) {
-        if (documentNumber == null || documentNumber.isBlank()) return null;
-        String trimmed = documentNumber.trim();
-        if (trimmed.length() <= 4) {
-            return "*".repeat(trimmed.length());
+        String normalized = normalizeDocumentNumber(documentNumber);
+        if (normalized.length() <= 4) {
+            return "*".repeat(normalized.length());
         }
         int unmaskedCount = 4;
-        int maskedCount = trimmed.length() - unmaskedCount;
-        return "*".repeat(maskedCount) + trimmed.substring(maskedCount);
+        int maskedCount = normalized.length() - unmaskedCount;
+        return "*".repeat(maskedCount) + normalized.substring(maskedCount);
+    }
+
+    private String normalizeDocumentNumber(String documentNumber) {
+        String normalized = documentNumber == null ? ""
+                : documentNumber.replaceAll("[^A-Za-z0-9]", "").toUpperCase(Locale.ROOT);
+        if (normalized.isEmpty()) {
+            throw new BadRequestException("Document number must contain letters or digits");
+        }
+        return normalized;
     }
 }

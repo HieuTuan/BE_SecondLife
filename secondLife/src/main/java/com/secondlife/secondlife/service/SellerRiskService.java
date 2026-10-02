@@ -5,7 +5,11 @@ import com.secondlife.secondlife.dto.risk.SellerRiskResult;
 import com.secondlife.secondlife.entity.SellerVerification;
 import com.secondlife.secondlife.entity.User;
 
+import java.util.Optional;
+
 public interface SellerRiskService {
 
     SellerRiskResult evaluateRisk(User user, SellerVerification verification, EkycResult ekycResult);
+
+    Optional<SellerRiskResult> checkIdentityRestriction(SellerVerification verification);
 }

@@ -3,6 +3,7 @@ package com.secondlife.secondlife.enums;
 public enum VerificationEventType {
     SUBMITTED,
     EKYC_STARTED,
+    EKYC_RETRY_REQUESTED,
     EKYC_PASSED,
     EKYC_FAILED,
     RESUBMISSION_REQUIRED,

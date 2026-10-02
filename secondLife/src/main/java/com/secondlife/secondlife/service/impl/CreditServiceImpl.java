@@ -7,6 +7,7 @@ import com.secondlife.secondlife.repository.TopupPackageRepository;
 import com.secondlife.secondlife.repository.UserCreditRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.CreditService;
+import com.secondlife.secondlife.exception.ConflictException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,15 +51,7 @@ public class CreditServiceImpl implements CreditService {
     @Override
     @Transactional
     public UserCredit purchaseTopupPackage(UUID userId, UUID packageId) {
-        TopupPackage pkg = topupPackageRepository.findById(packageId)
-                .orElseThrow(() -> new RuntimeException("Topup package not found"));
-
-        UserCredit userCredit = getUserCredit(userId);
-        
-        userCredit.setPostCredits(userCredit.getPostCredits() + pkg.getPostCredits());
-        userCredit.setChatCredits(userCredit.getChatCredits() + pkg.getChatCredits());
-        
-        return userCreditRepository.save(userCredit);
+        throw new ConflictException("Legacy topup purchase is unavailable until payment processing is integrated");
     }
 
     @Override

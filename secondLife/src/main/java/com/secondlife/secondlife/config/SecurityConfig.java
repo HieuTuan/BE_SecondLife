@@ -4,12 +4,13 @@ import com.secondlife.secondlife.security.jwt.JwtAccessDeniedHandler;
 import com.secondlife.secondlife.security.jwt.JwtAuthenticationEntryPoint;
 import com.secondlife.secondlife.security.jwt.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authorization.AuthorityAuthorizationManager;
+import org.springframework.security.authorization.AuthorizationManagers;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
-import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -27,16 +28,14 @@ import java.util.List;
 
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity(prePostEnabled = true)
+@EnableConfigurationProperties(CorsProperties.class)
 @RequiredArgsConstructor
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final JwtAuthenticationEntryPoint authenticationEntryPoint;
     private final JwtAccessDeniedHandler accessDeniedHandler;
-
-    @Value("${app.cors.allowed-origins}")
-    private String allowedOrigins;
+    private final CorsProperties corsProperties;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -57,12 +56,19 @@ public class SecurityConfig {
                                 "/swagger-resources/**",
                                 "/webjars/**"
                         ).permitAll()
+                        .requestMatchers("/api/auth/change-password").authenticated()
+                        .requestMatchers("/api/payment-callbacks/mock").permitAll()
                         // Public auth endpoints
-                        .requestMatchers("/api/v1/auth/**").permitAll()
+                        .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/api/health").permitAll()
                         .requestMatchers("/error").permitAll()
-                        // Public post endpoints
-                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/posts").permitAll()
-                        // Require authentication for all other requests
+                        // Administrative role assignment is also guarded at the filter boundary.
+                        .requestMatchers("/api/admin/permissions", "/api/admin/permissions/**",
+                                "/api/admin/roles", "/api/admin/roles/**",
+                                "/api/v1/admin/users/*/roles", "/api/v1/admin/users/*/role-changes")
+                        .access(AuthorizationManagers.allOf(
+                                AuthorityAuthorizationManager.hasRole("ADMIN"),
+                                AuthorityAuthorizationManager.hasAuthority("ADMIN_RBAC_MANAGE")))
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
@@ -73,7 +79,7 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        List<String> origins = Arrays.stream(allowedOrigins.split(","))
+        List<String> origins = Arrays.stream(corsProperties.allowedOrigins().split(","))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .toList();

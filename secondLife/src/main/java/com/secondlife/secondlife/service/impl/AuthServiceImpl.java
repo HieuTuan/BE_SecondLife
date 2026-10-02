@@ -128,7 +128,6 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    @Transactional
     public TokenResponse refresh(RefreshTokenRequest request) {
         return tokenService.rotateRefreshToken(request.refreshToken());
     }
@@ -181,6 +180,7 @@ public class AuthServiceImpl implements AuthService {
 
         User user = tokenService.verifyAndConsumePasswordResetOtp(request.email(), request.otp());
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        user.bumpTokenVersion();
         userRepository.save(user);
 
         // Revoke all existing sessions/refresh tokens
@@ -222,6 +222,9 @@ public class AuthServiceImpl implements AuthService {
             }
             if (user.getAccountStatus() == AccountStatus.DISABLED) {
                 throw new ForbiddenException("Account is disabled. Please contact support.");
+            }
+            if (user.getAccountStatus() != AccountStatus.ACTIVE) {
+                throw new ForbiddenException("Account is not active. Access denied.");
             }
 
             if (!user.isEmailVerified()) {

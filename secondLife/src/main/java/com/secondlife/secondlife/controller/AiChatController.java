@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -26,6 +27,7 @@ public class AiChatController {
     private final CurrentUserProvider currentUserProvider;
 
     @PostMapping
+    @PreAuthorize("hasAuthority('AI_CHAT_SELF')")
     @Operation(summary = "Send a message to the AI Chatbot")
     public ResponseEntity<ApiResponse<AiChatResponse>> chat(
             @AuthenticationPrincipal CustomUserDetails userDetails,

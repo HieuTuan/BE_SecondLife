@@ -30,29 +30,34 @@ public class EkycServiceImpl implements EkycService {
         int attempts = 0;
         EkycResult lastResult = null;
 
-        while (attempts <= maxRetries) {
+        // VNPT uploads each image once per request. Its transport handles one 401 retry;
+        // later provider recovery is handled by the background scheduler.
+        int retryLimit = "VNPT_EKYC".equals(ekycProviderClient.getProviderName()) ? 0 : maxRetries;
+        while (attempts <= retryLimit) {
             attempts++;
             try {
                 lastResult = ekycProviderClient.verify(request);
 
                 // If result is not a temporary provider error, return immediately
-                if (lastResult.status() != EkycStatus.PROVIDER_ERROR) {
+                if (lastResult.status() != EkycStatus.PROVIDER_ERROR
+                        || lastResult.reasonCode() == ReasonCode.PROVIDER_AUTH_FAILED
+                        || lastResult.reasonCode() == ReasonCode.PROVIDER_REQUEST_REJECTED) {
                     log.info("eKYC verification finished on attempt {} with status: {}, reason: {}",
                             attempts, lastResult.status(), lastResult.reasonCode());
                     return lastResult;
                 }
 
                 log.warn("eKYC provider reported recoverable error on attempt {}/{}: {}",
-                        attempts, maxRetries + 1, lastResult.reasonCode());
+                        attempts, retryLimit + 1, lastResult.reasonCode());
 
             } catch (Exception ex) {
                 log.error("Exception during eKYC provider call on attempt {}/{}: {}",
-                        attempts, maxRetries + 1, ex.getMessage());
+                        attempts, retryLimit + 1, ex.getClass().getSimpleName());
                 lastResult = EkycResult.providerError(
                         ReasonCode.PROVIDER_UNAVAILABLE,
                         ekycProviderClient.getProviderName(),
                         null,
-                        "Lỗi hệ thống khi kết nối đến cổng eKYC: " + ex.getMessage()
+                        "Không kết nối được tới cổng eKYC"
                 );
             }
         }

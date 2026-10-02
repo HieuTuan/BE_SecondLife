@@ -94,6 +94,7 @@ public class UserServiceImpl implements UserService {
         }
 
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        user.bumpTokenVersion();
         userRepository.save(user);
 
         // Revoke all active sessions upon password change
@@ -143,7 +144,12 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public UserAdminResponse updateAdminUserStatus(UUID currentAdminId, UUID targetUserId, AdminStatusUpdateRequest request) {
-        User targetUser = userRepository.findByIdWithAuthorities(targetUserId)
+        if (request == null || request.status() == null || request.status() == AccountStatus.PENDING_VERIFICATION) {
+            throw new BadRequestException("Admin status must be ACTIVE, LOCKED or DISABLED");
+        }
+        roleRepository.findByCodeForUpdate(RoleCode.ADMIN.name())
+                .orElseThrow(() -> new ConflictException("ADMIN role is not initialized"));
+        User targetUser = userRepository.findByIdForRoleUpdate(targetUserId)
                 .orElseThrow(() -> new NotFoundException("User not found with id: " + targetUserId));
 
         if (request.status() == AccountStatus.LOCKED || request.status() == AccountStatus.DISABLED) {
@@ -151,7 +157,7 @@ public class UserServiceImpl implements UserService {
                 throw new BadRequestException("Administrators cannot lock or disable their own account");
             }
 
-            if (targetUser.hasRole(RoleCode.ADMIN.name())) {
+            if (targetUser.hasRole(RoleCode.ADMIN.name()) && targetUser.getAccountStatus() == AccountStatus.ACTIVE) {
                 long activeAdminCount = userRepository.countActiveAdmins();
                 if (activeAdminCount <= 1) {
                     throw new BadRequestException("Cannot disable or lock the last remaining active Administrator account");

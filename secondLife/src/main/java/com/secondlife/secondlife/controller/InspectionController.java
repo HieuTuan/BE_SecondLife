@@ -23,7 +23,6 @@ import java.util.UUID;
 @RequestMapping("/api/v1/inspector")
 @RequiredArgsConstructor
 @Tag(name = "Inspection", description = "APIs dành cho Inspector và Inspection Center Manager")
-@PreAuthorize("hasRole('INSPECTION_CENTER')")
 public class InspectionController {
 
     private final InspectionService inspectionService;
@@ -31,6 +30,7 @@ public class InspectionController {
 
     /** Inspector: Xem danh sách đơn kiểm định được phân công */
     @GetMapping("/orders")
+    @PreAuthorize("hasAuthority('INSPECTION_ORDER_READ_SELF')")
     @Operation(summary = "Inspector xem đơn kiểm định của mình")
     public ResponseEntity<List<InspectionOrderResponse>> getMyOrders(
             @AuthenticationPrincipal CustomUserDetails userDetails) {
@@ -40,6 +40,7 @@ public class InspectionController {
 
     /** Manager: Xem tất cả đơn (có thể lọc theo status) */
     @GetMapping("/orders/all")
+    @PreAuthorize("hasAuthority('INSPECTION_ORDER_READ_ANY')")
     @Operation(summary = "Manager xem tất cả đơn kiểm định")
     public ResponseEntity<Page<InspectionOrderResponse>> getAllOrders(
             @RequestParam(required = false) String status,
@@ -49,6 +50,7 @@ public class InspectionController {
 
     /** Manager: Phân công nhân viên cho đơn kiểm định */
     @PostMapping("/orders/{orderId}/assign")
+    @PreAuthorize("hasAuthority('INSPECTION_ORDER_ASSIGN')")
     @Operation(summary = "Manager phân công Inspector cho đơn kiểm định")
     public ResponseEntity<InspectionOrderResponse> assignInspector(
             @PathVariable UUID orderId,
@@ -58,6 +60,7 @@ public class InspectionController {
 
     /** Inspector: Nộp kết quả kiểm định */
     @PostMapping("/orders/{orderId}/result")
+    @PreAuthorize("hasAuthority('INSPECTION_REPORT_SUBMIT')")
     @Operation(summary = "Inspector nộp kết quả kiểm định (PASSED/FAILED). Nếu PASSED → AI scan lại → ACTIVE")
     public ResponseEntity<InspectionOrderResponse> submitResult(
             @AuthenticationPrincipal CustomUserDetails userDetails,

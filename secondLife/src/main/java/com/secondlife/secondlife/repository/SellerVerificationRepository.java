@@ -7,7 +7,9 @@ import com.secondlife.secondlife.enums.RiskStatus;
 import com.secondlife.secondlife.enums.SellerVerificationStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import java.time.Instant;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -16,6 +18,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+
+import jakarta.persistence.LockModeType;
 
 @Repository
 public interface SellerVerificationRepository extends JpaRepository<SellerVerification, UUID> {
@@ -60,4 +64,15 @@ public interface SellerVerificationRepository extends JpaRepository<SellerVerifi
            "LEFT JOIN FETCH sv.reviewedBy " +
            "WHERE sv.id = :id")
     Optional<SellerVerification> findByIdWithDetails(@Param("id") UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT sv FROM SellerVerification sv WHERE sv.id = :id")
+    Optional<SellerVerification> findByIdForUpdate(@Param("id") UUID id);
+
+    @Query("SELECT sv.id FROM SellerVerification sv WHERE sv.status = 'EKYC_PENDING' " +
+            "AND sv.ekycStatus = 'PROVIDER_ERROR' AND sv.nextRetryAt <= :now " +
+            "AND sv.recoveryAttempts < :maxAttempts ORDER BY sv.nextRetryAt")
+    List<UUID> findDueRecoveryIds(@Param("now") Instant now,
+                                  @Param("maxAttempts") int maxAttempts,
+                                  Pageable pageable);
 }

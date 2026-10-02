@@ -5,21 +5,28 @@ import com.secondlife.secondlife.dto.request.*;
 import com.secondlife.secondlife.dto.response.AuthResponse;
 import com.secondlife.secondlife.dto.response.TokenResponse;
 import com.secondlife.secondlife.service.AuthService;
+import com.secondlife.secondlife.service.UserService;
+import com.secondlife.secondlife.security.CurrentUserProvider;
+import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/v1/auth")
+@RequestMapping("/api/auth")
 @RequiredArgsConstructor
 @Tag(name = "Authentication", description = "User registration, authentication, token refresh, and password reset APIs")
 public class AuthController {
 
     private final AuthService authService;
+    private final UserService userService;
+    private final CurrentUserProvider currentUserProvider;
 
     @PostMapping("/register")
     @Operation(summary = "Register a new user account (defaults to BUYER role)")
@@ -50,14 +57,14 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.success("Logout successful"));
     }
 
-    @PostMapping("/verify-email")
+    @PostMapping("/email-verification/confirm")
     @Operation(summary = "Verify account email using 6-digit OTP code")
     public ResponseEntity<ApiResponse<Void>> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
         authService.verifyEmail(request);
         return ResponseEntity.ok(ApiResponse.success("Email verified successfully"));
     }
 
-    @PostMapping("/resend-verification")
+    @PostMapping("/email-verification/send")
     @Operation(summary = "Resend account verification email")
     public ResponseEntity<ApiResponse<Void>> resendVerification(@Valid @RequestBody ResendVerificationRequest request) {
         authService.resendVerification(request);
@@ -76,6 +83,17 @@ public class AuthController {
     public ResponseEntity<ApiResponse<Void>> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         authService.resetPassword(request);
         return ResponseEntity.ok(ApiResponse.success("Password has been reset successfully"));
+    }
+
+    @PostMapping("/change-password")
+    @Operation(summary = "Change own password and revoke active sessions")
+    @PreAuthorize("hasAuthority('PASSWORD_CHANGE_SELF')")
+    public ResponseEntity<ApiResponse<Void>> changePassword(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @Valid @RequestBody ChangePasswordRequest request
+    ) {
+        userService.changePassword(currentUserProvider.resolveUserId(userDetails), request);
+        return ResponseEntity.ok(ApiResponse.success("Password changed successfully. All active sessions revoked."));
     }
 
     @PostMapping("/google")

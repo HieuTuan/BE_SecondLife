@@ -17,5 +17,12 @@ public record EkycRequest(
         @NotBlank(message = "URL ảnh mặt sau không được để trống")
         String documentBackUrl,
 
-        String selfieUrl
-) {}
+        String selfieUrl,
+        String clientSession,
+        String token
+) {
+    public EkycRequest(VerificationType documentType, String documentNumber,
+                       String documentFrontUrl, String documentBackUrl, String selfieUrl) {
+        this(documentType, documentNumber, documentFrontUrl, documentBackUrl, selfieUrl, null, null);
+    }
+}

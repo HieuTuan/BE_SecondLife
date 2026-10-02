@@ -8,6 +8,8 @@ import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.entity.UserRole;
 import com.secondlife.secondlife.enums.AccountStatus;
+import com.secondlife.secondlife.exception.*;
+import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.RoleRepository;
@@ -37,6 +39,7 @@ public class InspectionServiceImpl implements InspectionService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
+    private final UserMapper userMapper;
     @Qualifier("googleGenAiChatModel")
     private final org.springframework.ai.chat.model.ChatModel googleChatModel;
 
@@ -64,10 +67,14 @@ public class InspectionServiceImpl implements InspectionService {
     @Transactional
     public InspectionOrderResponse assignInspector(UUID orderId, UUID inspectorId) {
         InspectionOrder order = inspectionOrderRepository.findById(orderId)
-                .orElseThrow(() -> new RuntimeException("Inspection order not found"));
+                .orElseThrow(() -> new NotFoundException("Inspection order not found"));
 
         User inspector = userRepository.findById(inspectorId)
-                .orElseThrow(() -> new RuntimeException("Inspector not found"));
+                .orElseThrow(() -> new NotFoundException("Inspector not found"));
+
+        if (inspector.getAccountStatus() != AccountStatus.ACTIVE || !inspector.hasRole("INSPECTOR")) {
+            throw new BadRequestException("Assigned user must be an active INSPECTOR");
+        }
 
         order.setInspector(inspector);
         return InspectionOrderResponse.from(inspectionOrderRepository.save(order));
@@ -77,13 +84,13 @@ public class InspectionServiceImpl implements InspectionService {
     @Transactional
     public InspectionOrderResponse submitResult(UUID orderId, UUID inspectorId, InspectionResultRequest request) {
         InspectionOrder order = inspectionOrderRepository.findById(orderId)
-                .orElseThrow(() -> new RuntimeException("Inspection order not found"));
+                .orElseThrow(() -> new NotFoundException("Inspection order not found"));
 
-        if (!order.getInspector().getId().equals(inspectorId)) {
-            throw new RuntimeException("Unauthorized: This order is not assigned to you");
+        if (order.getInspector() == null || !order.getInspector().getId().equals(inspectorId)) {
+            throw new ForbiddenException("This order is not assigned to you");
         }
         if (!"PENDING".equals(order.getStatus())) {
-            throw new RuntimeException("Order is already completed");
+            throw new ConflictException("Order is already completed");
         }
 
         order.setNote(request.getNote());
@@ -108,7 +115,7 @@ public class InspectionServiceImpl implements InspectionService {
             }
             postRepository.save(post);
         } else {
-            throw new RuntimeException("Invalid status. Must be PASSED or FAILED");
+            throw new BadRequestException("Invalid status. Must be PASSED or FAILED");
         }
 
         return InspectionOrderResponse.from(inspectionOrderRepository.save(order));
@@ -118,7 +125,7 @@ public class InspectionServiceImpl implements InspectionService {
     @Transactional
     public void createInspectorAccount(String email, String fullName, String password, UUID managerId) {
         if (userRepository.existsByEmailIgnoreCase(email)) {
-            throw new RuntimeException("Email already exists");
+            throw new ConflictException("Email already exists");
         }
 
         Role inspectorRole = roleRepository.findByCode("INSPECTOR")
@@ -143,6 +150,7 @@ public class InspectionServiceImpl implements InspectionService {
         return userRepository.findAll().stream()
                 .filter(u -> u.getUserRoles().stream()
                         .anyMatch(ur -> "INSPECTOR".equals(ur.getRole().getCode())))
+                .map(userMapper::toSummaryResponse)
                 .collect(Collectors.toList());
     }
 

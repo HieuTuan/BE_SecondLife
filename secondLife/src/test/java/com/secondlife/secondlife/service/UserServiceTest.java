@@ -132,13 +132,22 @@ class UserServiceTest {
     @Test
     void updateAdminUserStatus_WhenSelfLocking_ShouldThrowBadRequest() {
         AdminStatusUpdateRequest request = new AdminStatusUpdateRequest(AccountStatus.LOCKED);
-        when(userRepository.findByIdWithAuthorities(adminId)).thenReturn(Optional.of(admin));
+        when(roleRepository.findByCodeForUpdate("ADMIN")).thenReturn(Optional.of(new Role("ADMIN", "Admin", null)));
+        when(userRepository.findByIdForRoleUpdate(adminId)).thenReturn(Optional.of(admin));
 
         BadRequestException ex = assertThrows(BadRequestException.class, () ->
                 userService.updateAdminUserStatus(adminId, adminId, request)
         );
 
         assertTrue(ex.getMessage().contains("own account"));
+    }
+
+    @Test
+    void adminCannotMoveAnAccountToPendingVerification() {
+        assertThrows(BadRequestException.class, () -> userService.updateAdminUserStatus(adminId, UUID.randomUUID(),
+                new AdminStatusUpdateRequest(AccountStatus.PENDING_VERIFICATION)));
+        verifyNoInteractions(roleRepository);
+        verify(userRepository, never()).save(any());
     }
 
     @Test
@@ -150,7 +159,8 @@ class UserServiceTest {
 
         AdminStatusUpdateRequest request = new AdminStatusUpdateRequest(AccountStatus.LOCKED);
 
-        when(userRepository.findByIdWithAuthorities(otherAdminId)).thenReturn(Optional.of(otherAdmin));
+        when(roleRepository.findByCodeForUpdate("ADMIN")).thenReturn(Optional.of(adminRole));
+        when(userRepository.findByIdForRoleUpdate(otherAdminId)).thenReturn(Optional.of(otherAdmin));
         when(userRepository.countActiveAdmins()).thenReturn(1L);
 
         BadRequestException ex = assertThrows(BadRequestException.class, () ->
@@ -192,7 +202,8 @@ class UserServiceTest {
         User targetUser = new User("target@example.com", "pass", AccountStatus.ACTIVE);
         AdminStatusUpdateRequest request = new AdminStatusUpdateRequest(AccountStatus.LOCKED);
 
-        when(userRepository.findByIdWithAuthorities(targetUserId)).thenReturn(Optional.of(targetUser));
+        when(roleRepository.findByCodeForUpdate("ADMIN")).thenReturn(Optional.of(new Role("ADMIN", "Admin", null)));
+        when(userRepository.findByIdForRoleUpdate(targetUserId)).thenReturn(Optional.of(targetUser));
         when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
 
         userService.updateAdminUserStatus(adminId, targetUserId, request);
