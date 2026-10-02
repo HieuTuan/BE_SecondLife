@@ -4,6 +4,7 @@ import com.secondlife.secondlife.dto.response.WalletResponseDTO;
 import com.secondlife.secondlife.entity.UserWallet;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
+import com.secondlife.secondlife.service.DepositService;
 import com.secondlife.secondlife.service.WalletService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -20,6 +21,7 @@ import java.util.UUID;
 public class WalletController {
 
     private final WalletService walletService;
+    private final DepositService depositService;
     private final CurrentUserProvider currentUserProvider;
 
     @GetMapping("/me")
@@ -38,14 +40,12 @@ public class WalletController {
         return ResponseEntity.ok(dto);
     }
 
-    // A simple endpoint for testing/depositing money to one's own wallet
-    @PostMapping("/me/deposit")
+    @PostMapping("/deposit-request")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<String> depositMoney(
+    public ResponseEntity<com.secondlife.secondlife.dto.response.DepositResponseDTO> createDepositRequest(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @RequestParam BigDecimal amount) {
+            @jakarta.validation.Valid @RequestBody com.secondlife.secondlife.dto.request.DepositCreateRequestDTO requestDTO) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        walletService.deposit(userId, amount, UUID.randomUUID());
-        return ResponseEntity.ok("Deposited successfully");
+        return ResponseEntity.ok(depositService.createDepositRequest(userId, requestDTO));
     }
 }
