@@ -22,4 +22,8 @@ public interface NegotiationRepository extends JpaRepository<Negotiation, UUID> 
     long countRejectedNegotiations(@Param("postId") UUID postId, @Param("buyerId") UUID buyerId);
 
     boolean existsByPostIdAndBuyerIdAndStatusIn(UUID postId, UUID buyerId, List<NegotiationStatus> statuses);
+
+    org.springframework.data.domain.Page<Negotiation> findByBuyerId(UUID buyerId, org.springframework.data.domain.Pageable pageable);
+
+    org.springframework.data.domain.Page<Negotiation> findBySellerId(UUID sellerId, org.springframework.data.domain.Pageable pageable);
 }
