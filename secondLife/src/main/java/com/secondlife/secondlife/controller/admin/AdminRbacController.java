@@ -56,7 +56,7 @@ public class AdminRbacController {
     }
 
     @PostMapping("/permissions")
-    @Operation(summary = "Create a custom permission with allowed roles")
+    @Operation(summary = "Initialize a missing permission defined and implemented by the backend")
     public ResponseEntity<ApiResponse<PermissionResponse>> createPermission(
             @Valid @RequestBody CreatePermissionRequest request) {
         PermissionResponse response = rbacService.createPermission(request);

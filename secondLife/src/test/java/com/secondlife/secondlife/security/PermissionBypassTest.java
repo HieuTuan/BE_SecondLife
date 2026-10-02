@@ -51,13 +51,13 @@ class PermissionBypassTest {
 
     @Test
     @WithMockUser(roles = "BUYER")
-    void buyerCanCallAdminApiWhenPermissionsAreDisabled() throws Exception {
+    void legacyDisableFlagCannotBypassMethodAuthorization() throws Exception {
         UUID postId = UUID.randomUUID();
 
         mockMvc.perform(post("/api/v1/admin/posts/{postId}/approve", postId))
-                .andExpect(status().isOk());
+                .andExpect(status().isForbidden());
 
-        verify(postService).approvePost(postId);
+        verifyNoInteractions(postService);
     }
 
     @Test

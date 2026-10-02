@@ -1,6 +1,10 @@
 package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.dto.request.PostInitRequest;
+import com.secondlife.secondlife.dto.request.PostSubmitRequest;
+import com.secondlife.secondlife.dto.response.PostFinalizeResponse;
+import com.secondlife.secondlife.dto.response.PostSubmitResponse;
+import jakarta.validation.Valid;
 import com.secondlife.secondlife.dto.response.PostInitResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
@@ -35,21 +39,20 @@ public class PostController {
 
     @PostMapping("/finalize-chat/{sessionId}")
     @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
-    public ResponseEntity<String> finalizeChat(
+    public ResponseEntity<PostFinalizeResponse> finalizeChat(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID sessionId) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        String description = postService.finalizeChatAndDescription(userId, sessionId);
-        return ResponseEntity.ok(description);
+        return ResponseEntity.ok(postService.finalizeChatAndDescription(userId, sessionId));
     }
 
     @PostMapping("/submit/{postId}")
     @PreAuthorize("hasAuthority('LISTING_PUBLISH_SELF')")
-    public ResponseEntity<String> submitPost(
+    public ResponseEntity<PostSubmitResponse> submitPost(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @PathVariable UUID postId) {
+            @PathVariable UUID postId,
+            @Valid @RequestBody PostSubmitRequest request) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        postService.submitPost(userId, postId);
-        return ResponseEntity.ok("Post submitted successfully");
+        return ResponseEntity.ok(postService.submitPost(userId, postId, request));
     }
 }

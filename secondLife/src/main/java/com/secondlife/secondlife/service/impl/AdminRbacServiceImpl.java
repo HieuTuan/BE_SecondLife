@@ -59,15 +59,23 @@ public class AdminRbacServiceImpl implements AdminRbacService {
     @Transactional
     public PermissionResponse createPermission(CreatePermissionRequest request) {
         String code = request.code();
-        if (permissionRepository.existsByCode(code) || systemPermission(code)) {
-            throw new ConflictException("Permission code already exists or is reserved by the system");
+        if (permissionRepository.existsByCode(code)) {
+            throw new ConflictException("Permission code already exists");
         }
-        if (code.startsWith("ROLE_") || code.startsWith("ADMIN_")) {
-            throw new BadRequestException("ROLE_ and ADMIN_ permission prefixes are reserved");
+        PermissionCode definedCode;
+        try {
+            definedCode = PermissionCode.valueOf(code);
+        } catch (IllegalArgumentException ex) {
+            throw new BadRequestException("Permission must be defined and implemented by the backend");
         }
-        Set<String> roles = validateAssignableRoles(request.assignableRoles());
+        if (!definedCode.isImplemented()) {
+            throw new BadRequestException("Permission has no implemented API operation");
+        }
         Permission permission = new Permission(code, request.name().trim(), request.description());
-        permission.getAssignableRoles().addAll(roles);
+        Set<String> roles = validateAssignableRoles(request.assignableRoles());
+        if (!roles.equals(assignableRoles(permission))) {
+            throw new BadRequestException("System permission assignment policy is fixed");
+        }
         try {
             return toPermissionResponse(permissionRepository.saveAndFlush(permission));
         } catch (DataIntegrityViolationException ex) {
@@ -271,12 +279,14 @@ public class AdminRbacServiceImpl implements AdminRbacService {
     private boolean assignable(RoleCode role, PermissionCode permission) {
         if (role == RoleCode.ADMIN) return false;
         return switch (permission) {
-            case PROFILE_READ_SELF, PROFILE_UPDATE_SELF, PASSWORD_CHANGE_SELF -> true;
+            case PROFILE_READ_SELF, PROFILE_UPDATE_SELF, PASSWORD_CHANGE_SELF, AI_CHAT_SELF, MEDIA_UPLOAD_SELF -> true;
             case SELLER_VERIFICATION_SUBMIT -> role == RoleCode.BUYER;
             case SELLER_VERIFICATION_READ_SELF -> role == RoleCode.BUYER || role == RoleCode.SELLER;
             case LISTING_CREATE_SELF, LISTING_PUBLISH_SELF, CREDIT_READ_SELF, CREDIT_PURCHASE_SELF ->
                     role == RoleCode.SELLER;
-            case INSPECTION_REPORT_SUBMIT -> role == RoleCode.INSPECTOR;
+            case INSPECTION_REPORT_SUBMIT, INSPECTION_ORDER_READ_SELF -> role == RoleCode.INSPECTOR;
+            case INSPECTION_ORDER_READ_ANY, INSPECTION_ORDER_ASSIGN, INSPECTION_STAFF_MANAGE ->
+                    role == RoleCode.INSPECTION_CENTER;
             case USER_READ_ANY, SELLER_VERIFICATION_READ_ANY, ROLE_READ,
                  STAFF_LISTING_REVIEW, STAFF_FRAUD_REVIEW, STAFF_DISPUTE_REVIEW,
                  STAFF_PAYOUT_REVIEW, STAFF_PAYOUT_HOLD, STAFF_USER_WARN,
@@ -284,7 +294,7 @@ public class AdminRbacServiceImpl implements AdminRbacService {
             case ADMIN_STAFF_MANAGE, ADMIN_RBAC_MANAGE, ADMIN_PRICING_MANAGE,
                  ADMIN_COMMISSION_MANAGE, ADMIN_CONFIG_MANAGE, ADMIN_PERMANENT_BAN,
                  ADMIN_HIGH_VALUE_PAYOUT, USER_STATUS_UPDATE, SELLER_VERIFICATION_REVIEW,
-                 POST_REVIEW, INSPECTION_CENTER_ACCOUNT_MANAGE -> false;
+                 POST_REVIEW, INSPECTION_CENTER_ACCOUNT_MANAGE, POST_CREATE, POST_UPDATE, POST_DELETE -> false;
         };
     }
 

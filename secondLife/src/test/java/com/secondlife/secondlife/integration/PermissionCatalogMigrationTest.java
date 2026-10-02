@@ -39,7 +39,7 @@ class PermissionCatalogMigrationTest {
 
         Flyway flyway = Flyway.configure().dataSource(postgres.getJdbcUrl(),
                 postgres.getUsername(), postgres.getPassword()).load();
-        assertEquals(1, flyway.migrate().migrationsExecuted);
+        assertEquals(2, flyway.migrate().migrationsExecuted);
         assertTrue(flyway.validateWithResult().validationSuccessful);
 
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(),

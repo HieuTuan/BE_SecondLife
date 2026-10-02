@@ -9,6 +9,10 @@ import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.repository.AiChatMessageRepository;
 import com.secondlife.secondlife.repository.AiChatSessionRepository;
 import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.repository.PostRepository;
+import com.secondlife.secondlife.exception.ForbiddenException;
+import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.service.AiChatService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -33,6 +37,7 @@ public class AiChatServiceImpl implements AiChatService {
     private final AiChatSessionRepository sessionRepository;
     private final AiChatMessageRepository messageRepository;
     private final UserRepository userRepository;
+    private final PostRepository postRepository;
     private final com.secondlife.secondlife.service.CreditService creditService;
 
     public AiChatServiceImpl(@org.springframework.beans.factory.annotation.Qualifier("ollamaChatModel") org.springframework.ai.chat.model.ChatModel ollamaChatModel,
@@ -40,12 +45,14 @@ public class AiChatServiceImpl implements AiChatService {
             AiChatSessionRepository sessionRepository,
             AiChatMessageRepository messageRepository,
             UserRepository userRepository,
+            PostRepository postRepository,
             com.secondlife.secondlife.service.CreditService creditService) {
         this.ollamaChatClient = ChatClient.builder(ollamaChatModel).build();
         this.googleChatClient = ChatClient.builder(googleChatModel).build();
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
         this.userRepository = userRepository;
+        this.postRepository = postRepository;
         this.creditService = creditService;
     }
 
@@ -53,13 +60,15 @@ public class AiChatServiceImpl implements AiChatService {
     @Transactional
     public AiChatResponse processChat(AiChatRequest request, UUID currentUserId) {
         User user = userRepository.findById(currentUserId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new NotFoundException("User not found"));
 
         AiChatSession session;
         if (request.getSessionId() != null) {
             session = sessionRepository.findById(request.getSessionId())
-                    .orElseThrow(() -> new RuntimeException("Session not found"));
-            
+                    .orElseThrow(() -> new NotFoundException("Session not found"));
+            requireSessionOwner(session, currentUserId);
+            requirePostOwner(session.getPostId(), currentUserId);
+            if (session.isCompleted()) throw new ConflictException("Session is already completed");
             if (session.getMessageCount() >= 5) {
                 try {
                     creditService.deductChatCredit(currentUserId);
@@ -68,6 +77,7 @@ public class AiChatServiceImpl implements AiChatService {
                 }
             }
         } else {
+            requirePostOwner(request.getPostId(), currentUserId);
             session = new AiChatSession();
             session.setUser(user);
             session.setPostId(request.getPostId());
@@ -148,14 +158,12 @@ public class AiChatServiceImpl implements AiChatService {
     @Transactional
     public PostFinalizeResponse finalizeChat(UUID sessionId, UUID currentUserId) {
         AiChatSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new RuntimeException("Session not found"));
-        
-        if (!session.getUser().getId().equals(currentUserId)) {
-            throw new RuntimeException("Unauthorized to finalize this session");
-        }
+                .orElseThrow(() -> new NotFoundException("Session not found"));
+        requireSessionOwner(session, currentUserId);
+        requirePostOwner(session.getPostId(), currentUserId);
         
         if (session.isCompleted()) {
-            throw new RuntimeException("Session is already completed");
+            throw new ConflictException("Session is already completed");
         }
 
         List<Message> aiMessages = new ArrayList<>();
@@ -194,5 +202,19 @@ public class AiChatServiceImpl implements AiChatService {
         sessionRepository.save(session);
         
         return new PostFinalizeResponse(finalDescription, suggestedPrice);
+    }
+
+    private void requireSessionOwner(AiChatSession session, UUID userId) {
+        if (session.getUser() == null || !userId.equals(session.getUser().getId())) {
+            throw new ForbiddenException("This chat session belongs to another user");
+        }
+    }
+
+    private void requirePostOwner(UUID postId, UUID userId) {
+        if (postId == null) return;
+        var post = postRepository.findById(postId).orElseThrow(() -> new NotFoundException("Post not found"));
+        if (post.getUser() == null || !userId.equals(post.getUser().getId())) {
+            throw new ForbiddenException("This post belongs to another user");
+        }
     }
 }

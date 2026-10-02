@@ -62,9 +62,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/health").permitAll()
                         .requestMatchers("/error").permitAll()
-                        // RBAC management remains admin-only even if method permission checks are disabled.
+                        // Administrative role assignment is also guarded at the filter boundary.
                         .requestMatchers("/api/admin/permissions", "/api/admin/permissions/**",
-                                "/api/admin/roles", "/api/admin/roles/**")
+                                "/api/admin/roles", "/api/admin/roles/**",
+                                "/api/v1/admin/users/*/roles", "/api/v1/admin/users/*/role-changes")
                         .access(AuthorizationManagers.allOf(
                                 AuthorityAuthorizationManager.hasRole("ADMIN"),
                                 AuthorityAuthorizationManager.hasAuthority("ADMIN_RBAC_MANAGE")))

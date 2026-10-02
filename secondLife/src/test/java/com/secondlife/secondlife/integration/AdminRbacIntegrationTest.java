@@ -2,6 +2,8 @@ package com.secondlife.secondlife.integration;
 
 import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.entity.Permission;
+import com.secondlife.secondlife.repository.PermissionRepository;
 import com.secondlife.secondlife.enums.AccountStatus;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
@@ -43,7 +45,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -69,6 +70,7 @@ class AdminRbacIntegrationTest {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private UserRepository userRepository;
     @Autowired private RoleRepository roleRepository;
+    @Autowired private PermissionRepository permissionRepository;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JwtTokenProvider jwtTokenProvider;
     @Autowired private RbacDataSeeder seeder;
@@ -76,7 +78,7 @@ class AdminRbacIntegrationTest {
     @Autowired private WebApplicationContext context;
 
     @Test
-    void customPermissionCrudSupportsGrantRevokeAndPreservesAuditAfterDeletion() throws Exception {
+    void preservesLegacyCustomPermissionManagementButRejectsArbitraryCreation() throws Exception {
         User admin = userForRole("ADMIN");
         User buyer = userForRole("BUYER");
         String authorization = bearer(admin);
@@ -86,9 +88,11 @@ class AdminRbacIntegrationTest {
 
         mockMvc.perform(post("/api/admin/permissions").header("Authorization", authorization)
                         .contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isCreated())
-                .andExpect(header().string("Location", "/api/admin/permissions/" + code))
-                .andExpect(jsonPath("$.data.systemPermission").value(false));
+                .andExpect(status().isBadRequest());
+        // Existing custom rows remain manageable for compatibility; only new arbitrary codes are prohibited.
+        Permission legacy = new Permission(code, "Export reports", "Custom reporting");
+        legacy.getAssignableRoles().add("BUYER");
+        permissionRepository.saveAndFlush(legacy);
         mockMvc.perform(post("/api/admin/permissions").header("Authorization", authorization)
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isConflict());

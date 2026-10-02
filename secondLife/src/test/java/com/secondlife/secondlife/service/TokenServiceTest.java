@@ -80,6 +80,17 @@ class TokenServiceTest {
     }
 
     @Test
+    void pendingAccountCannotRefreshItsSession() {
+        String rawToken = "pending-token";
+        user.setAccountStatus(AccountStatus.PENDING_VERIFICATION);
+        RefreshToken token = new RefreshToken(user, tokenService.hashToken(rawToken), Instant.now().plusSeconds(3600));
+        when(refreshTokenRepository.findByTokenHash(tokenService.hashToken(rawToken))).thenReturn(Optional.of(token));
+        assertThrows(com.secondlife.secondlife.exception.ForbiddenException.class, () -> tokenService.rotateRefreshToken(rawToken));
+        verify(refreshTokenRepository, never()).save(any());
+        verifyNoInteractions(jwtTokenProvider);
+    }
+
+    @Test
     void generateTokenPair_ShouldSaveHashedTokenAndReturnRaw() {
         when(jwtTokenProvider.generateAccessToken(user)).thenReturn("access-token-jwt");
         when(jwtTokenProvider.getAccessExpirationMs()).thenReturn(900000L);

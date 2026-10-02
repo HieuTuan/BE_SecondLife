@@ -275,7 +275,7 @@ class Day04SellerVerificationIntegrationTest {
         mockMvc.perform(post("/api/seller-verifications/" + id + "/resubmit")
                         .header("Authorization", bearer(otherToken))
                         .contentType(MediaType.APPLICATION_JSON).content(newImages))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isForbidden());
         mockMvc.perform(post("/api/seller-verifications/" + id + "/resubmit")
                         .header("Authorization", bearer(applicantToken))
                         .contentType(MediaType.APPLICATION_JSON).content(newImages))

@@ -53,6 +53,7 @@ class FlywayMigrationTest {
                         AND to_regclass('public.seller_verifications') IS NOT NULL
                         AND to_regclass('public.seller_verification_events') IS NOT NULL
                         AND to_regclass('public.permission_assignable_roles') IS NOT NULL
+                        AND to_regclass('public.user_role_audit') IS NOT NULL
                         AND to_regclass('public.flyway_schema_history') IS NOT NULL
                      """)) {
             assertTrue(tables.next() && tables.getBoolean(1));
@@ -70,6 +71,8 @@ class FlywayMigrationTest {
                 .andExpect(jsonPath("$.paths['/api/admin/permissions'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/admin/permissions/{permissionCode}'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/admin/permissions/{permissionCode}'].put").exists())
-                .andExpect(jsonPath("$.paths['/api/admin/permissions/{permissionCode}'].delete").exists());
+                .andExpect(jsonPath("$.paths['/api/admin/permissions/{permissionCode}'].delete").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/admin/users/{userId}/roles'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/admin/users/{userId}/roles'].put").exists());
     }
 }

@@ -16,6 +16,8 @@ import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.ItemRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.exception.ForbiddenException;
+import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.service.AiChatService;
 import com.secondlife.secondlife.service.CreditService;
 import com.secondlife.secondlife.service.PostService;
@@ -168,16 +170,18 @@ public class PostServiceImpl implements PostService {
     @Override
     @Transactional
     public com.secondlife.secondlife.dto.response.PostFinalizeResponse finalizeChatAndDescription(UUID userId, UUID sessionId) {
-        // 1. Tell AiChatService to summarize
-        com.secondlife.secondlife.dto.response.PostFinalizeResponse finalizeResponse = aiChatService.finalizeChat(sessionId, userId);
-
-        // 2. Fetch the session to get postId
         com.secondlife.secondlife.entity.AiChatSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new RuntimeException("Session not found"));
-
-        if (session.getPostId() != null) {
-            Post post = postRepository.findById(session.getPostId())
-                    .orElseThrow(() -> new RuntimeException("Post not found"));
+                .orElseThrow(() -> new NotFoundException("Session not found"));
+        if (session.getUser() == null || !userId.equals(session.getUser().getId())) {
+            throw new ForbiddenException("This chat session belongs to another user");
+        }
+        Post post = session.getPostId() == null ? null : postRepository.findById(session.getPostId())
+                .orElseThrow(() -> new NotFoundException("Post not found"));
+        if (post != null && (post.getUser() == null || !userId.equals(post.getUser().getId()))) {
+            throw new ForbiddenException("This post belongs to another user");
+        }
+        var finalizeResponse = aiChatService.finalizeChat(sessionId, userId);
+        if (post != null) {
             post.setAiDescription(finalizeResponse.getDescription());
             post.setDescription(finalizeResponse.getDescription());
             post.setAiSuggestedPrice(finalizeResponse.getSuggestedPrice());
@@ -191,10 +195,10 @@ public class PostServiceImpl implements PostService {
     @Transactional
     public PostSubmitResponse submitPost(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.PostSubmitRequest request) {
         Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new RuntimeException("Post not found"));
+                .orElseThrow(() -> new NotFoundException("Post not found"));
 
         if (!post.getUser().getId().equals(userId)) {
-            throw new RuntimeException("Unauthorized");
+            throw new ForbiddenException("This post belongs to another user");
         }
 
         // Cập nhật thông tin người dùng chốt

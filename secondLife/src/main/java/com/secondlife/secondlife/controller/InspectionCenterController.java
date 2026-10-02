@@ -20,7 +20,7 @@ import java.util.UUID;
 @RequestMapping("/api/v1/inspector-center")
 @RequiredArgsConstructor
 @Tag(name = "Inspection Center Management", description = "APIs dành cho Inspection Center Manager quản lý nhân viên")
-@PreAuthorize("hasAuthority('INSPECTION_CENTER_ACCOUNT_MANAGE')")
+@PreAuthorize("hasAuthority('INSPECTION_STAFF_MANAGE')")
 public class InspectionCenterController {
 
     private final InspectionService inspectionService;

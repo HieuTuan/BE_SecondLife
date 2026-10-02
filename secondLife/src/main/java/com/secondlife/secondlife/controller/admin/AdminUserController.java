@@ -4,6 +4,8 @@ import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.dto.request.AdminStatusUpdateRequest;
 import com.secondlife.secondlife.dto.response.UserAdminResponse;
+import com.secondlife.secondlife.dto.rbac.*;
+import com.secondlife.secondlife.service.AdminUserRoleService;
 import com.secondlife.secondlife.enums.AccountStatus;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
@@ -30,6 +32,33 @@ public class AdminUserController {
 
     private final UserService userService;
     private final CurrentUserProvider currentUserProvider;
+    private final AdminUserRoleService adminUserRoleService;
+
+    @GetMapping("/{userId}/roles")
+    @PreAuthorize("hasRole('ADMIN') and hasAuthority('ADMIN_RBAC_MANAGE')")
+    @Operation(summary = "Read assigned roles and effective permissions of a user")
+    public ResponseEntity<ApiResponse<UserRolesResponse>> getUserRoles(@PathVariable UUID userId) {
+        return ResponseEntity.ok(ApiResponse.success("Get user roles successfully", adminUserRoleService.getUserRoles(userId)));
+    }
+
+    @PutMapping("/{userId}/roles")
+    @PreAuthorize("hasRole('ADMIN') and hasAuthority('ADMIN_RBAC_MANAGE')")
+    @Operation(summary = "Replace user roles; changed users must sign in again")
+    public ResponseEntity<ApiResponse<UserRolesResponse>> replaceUserRoles(
+            @AuthenticationPrincipal CustomUserDetails admin, @PathVariable UUID userId,
+            @Valid @RequestBody ReplaceUserRolesRequest request) {
+        return ResponseEntity.ok(ApiResponse.success("User roles updated successfully",
+                adminUserRoleService.replaceUserRoles(currentUserProvider.resolveAdminId(admin), userId, request)));
+    }
+
+    @GetMapping("/{userId}/role-changes")
+    @PreAuthorize("hasRole('ADMIN') and hasAuthority('ADMIN_RBAC_MANAGE')")
+    @Operation(summary = "Read user role assignment audit history")
+    public ResponseEntity<ApiResponse<PageResponse<UserRoleAuditResponse>>> getUserRoleAudit(
+            @PathVariable UUID userId,
+            @org.springdoc.core.annotations.ParameterObject @PageableDefault(sort = "changedAt", direction = Sort.Direction.DESC) Pageable pageable) {
+        return ResponseEntity.ok(ApiResponse.success("Get user role audit successfully", adminUserRoleService.getUserRoleAudit(userId, pageable)));
+    }
 
     @GetMapping
     @Operation(summary = "Get users with filtering and pagination")

@@ -223,6 +223,9 @@ public class AuthServiceImpl implements AuthService {
             if (user.getAccountStatus() == AccountStatus.DISABLED) {
                 throw new ForbiddenException("Account is disabled. Please contact support.");
             }
+            if (user.getAccountStatus() != AccountStatus.ACTIVE) {
+                throw new ForbiddenException("Account is not active. Access denied.");
+            }
 
             if (!user.isEmailVerified()) {
                 user.setEmailVerified(true);

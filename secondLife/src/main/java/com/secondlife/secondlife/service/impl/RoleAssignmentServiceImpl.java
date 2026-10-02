@@ -27,6 +27,7 @@ public class RoleAssignmentServiceImpl implements RoleAssignmentService {
     @Override
     @Transactional
     public void grantRole(UUID userId, RoleCode roleCode) {
+        if (roleCode == RoleCode.ADMIN) lockRole(roleCode);
         User user = lockUser(userId);
         Role role = getRole(roleCode);
         if (!user.hasRole(roleCode.name())) {
@@ -40,11 +41,12 @@ public class RoleAssignmentServiceImpl implements RoleAssignmentService {
     @Override
     @Transactional
     public void removeRole(UUID userId, RoleCode roleCode) {
+        if (roleCode == RoleCode.ADMIN) lockRole(roleCode);
         User user = lockUser(userId);
         if (!user.hasRole(roleCode.name())) {
             return;
         }
-        Role role = roleCode == RoleCode.ADMIN ? lockRole(roleCode) : getRole(roleCode);
+        Role role = getRole(roleCode);
         if (roleCode == RoleCode.ADMIN && user.getAccountStatus() == AccountStatus.ACTIVE
                 && userRepository.countActiveAdmins() <= 1) {
             throw new ConflictException("Cannot remove the last active ADMIN role");

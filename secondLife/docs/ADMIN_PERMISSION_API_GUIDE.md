@@ -1,14 +1,14 @@
 # Admin quản lý permission
 
-Tất cả API bên dưới yêu cầu `Authorization: Bearer <accessToken>`, role `ADMIN` và authority `ADMIN_RBAC_MANAGE`. Nhóm API này vẫn kiểm tra quyền khi `APP_SECURITY_PERMISSIONS_ENABLED=false`.
+Tất cả API bên dưới yêu cầu `Authorization: Bearer <accessToken>`, role `ADMIN` và authority `ADMIN_RBAC_MANAGE`. Kiểm tra permission luôn bật; biến cũ `APP_SECURITY_PERMISSIONS_ENABLED` không còn tắt được authorization.
 
 ## Danh mục permission
 
 | Method | URL | Chức năng | Thành công |
 | --- | --- | --- | --- |
 | GET | `/api/admin/permissions` | Danh sách permission và role được phép gán | 200 |
-| GET | `/api/admin/permissions/{permissionCode}` | Chi tiết permission | 200 |
-| POST | `/api/admin/permissions` | Tạo permission tùy chỉnh | 201, có header `Location` |
+| GET | /api/admin/permissions/{permissionCode} | Chi tiết permission | 200 |
+| POST | `/api/admin/permissions` | Khởi tạo permission đã được backend định nghĩa và triển khai, nếu chưa có trong DB | 201, có header `Location` |
 | PUT | `/api/admin/permissions/{permissionCode}` | Sửa tên, mô tả, role được phép gán | 200 |
 | DELETE | `/api/admin/permissions/{permissionCode}` | Xóa permission tùy chỉnh chưa gán vào role | 200 |
 
@@ -16,16 +16,16 @@ Body tạo permission:
 
 ```json
 {
-  "code": "REPORT_EXPORT",
-  "name": "Export reports",
-  "description": "Xuất báo cáo vận hành",
-  "assignableRoles": ["STAFF"]
+  "code": "CREDIT_READ_SELF",
+  "name": "Read Own Credits",
+  "description": "Read own credit balances and pricing",
+  "assignableRoles": ["SELLER"]
 }
 ```
 
-`code` dài tối đa 100 ký tự, bắt đầu bằng chữ cái in hoa, chỉ gồm `A-Z`, `0-9`, `_` và không đổi sau khi tạo. Không được trùng mã đã có hoặc mã trong `PermissionCode`; tiền tố `ROLE_` và `ADMIN_` được dành riêng để tránh giả mạo role/quyền quản trị.
+`code` phải có trong `PermissionCode`, được đánh dấu đã có nghiệp vụ triển khai và chưa có trong database. Các mã tùy ý như `REPORT_EXPORT`, `ROLE_ADMIN` hoặc mã dành cho chức năng chưa triển khai trả 400. Mã đã có trả 409. Các migration thường đã tạo sẵn toàn bộ permission cần dùng, nên luồng admin chính là đọc catalog rồi gán/thu hồi quyền; POST được giữ để tương thích và khởi tạo mã hệ thống bị thiếu. Thêm chức năng mới cần bổ sung mã, guard và migration trong backend trước.
 
-`name` bắt buộc, không được trắng và dài tối đa 100 ký tự. `description` không bắt buộc, tối đa 255 ký tự. `assignableRoles` bắt buộc khi tạo, có thể là mảng rỗng; chỉ nhận role đã được khởi tạo trong `BUYER`, `SELLER`, `INSPECTOR`, `STAFF`, `INSPECTION_CENTER`.
+`name` bắt buộc, không được trắng và dài tối đa 100 ký tự. `description` không bắt buộc, tối đa 255 ký tự. `assignableRoles` bắt buộc khi tạo và phải đúng chính sách cố định của permission hệ thống, ví dụ `CREDIT_READ_SELF` chỉ cho `SELLER`. ADMIN không xuất hiện trong `assignableRoles` vì bộ quyền ADMIN cố định.
 
 Body cập nhật:
 
@@ -42,7 +42,7 @@ Nếu bỏ `assignableRoles` hoặc truyền `null` khi cập nhật, chính sá
 - Permission hệ thống (`systemPermission=true`) cho phép sửa tên/mô tả; chính sách gán role cố định và không được xóa.
 - Permission tùy chỉnh đang được gán không được xóa. Cần thu hồi khỏi mọi role trước.
 - Muốn bỏ một role khỏi `assignableRoles`, cần thu hồi permission khỏi role đó trước.
-- Tạo permission chỉ tạo authority có thể cấp cho role. Để bảo vệ chức năng mới, backend phải kiểm tra authority tương ứng, ví dụ `@PreAuthorize("hasRole('STAFF') and hasAuthority('REPORT_EXPORT')")`.
+- Permission custom từ dữ liệu cũ vẫn được đọc, sửa metadata/chính sách và thu hồi/xóa. Backend không tự tạo API hay nghiệp vụ từ các mã này.
 
 ## Gán và thu hồi permission cho role
 
@@ -57,8 +57,8 @@ Frontend tải danh mục và role, hiển thị permission theo `assignableRole
 
 ```json
 {
-  "expectedPermissionCodes": ["PROFILE_READ_SELF", "ROLE_READ"],
-  "permissionCodes": ["PROFILE_READ_SELF", "ROLE_READ", "REPORT_EXPORT"]
+  "expectedPermissionCodes": ["PROFILE_READ_SELF"],
+  "permissionCodes": ["PROFILE_READ_SELF", "USER_READ_ANY"]
 }
 ```
 
@@ -78,4 +78,27 @@ Luồng xóa trên frontend: tải các role đang có permission → thu hồi 
 | 404 | Permission hoặc role không tồn tại |
 | 409 | Trùng code, thay đổi permission hệ thống bị cấm, permission còn được gán, hoặc bộ quyền role đã thay đổi; tải lại dữ liệu trước khi lưu |
 
-Migration `V16__permission_catalog_assignable_roles.sql` bổ sung bảng chính sách gán role cho permission tùy chỉnh. `V17__align_permission_policy_constraints.sql` điều chỉnh constraint để cập nhật chính sách không xung đột thứ tự khóa khi cấp quyền. Flyway chạy migration khi khởi động; không sửa các migration đã áp dụng và không cần bật seeder để sử dụng các API.
+Migration V16 bổ sung chính sách permission custom; V17 điều chỉnh thứ tự khóa liên quan constraint. V18 bổ sung quyền chat/media/kiểm định và audit role user. Flyway chạy migration khi khởi động; không sửa migration đã áp dụng và không cần bật seeder để sử dụng các API. Kiểm thử dùng PostgreSQL riêng, không tự áp dụng vào database ứng dụng đang có dữ liệu.
+
+## Gán và thu hồi role của user
+
+| Method | URL | Chức năng |
+| --- | --- | --- |
+| GET | `/api/v1/admin/users/{userId}/roles` | Role đã gán và permission hiệu lực |
+| PUT | `/api/v1/admin/users/{userId}/roles` | Thay thế toàn bộ role của user |
+| GET | `/api/v1/admin/users/{userId}/role-changes` | Audit phân trang |
+
+Ví dụ thêm STAFF cho user đang chỉ có BUYER:
+
+```json
+{
+  "expectedRoleCodes": ["BUYER"],
+  "roleCodes": ["BUYER", "STAFF"]
+}
+```
+
+Luôn tải bộ role hiện tại trước khi PUT; không khớp `expectedRoleCodes` trả 409. `roleCodes: []` thu hồi toàn bộ role nếu không vi phạm bảo vệ ADMIN. Không cho tự gỡ ADMIN, gỡ ADMIN hoạt động cuối cùng hoặc thêm SELLER khi chưa có hồ sơ APPROVED. Role không hợp lệ trả 400, user không tồn tại trả 404. Thay đổi có audit và transaction; no-op không tăng phiên bản token hay tạo audit.
+
+Thay **permission của role** có hiệu lực với JWT hiện có từ request tiếp theo. Thay **role của user** tăng `tokenVersion`, thu hồi mọi refresh token; JWT cũ trả 401 và user phải đăng nhập lại. Frontend tải lại `/api/users/me` để cập nhật trạng thái quyền sau khi đăng nhập.
+
+Xem [báo cáo RBAC đầy đủ](RBAC_COMPLETION_REPORT.md) để biết mapping, API được bảo vệ và trace request.

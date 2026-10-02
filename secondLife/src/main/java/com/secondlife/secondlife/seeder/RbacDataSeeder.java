@@ -124,7 +124,13 @@ public class RbacDataSeeder implements ApplicationRunner {
                 Map.entry(PermissionCode.SELLER_VERIFICATION_REVIEW, new String[]{"Review Seller Verification", "Allows approving or rejecting seller verification requests"}),
                 Map.entry(PermissionCode.POST_REVIEW, new String[]{"Review Posts", "Allows approving or rejecting submitted posts"}),
                 Map.entry(PermissionCode.INSPECTION_CENTER_ACCOUNT_MANAGE, new String[]{"Manage Inspection Center Accounts", "Allows provisioning Inspection Center partner accounts"}),
-                Map.entry(PermissionCode.ROLE_READ, new String[]{"Read Roles", "Allows viewing available roles and permissions in the system"})
+                Map.entry(PermissionCode.ROLE_READ, new String[]{"Read Roles", "Allows viewing available roles and permissions in the system"}),
+                Map.entry(PermissionCode.INSPECTION_ORDER_READ_SELF, new String[]{"Read Assigned Inspections", "Read own assigned inspection orders"}),
+                Map.entry(PermissionCode.INSPECTION_ORDER_READ_ANY, new String[]{"Read All Inspections", "Read and filter all inspection orders"}),
+                Map.entry(PermissionCode.INSPECTION_ORDER_ASSIGN, new String[]{"Assign Inspection Orders", "Assign orders to active inspectors"}),
+                Map.entry(PermissionCode.INSPECTION_STAFF_MANAGE, new String[]{"Manage Inspectors", "Create and list inspectors"}),
+                Map.entry(PermissionCode.AI_CHAT_SELF, new String[]{"Use Own AI Chat", "Use own chat sessions"}),
+                Map.entry(PermissionCode.MEDIA_UPLOAD_SELF, new String[]{"Upload Media", "Upload images"})
         );
 
         for (Map.Entry<PermissionCode, String[]> entry : metadata.entrySet()) {
@@ -166,6 +172,9 @@ public class RbacDataSeeder implements ApplicationRunner {
     }
 
     private void seedRolePermissions(Map<RoleCode, Role> roles, Map<PermissionCode, Permission> permissions) {
+        // Only newly created roles are passed here. Restarting must not undo an admin's revocations.
+        roles.values().forEach(role -> assignPermissionsIfMissing(role, List.of(
+                permissions.get(PermissionCode.AI_CHAT_SELF), permissions.get(PermissionCode.MEDIA_UPLOAD_SELF))));
         // BUYER
         assignPermissionsIfMissing(roles.get(RoleCode.BUYER), List.of(
                 permissions.get(PermissionCode.PROFILE_READ_SELF),
@@ -209,11 +218,15 @@ public class RbacDataSeeder implements ApplicationRunner {
                 permissions.get(PermissionCode.PROFILE_READ_SELF),
                 permissions.get(PermissionCode.PROFILE_UPDATE_SELF),
                 permissions.get(PermissionCode.PASSWORD_CHANGE_SELF),
-                permissions.get(PermissionCode.INSPECTION_REPORT_SUBMIT)
+                permissions.get(PermissionCode.INSPECTION_REPORT_SUBMIT),
+                permissions.get(PermissionCode.INSPECTION_ORDER_READ_SELF)
         ));
 
         // INSPECTION_CENTER
         assignPermissionsIfMissing(roles.get(RoleCode.INSPECTION_CENTER), List.of(
+                permissions.get(PermissionCode.INSPECTION_ORDER_READ_ANY),
+                permissions.get(PermissionCode.INSPECTION_ORDER_ASSIGN),
+                permissions.get(PermissionCode.INSPECTION_STAFF_MANAGE),
                 permissions.get(PermissionCode.PROFILE_READ_SELF),
                 permissions.get(PermissionCode.PROFILE_UPDATE_SELF),
                 permissions.get(PermissionCode.PASSWORD_CHANGE_SELF)

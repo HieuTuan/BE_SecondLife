@@ -99,7 +99,7 @@ public class TokenServiceImpl implements TokenService {
         }
 
         User user = token.getUser();
-        if (user.getAccountStatus() == AccountStatus.LOCKED || user.getAccountStatus() == AccountStatus.DISABLED) {
+        if (user.getAccountStatus() != AccountStatus.ACTIVE) {
             throw new ForbiddenException("Account is " + user.getAccountStatus().name().toLowerCase() + ". Access denied.");
         }
 

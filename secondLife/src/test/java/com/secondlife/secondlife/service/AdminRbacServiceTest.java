@@ -38,21 +38,22 @@ class AdminRbacServiceTest {
     @InjectMocks private AdminRbacServiceImpl service;
 
     @Test
-    void createsAssignableCustomPermission() {
-        when(roleRepository.existsByCode("STAFF")).thenReturn(true);
+    void initializesOnlyImplementedDeveloperDefinedPermission() {
+        when(roleRepository.existsByCode("SELLER")).thenReturn(true);
         when(permissionRepository.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
 
         var response = service.createPermission(new CreatePermissionRequest(
-                "REPORT_EXPORT", " Export reports ", "Reporting", Set.of("STAFF")));
+                "CREDIT_READ_SELF", " Export reports ", "Reporting", Set.of("SELLER")));
 
         assertEquals("Export reports", response.name());
-        assertEquals(Set.of("STAFF"), response.assignableRoles());
-        assertFalse(response.systemPermission());
+        assertEquals(Set.of("SELLER"), response.assignableRoles());
+        assertTrue(response.systemPermission());
     }
 
     @Test
     void preventsDuplicateOrReservedCodesIncludingRoleAuthoritySpoofing() {
         when(permissionRepository.existsByCode("REPORT_EXPORT")).thenReturn(true);
+        when(permissionRepository.existsByCode("ADMIN_RBAC_MANAGE")).thenReturn(true);
         assertThrows(ConflictException.class, () -> service.createPermission(create("REPORT_EXPORT")));
         assertThrows(ConflictException.class, () -> service.createPermission(create("ADMIN_RBAC_MANAGE")));
         assertThrows(BadRequestException.class, () -> service.createPermission(create("ROLE_ADMIN")));
@@ -62,17 +63,20 @@ class AdminRbacServiceTest {
 
     @Test
     void concurrentDuplicateCreateReturnsConflict() {
-        when(roleRepository.existsByCode("STAFF")).thenReturn(true);
+        when(roleRepository.existsByCode("SELLER")).thenReturn(true);
         when(permissionRepository.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("duplicate"));
-        assertThrows(ConflictException.class, () -> service.createPermission(create("REPORT_EXPORT")));
+        assertThrows(ConflictException.class, () -> service.createPermission(new CreatePermissionRequest(
+                "CREDIT_READ_SELF", "Credits", null, Set.of("SELLER"))));
     }
 
     @Test
     void rejectsUnknownAndAdminAssignableRoles() {
         for (String role : List.of("ADMIN", "UNKNOWN", "STAFF")) {
             assertThrows(BadRequestException.class, () -> service.createPermission(
-                    new CreatePermissionRequest("REPORT_EXPORT", "Reports", null, Set.of(role))));
+                    new CreatePermissionRequest("CREDIT_READ_SELF", "Reports", null, Set.of(role))));
         }
+        assertThrows(BadRequestException.class, () -> service.createPermission(create("REPORT_EXPORT")));
+        assertThrows(BadRequestException.class, () -> service.createPermission(create("POST_DELETE")));
         verify(permissionRepository, never()).saveAndFlush(any());
     }
 

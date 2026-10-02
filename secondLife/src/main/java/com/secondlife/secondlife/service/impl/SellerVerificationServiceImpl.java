@@ -21,6 +21,7 @@ import com.secondlife.secondlife.enums.RoleCode;
 import com.secondlife.secondlife.enums.SellerVerificationStatus;
 import com.secondlife.secondlife.enums.VerificationEventType;
 import com.secondlife.secondlife.exception.BadRequestException;
+import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.SellerVerificationMapper;
@@ -152,7 +153,7 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy hồ sơ xác thực với id: " + verificationId));
 
         if (!verification.getUser().getId().equals(userId)) {
-            throw new BadRequestException("Hồ sơ xác thực này không thuộc tài khoản hiện tại");
+            throw new ForbiddenException("Hồ sơ xác thực này không thuộc tài khoản hiện tại");
         }
 
         if (verification.getStatus() != SellerVerificationStatus.RESUBMIT_REQUIRED) {
