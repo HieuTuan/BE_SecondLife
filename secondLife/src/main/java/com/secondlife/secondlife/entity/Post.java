@@ -41,6 +41,23 @@ public class Post {
     @Column(name = "image_url")
     private String imageUrl; // the original image uploaded by the user
 
+    @ElementCollection
+    @CollectionTable(name = "post_images", joinColumns = @JoinColumn(name = "post_id"))
+    @OrderColumn(name = "image_position")
+    private java.util.List<PostImage> images = new java.util.ArrayList<>();
+
+    public java.util.List<String> getImageUrls() {
+        if (!images.isEmpty()) return images.stream().map(PostImage::getImageUrl).toList();
+        return imageUrl == null ? java.util.List.of() : java.util.List.of(imageUrl);
+    }
+
+    public java.util.Set<String> getImageFingerprints() {
+        var fingerprints = new java.util.HashSet<String>();
+        if (imageFingerprint != null) fingerprints.add(imageFingerprint);
+        for (PostImage image : images) if (image.getImageFingerprint() != null) fingerprints.add(image.getImageFingerprint());
+        return fingerprints;
+    }
+
     @Column(name = "status", nullable = false)
     private String status = "DRAFT"; // DRAFT, PENDING, ACTIVE, REJECTED
 
@@ -59,8 +76,33 @@ public class Post {
     @Column(name = "ai_description", columnDefinition = "TEXT")
     private String aiDescription; // Mô tả do AI gen ra lúc bấm kết thúc
 
+    @Column(name = "description_accepted", nullable = false)
+    private boolean descriptionAccepted;
+    @Column(name = "review_reason", columnDefinition = "TEXT")
+    private String reviewReason;
+    @Column(name = "duplicate_post_ids", columnDefinition = "TEXT")
+    private String duplicatePostIds;
+    @Column(name = "reviewed_by")
+    private UUID reviewedBy;
+    @Column(name = "reviewed_at")
+    private Instant reviewedAt;
+
+    public java.util.List<UUID> getDuplicateMatches() {
+        return duplicatePostIds == null || duplicatePostIds.isBlank() ? java.util.List.of()
+                : java.util.Arrays.stream(duplicatePostIds.split(",")).map(UUID::fromString).toList();
+    }
+
     @Column(name = "ai_suggested_price", precision = 18, scale = 2)
     private BigDecimal aiSuggestedPrice; // Giá AI gợi ý
+
+    @Column(name = "listing_credit_charged", nullable = false)
+    private boolean listingCreditCharged;
+
+    @Column(name = "published_at")
+    private Instant publishedAt;
+
+    @Column(name = "image_fingerprint", length = 64)
+    private String imageFingerprint;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "ai_chat_session_id")

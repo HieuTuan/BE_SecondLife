@@ -38,7 +38,7 @@ class PermissionCatalogMigrationTest {
         }
 
         Flyway flyway = Flyway.configure().dataSource(postgres.getJdbcUrl(),
-                postgres.getUsername(), postgres.getPassword()).load();
+                postgres.getUsername(), postgres.getPassword()).target("18").load();
         assertEquals(2, flyway.migrate().migrationsExecuted);
         assertTrue(flyway.validateWithResult().validationSuccessful);
 

@@ -40,6 +40,7 @@ public class InspectionServiceImpl implements InspectionService {
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
     private final UserMapper userMapper;
+    private final com.secondlife.secondlife.service.ListingPublicationService publication;
     @Qualifier("googleGenAiChatModel")
     private final org.springframework.ai.chat.model.ChatModel googleChatModel;
 
@@ -66,8 +67,10 @@ public class InspectionServiceImpl implements InspectionService {
     @Override
     @Transactional
     public InspectionOrderResponse assignInspector(UUID orderId, UUID inspectorId) {
-        InspectionOrder order = inspectionOrderRepository.findById(orderId)
+        InspectionOrder order = inspectionOrderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new NotFoundException("Inspection order not found"));
+
+        if (!"PENDING".equals(order.getStatus())) throw new ConflictException("Order is already completed");
 
         User inspector = userRepository.findById(inspectorId)
                 .orElseThrow(() -> new NotFoundException("Inspector not found"));
@@ -83,7 +86,9 @@ public class InspectionServiceImpl implements InspectionService {
     @Override
     @Transactional
     public InspectionOrderResponse submitResult(UUID orderId, UUID inspectorId, InspectionResultRequest request) {
-        InspectionOrder order = inspectionOrderRepository.findById(orderId)
+        UUID owner = inspectionOrderRepository.findOwnerId(orderId).orElseThrow(() -> new NotFoundException("Inspection order not found"));
+        userRepository.findByIdForRoleUpdate(owner).orElseThrow(() -> new NotFoundException("User not found"));
+        InspectionOrder order = inspectionOrderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new NotFoundException("Inspection order not found"));
 
         if (order.getInspector() == null || !order.getInspector().getId().equals(inspectorId)) {
@@ -95,7 +100,7 @@ public class InspectionServiceImpl implements InspectionService {
 
         order.setNote(request.getNote());
 
-        Post post = order.getPost();
+        Post post = postRepository.findByIdForUpdate(order.getPost().getId()).orElseThrow(() -> new NotFoundException("Post not found"));
 
         if ("FAILED".equals(request.getStatus())) {
             order.setStatus("FAILED");
@@ -106,8 +111,8 @@ public class InspectionServiceImpl implements InspectionService {
             order.setStatus("PASSED");
             // AI Scan lần 2 để xác nhận trước khi ACTIVE
             String scanResult = aiScanPost(post);
-            if (scanResult.startsWith("APPROVED")) {
-                post.setStatus("ACTIVE");
+            if ("APPROVED".equals(scanResult)) {
+                publication.activate(post);
             } else {
                 String reason = scanResult.contains(":") ? scanResult.substring(scanResult.indexOf(":") + 1).trim() : "AI final check failed";
                 post.setStatus("REJECTED");
@@ -172,7 +177,13 @@ public class InspectionServiceImpl implements InspectionService {
         );
 
         Prompt aiPrompt = new Prompt(new UserMessage(prompt));
-        String result = client.prompt(aiPrompt).call().content();
-        return result != null ? result.trim() : "APPROVED";
+        String result;
+        try { result = client.prompt(aiPrompt).call().content(); }
+        catch (Exception ex) { throw new AiProviderException("AI moderation unavailable; no listing credit was consumed", ex); }
+        if (result == null) throw new AiProviderException("AI moderation returned no result");
+        result = result.trim();
+        if (!"APPROVED".equals(result) && !(result.startsWith("REJECTED:") && !result.substring(9).trim().isEmpty()))
+            throw new AiProviderException("AI moderation returned an invalid result");
+        return result;
     }
 }

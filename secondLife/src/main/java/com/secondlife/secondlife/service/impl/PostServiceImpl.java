@@ -9,7 +9,6 @@ import com.secondlife.secondlife.entity.CategoryQuestionTemplate;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
-import com.secondlife.secondlife.entity.UserCredit;
 import com.secondlife.secondlife.repository.CategoryQuestionTemplateRepository;
 import com.secondlife.secondlife.repository.CategoryRepository;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
@@ -19,7 +18,13 @@ import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.service.AiChatService;
-import com.secondlife.secondlife.service.CreditService;
+import com.secondlife.secondlife.service.ListingAccessService;
+import com.secondlife.secondlife.service.ListingCreditService;
+import com.secondlife.secondlife.service.ListingFingerprint;
+import com.secondlife.secondlife.enums.CreditType;
+import com.secondlife.secondlife.exception.BadRequestException;
+import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.exception.AiProviderException;
 import com.secondlife.secondlife.service.PostService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -45,7 +50,8 @@ public class PostServiceImpl implements PostService {
 
     private final PostRepository postRepository;
     private final UserRepository userRepository;
-    private final CreditService creditService;
+    private final ListingCreditService listingCredits;
+    private final ListingAccessService listingAccess;
     private final AiChatService aiChatService;
     private final CategoryQuestionTemplateRepository templateRepository;
     private final com.secondlife.secondlife.repository.AiChatSessionRepository sessionRepository;
@@ -55,10 +61,14 @@ public class PostServiceImpl implements PostService {
     private final com.secondlife.secondlife.service.CloudinaryService cloudinaryService;
     private final InspectionOrderRepository inspectionOrderRepository;
     private final org.springframework.ai.chat.model.ChatModel googleChatModel;
+    private final com.secondlife.secondlife.service.ListingPublicationService publication;
+    private final com.secondlife.secondlife.service.ListingReviewService reviews;
+    private final com.secondlife.secondlife.service.ListingSubmissionLock submissionLock;
 
     public PostServiceImpl(PostRepository postRepository,
                            UserRepository userRepository,
-                           CreditService creditService,
+                           ListingCreditService listingCredits,
+                           ListingAccessService listingAccess,
                            AiChatService aiChatService,
                            CategoryQuestionTemplateRepository templateRepository,
                            com.secondlife.secondlife.repository.AiChatSessionRepository sessionRepository,
@@ -68,10 +78,14 @@ public class PostServiceImpl implements PostService {
                            com.secondlife.secondlife.service.CloudinaryService cloudinaryService,
                            InspectionOrderRepository inspectionOrderRepository,
                            @org.springframework.beans.factory.annotation.Qualifier("googleGenAiChatModel")
-                           org.springframework.ai.chat.model.ChatModel googleChatModel) {
+                           org.springframework.ai.chat.model.ChatModel googleChatModel,
+                           com.secondlife.secondlife.service.ListingPublicationService publication,
+                           com.secondlife.secondlife.service.ListingReviewService reviews,
+                           com.secondlife.secondlife.service.ListingSubmissionLock submissionLock) {
         this.postRepository = postRepository;
         this.userRepository = userRepository;
-        this.creditService = creditService;
+        this.listingCredits = listingCredits;
+        this.listingAccess = listingAccess;
         this.aiChatService = aiChatService;
         this.templateRepository = templateRepository;
         this.sessionRepository = sessionRepository;
@@ -81,17 +95,32 @@ public class PostServiceImpl implements PostService {
         this.cloudinaryService = cloudinaryService;
         this.inspectionOrderRepository = inspectionOrderRepository;
         this.googleChatModel = googleChatModel;
+        this.publication = publication;
+        this.reviews = reviews;
+        this.submissionLock = submissionLock;
     }
 
     @Override
     @Transactional
     public PostInitResponse initPost(UUID userId, PostInitRequest request) {
-        // 1. Deduct post credit
-        creditService.deductPostCredit(userId);
-
-        // 2. Create Draft Post
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+        User user = userRepository.findByIdForRoleUpdate(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        if (request.getCategoryId() == null || !categoryRepository.existsById(request.getCategoryId()))
+            throw new BadRequestException("A valid categoryId is required");
+        if (request.getItemId() != null) {
+            var item = itemRepository.findById(request.getItemId()).orElseThrow(() -> new BadRequestException("Invalid itemId"));
+            if (!request.getCategoryId().equals(item.getCategory().getId()))
+                throw new BadRequestException("itemId does not belong to categoryId");
+        }
+        if (postRepository.countByUser_IdAndStatusIn(userId, java.util.List.of("DRAFT", "REJECTED", "PENDING", "PENDING_INSPECTION")) >= 30)
+            throw new ConflictException("Maximum 30 unfinished drafts; finish an existing draft first");
+        if (request.getImages() == null || request.getImages().size() < 3 || request.getImages().size() > 6)
+            throw new BadRequestException("Upload between 3 and 6 product images");
+        for (var image : request.getImages()) {
+            if (image == null || image.isEmpty() || image.getSize() > 10 * 1024 * 1024L || image.getContentType() == null
+                    || !java.util.Set.of("image/jpeg", "image/png", "image/webp").contains(image.getContentType()))
+                throw new BadRequestException("Every image must be a non-empty JPEG, PNG or WebP no larger than 10 MB");
+        }
 
         Post post = new Post();
         post.setUser(user);
@@ -99,14 +128,22 @@ public class PostServiceImpl implements PostService {
         post.setItemId(request.getItemId());
         post.setStatus("DRAFT");
         
-        if (request.getImage() != null && !request.getImage().isEmpty()) {
+        for (var image : request.getImages()) {
             try {
-                String imageUrl = cloudinaryService.uploadImage(request.getImage());
-                post.setImageUrl(imageUrl);
+                byte[] imageBytes = image.getBytes();
+                String perceptualFingerprint = com.secondlife.secondlife.service.ListingImageSimilarity.fingerprint(imageBytes);
+                String imageUrl = cloudinaryService.uploadImage(image);
+                if (imageUrl == null || imageUrl.isBlank()) throw new IllegalStateException("Image upload returned an empty URL");
+                post.getImages().add(new com.secondlife.secondlife.entity.PostImage(imageUrl,
+                        ListingFingerprint.sha256(imageBytes), perceptualFingerprint));
             } catch (java.io.IOException e) {
                 throw new RuntimeException("Failed to upload image to Cloudinary", e);
+            } catch (IllegalArgumentException e) {
+                throw new BadRequestException("Invalid or excessively large image dimensions");
             }
         }
+        post.setImageUrl(post.getImages().getFirst().getImageUrl());
+        post.setImageFingerprint(post.getImages().getFirst().getImageFingerprint());
         
         post = postRepository.save(post);
 
@@ -115,13 +152,18 @@ public class PostServiceImpl implements PostService {
         aiRequest.setSessionId(null);
         aiRequest.setPostId(post.getId());
         // Prompt for Llava to only describe the visual condition
-        aiRequest.setMessage("Dựa vào hình ảnh được cung cấp, hãy chỉ nhận xét ngắn gọn về ngoại hình và tình trạng vật lý của sản phẩm này. Không cần thêm lời chào hay bình luận gì khác.");
-        aiRequest.setImage(request.getImage());
+        String selectedCategoryName = categoryRepository.findById(request.getCategoryId()).orElseThrow().getName();
+        String selectedItemName = request.getItemId() == null ? "Chưa chọn" : itemRepository.findById(request.getItemId()).orElseThrow().getName();
+        aiRequest.setMessage("Danh mục người bán chọn: " + selectedCategoryName + "; loại sản phẩm: " + selectedItemName
+                + ". Dựa vào toàn bộ ảnh, hãy viết mô tả sản phẩm để đăng bán, nhận xét ngoại hình, tình trạng và đặc điểm nhìn thấy."
+                + " Chỉ mô tả sản phẩm, không mô tả cảnh nền thành đặc tính sản phẩm. Không suy đoán hãng, tuổi đời, bảo hành nếu ảnh không chứng minh. Không đề xuất giá, không thêm lời chào.");
+        aiRequest.setImages(request.getImages());
 
-        // This will deduct 1 chat credit if applicable, or we might say the first message doesn't cost a chat credit? 
-        // User said: "Mỗi bài đăng đi kèm 5 lượt chat". So it might cost a chat credit. 
-        // Actually, AiChatService will create a new session and count=1.
+        // Initial image analysis is free description chat, not valuation.
         AiChatResponse aiResponse = aiChatService.processChat(aiRequest, userId);
+        post.setAiDescription(aiResponse.getReply());
+        post.setDescription(aiResponse.getReply());
+        post.setDescriptionAccepted(false);
 
         // 4. Fetch or Generate Template
         CategoryQuestionTemplate template = templateRepository.findByCategoryIdAndItemId(request.getCategoryId(), request.getItemId())
@@ -170,21 +212,19 @@ public class PostServiceImpl implements PostService {
     @Override
     @Transactional
     public com.secondlife.secondlife.dto.response.PostFinalizeResponse finalizeChatAndDescription(UUID userId, UUID sessionId) {
+        userRepository.findByIdForRoleUpdate(userId).orElseThrow(() -> new NotFoundException("User not found"));
         com.secondlife.secondlife.entity.AiChatSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new NotFoundException("Session not found"));
         if (session.getUser() == null || !userId.equals(session.getUser().getId())) {
             throw new ForbiddenException("This chat session belongs to another user");
         }
-        Post post = session.getPostId() == null ? null : postRepository.findById(session.getPostId())
-                .orElseThrow(() -> new NotFoundException("Post not found"));
-        if (post != null && (post.getUser() == null || !userId.equals(post.getUser().getId()))) {
-            throw new ForbiddenException("This post belongs to another user");
-        }
+        Post post = session.getPostId() == null ? null : listingAccess.owned(userId, session.getPostId(), true);
+        if (post != null) listingAccess.requireDraft(post);
         var finalizeResponse = aiChatService.finalizeChat(sessionId, userId);
         if (post != null) {
             post.setAiDescription(finalizeResponse.getDescription());
             post.setDescription(finalizeResponse.getDescription());
-            post.setAiSuggestedPrice(finalizeResponse.getSuggestedPrice());
+            post.setDescriptionAccepted(false);
             postRepository.save(post);
         }
         
@@ -194,87 +234,75 @@ public class PostServiceImpl implements PostService {
     @Override
     @Transactional
     public PostSubmitResponse submitPost(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.PostSubmitRequest request) {
-        Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new NotFoundException("Post not found"));
-
-        if (!post.getUser().getId().equals(userId)) {
-            throw new ForbiddenException("This post belongs to another user");
+        Post post = listingAccess.owned(userId, postId, true);
+        if (request.getTitle() == null || request.getTitle().isBlank() || request.getTitle().length() > 255
+                || request.getDescription() == null || request.getDescription().isBlank() || request.getDescription().length() > 10000
+                || request.getPrice() == null || request.getPrice().compareTo(BigDecimal.ONE) < 0
+                || request.getPrice().scale() > 2 || request.getPrice().precision() - request.getPrice().scale() > 16)
+            throw new BadRequestException("A valid title, description and positive VND price are required");
+        // A retry after acceptance may return the prior outcome but cannot edit/re-up the listing.
+        if (post.isListingCreditCharged() || "PENDING".equals(post.getStatus()) || "PENDING_INSPECTION".equals(post.getStatus())) {
+            if (!("ACTIVE".equals(post.getStatus()) || "PENDING_INSPECTION".equals(post.getStatus()) || "PENDING".equals(post.getStatus()))
+                    || !ListingFingerprint.normalize(request.getTitle()).equals(ListingFingerprint.normalize(post.getTitle()))
+                    || !ListingFingerprint.normalize(request.getDescription()).equals(ListingFingerprint.normalize(post.getDescription()))
+                    || request.getPrice().compareTo(post.getPrice()) != 0)
+                throw new ConflictException("This post has already been submitted; re-up is not supported");
+            return submitResponse(post);
         }
-
-        // Cập nhật thông tin người dùng chốt
-        post.setTitle(request.getTitle());
-        post.setDescription(request.getDescription());
+        listingAccess.requireDraft(post);
+        listingAccess.requireVerifiedSeller(userId);
+        if (!post.isDescriptionAccepted() || !ListingFingerprint.normalize(request.getDescription()).equals(ListingFingerprint.normalize(post.getDescription())))
+            throw new ConflictException("Accept the latest product description before submitting");
+        if (post.getImageUrl() == null || post.getImageUrl().isBlank()) throw new BadRequestException("A product image is required");
+        if (postRepository.countByUser_IdAndPublishedAtAfter(userId, java.time.Instant.now().minusSeconds(600)) >= 5)
+            throw new ConflictException("Publish rate limit reached; maximum 5 accepted posts per 10 minutes");
+        post.setTitle(request.getTitle().trim());
+        post.setDescription(request.getDescription().trim());
         post.setPrice(request.getPrice());
-        postRepository.save(post);
-
-        // BƯỚC A: AI Scan bài đăng
+        submissionLock.lock();
+        var matches = new java.util.ArrayList<UUID>();
+        for (Post other : postRepository.findByIdNotAndStatusIn(postId,
+                java.util.List.of("ACTIVE", "PENDING_INSPECTION", "PENDING"))) {
+            boolean sameImage = !java.util.Collections.disjoint(post.getImageFingerprints(), other.getImageFingerprints());
+            boolean visuallySimilar = post.getImages().stream().anyMatch(image -> other.getImages().stream().anyMatch(candidate ->
+                    com.secondlife.secondlife.service.ListingImageSimilarity.similar(image.getPerceptualFingerprint(), candidate.getPerceptualFingerprint())));
+            boolean sameProduct = userId.equals(other.getUser().getId()) && java.util.Objects.equals(post.getCategoryId(), other.getCategoryId())
+                    && java.util.Objects.equals(post.getItemId(), other.getItemId())
+                    && ListingFingerprint.normalize(post.getTitle()).equals(ListingFingerprint.normalize(other.getTitle()))
+                    && ListingFingerprint.normalize(post.getDescription()).equals(ListingFingerprint.normalize(other.getDescription()));
+            if (sameImage || visuallySimilar || sameProduct) matches.add(other.getId());
+        }
+        post.setReviewReason(null);
+        post.setDuplicatePostIds(null);
+        post.setReviewedBy(null); post.setReviewedAt(null);
+        if (!matches.isEmpty()) {
+            post.setStatus("PENDING");
+            post.setRejectionReason(null);
+            post.setReviewReason("Possible duplicate product images or listing content; STAFF review required");
+            post.setDuplicatePostIds(matches.stream().map(UUID::toString).collect(java.util.stream.Collectors.joining(",")));
+            postRepository.save(post);
+            return submitResponse(post);
+        }
         String scanResult = aiScanPost(post);
-        if (scanResult.startsWith("REJECTED")) {
-            String reason = scanResult.contains(":") ? scanResult.substring(scanResult.indexOf(":") + 1).trim() : "Nội dung bài đăng không hợp lệ";
+        if (scanResult.startsWith("REJECTED:")) {
             post.setStatus("REJECTED");
-            post.setRejectionReason("AI tự động từ chối: " + reason);
+            post.setRejectionReason(scanResult.substring("REJECTED:".length()).trim());
             postRepository.save(post);
-            throw new RuntimeException("Bài đăng bị từ chối bởi hệ thống AI: " + reason);
+            return new PostSubmitResponse("REJECTED", false, null, null, post.getRejectionReason(), null);
         }
+        publication.accept(post);
+        postRepository.save(post);
+        return submitResponse(post);
+    }
 
-        // BƯỚC B: Kiểm tra ngưỡng giá
-        if (post.getPrice() != null && post.getPrice().compareTo(highValueThreshold) > 0) {
-            // Hàng giá trị cao → kiểm định
-            BigDecimal totalFee = inspectionFee.add(shippingFee);
-
-            // Kiểm tra credit của Seller
-            UserCredit userCredit = creditService.getUserCredit(userId);
-            // Dùng post_credits như một đơn vị tương đương tiền (1 credit = 1000 VNĐ)
-            // Nếu không đủ credit, trả về response kèm số tiền còn thiếu để FE hiển thị lựa chọn
-            long requiredCredits = totalFee.longValue() / 1000;
-            if (userCredit.getPostCredits() < requiredCredits) {
-                BigDecimal shortfall = totalFee.subtract(BigDecimal.valueOf(userCredit.getPostCredits() * 1000L));
-                return new PostSubmitResponse(
-                        "INSUFFICIENT_CREDIT",
-                        true,
-                        inspectionFee,
-                        shippingFee,
-                        "Không đủ credit để thanh toán phí kiểm định và vận chuyển. Vui lòng nạp thêm hoặc thanh toán trực tiếp qua chuyển khoản.",
-                        shortfall
-                );
-            }
-
-            // Trừ credit
-            userCredit.setPostCredits((int)(userCredit.getPostCredits() - requiredCredits));
-
-            // Tạo InspectionOrder
-            InspectionOrder order = new InspectionOrder();
-            order.setPost(post);
-            order.setInspectionFee(inspectionFee);
-            order.setShippingFee(shippingFee);
-            order.setStatus("PENDING");
-            inspectionOrderRepository.save(order);
-
-            post.setStatus("PENDING_INSPECTION");
-            postRepository.save(post);
-
-            return new PostSubmitResponse(
-                    "PENDING_INSPECTION",
-                    true,
-                    inspectionFee,
-                    shippingFee,
-                    "Sản phẩm có giá trị cao. Đã tạo đơn kiểm định. Vui lòng gửi sản phẩm đến trung tâm kiểm định theo hướng dẫn.",
-                    null
-            );
-        } else {
-            // Hàng giá thường → AI đã duyệt, đăng luôn
-            post.setStatus("ACTIVE");
-            postRepository.save(post);
-
-            return new PostSubmitResponse(
-                    "ACTIVE",
-                    false,
-                    null,
-                    null,
-                    "Bài đăng đã được AI duyệt và hiển thị trên sàn.",
-                    null
-            );
-        }
+    private PostSubmitResponse submitResponse(Post post) {
+        if ("PENDING".equals(post.getStatus()))
+            return new PostSubmitResponse("PENDING", false, null, null, "Bài có dấu hiệu trùng lặp, đang chờ STAFF kiểm duyệt; chưa trừ credit đăng bài", null);
+        boolean inspection = "PENDING_INSPECTION".equals(post.getStatus());
+        return new PostSubmitResponse(post.getStatus(), inspection, inspection ? inspectionFee : null,
+                inspection ? shippingFee : null, inspection
+                ? "Đã nhận bài và tạo đơn kiểm định. Phí kiểm định/vận chuyển thanh toán qua luồng riêng."
+                : "Bài đăng đã được duyệt và hiển thị trên sàn.", null);
     }
 
     /**
@@ -282,7 +310,6 @@ public class PostServiceImpl implements PostService {
      * Returns "APPROVED" hoặc "REJECTED:<reason>"
      */
     private String aiScanPost(Post post) {
-        ChatClient client = ChatClient.builder(googleChatModel).build();
         String prompt = String.format(
             "Bạn là hệ thống kiểm duyệt tự động của sàn mua bán đồ cũ SecondLife. " +
             "Hãy đánh giá bài đăng sản phẩm sau có phù hợp để hiển thị trên sàn không? " +
@@ -295,37 +322,26 @@ public class PostServiceImpl implements PostService {
         );
         Prompt aiPrompt = new Prompt(new UserMessage(prompt));
         ChatClient googleClient = ChatClient.builder(googleChatModel).build();
-        String result = googleClient.prompt(aiPrompt).call().content();
-        return result != null ? result.trim() : "APPROVED";
+        String result;
+        try { result = googleClient.prompt(aiPrompt).call().content(); }
+        catch (Exception ex) { throw new AiProviderException("AI moderation unavailable; no listing credit was consumed", ex); }
+        if (result == null) throw new AiProviderException("AI moderation returned no result");
+        result = result.trim();
+        if (!"APPROVED".equals(result) && !(result.startsWith("REJECTED:") && result.substring(9).trim().length() > 0))
+            throw new AiProviderException("AI moderation returned an invalid result");
+        return result;
     }
 
     @Override
     @Transactional
     public void approvePost(UUID postId) {
-        Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new RuntimeException("Post not found"));
-        
-        if (!"PENDING".equals(post.getStatus())) {
-            throw new RuntimeException("Post must be in PENDING status to be approved");
-        }
-        
-        post.setStatus("ACTIVE");
-        postRepository.save(post);
+        reviews.approve(postId, null);
     }
 
     @Override
     @Transactional
     public void rejectPost(UUID postId, String reason) {
-        Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new RuntimeException("Post not found"));
-        
-        if (!"PENDING".equals(post.getStatus())) {
-            throw new RuntimeException("Post must be in PENDING status to be rejected");
-        }
-        
-        post.setStatus("REJECTED");
-        post.setRejectionReason(reason);
-        postRepository.save(post);
+        reviews.reject(postId, null, reason);
     }
 
     @Override

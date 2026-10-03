@@ -12,6 +12,18 @@ import java.util.UUID;
 public class CreditBalanceGrantRepository {
     private final JdbcTemplate jdbcTemplate;
 
+    /** Conditional UPDATE acquires a row lock and cannot overdraw, even against concurrent grants. */
+    public long consumeOne(UUID userId, CreditType type) {
+        var balances = jdbcTemplate.queryForList("""
+                UPDATE credit_balances SET quantity = quantity - 1, version = version + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND credit_type = ? AND quantity >= 1
+                RETURNING quantity
+                """, Long.class, userId, type.name());
+        if (balances.isEmpty()) throw new com.secondlife.secondlife.exception.ConflictException("Insufficient " + type + " credits");
+        return balances.get(0);
+    }
+
     /** The upsert locks the balance row and returns the quantity for the matching ledger entry. */
     public long grant(UUID userId, CreditType type, int quantity) {
         Long balance = jdbcTemplate.queryForObject("""

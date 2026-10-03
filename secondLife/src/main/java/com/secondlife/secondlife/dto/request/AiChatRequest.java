@@ -10,7 +10,9 @@ public class AiChatRequest {
     private UUID postId; // required if starting a new chat
     
     @NotBlank
+    @jakarta.validation.constraints.Size(max = 4000)
     private String message;
 
-    private org.springframework.web.multipart.MultipartFile image; // Optional: for image analysis with llava
+    @jakarta.validation.constraints.Size(max = 6)
+    private java.util.List<org.springframework.web.multipart.MultipartFile> images;
 }

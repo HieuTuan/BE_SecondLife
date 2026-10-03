@@ -31,7 +31,7 @@ public class AiChatSession {
     private String title;
 
     @Column(name = "message_count", nullable = false)
-    private int messageCount = 0; // Each post allows up to 5 messages
+    private int messageCount = 0; // Free description chat, bounded per session and per user.
 
     @Column(name = "is_completed", nullable = false)
     private boolean isCompleted = false;

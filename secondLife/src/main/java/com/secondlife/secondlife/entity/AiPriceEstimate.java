@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
+@org.hibernate.annotations.Immutable
 @Table(name = "ai_price_estimates")
 @Getter
 @Setter
@@ -23,6 +24,15 @@ public class AiPriceEstimate {
 
     @Column(name = "listing_id", nullable = false)
     private UUID listingId;
+
+    @Column(name = "request_id", updatable = false)
+    private UUID requestId;
+
+    @Column(name = "input_fingerprint", length = 64, updatable = false)
+    private String inputFingerprint;
+
+    @Column(name = "input_snapshot", columnDefinition = "TEXT", updatable = false)
+    private String inputSnapshot;
 
     @Column(name = "model_version", length = 100)
     private String modelVersion;

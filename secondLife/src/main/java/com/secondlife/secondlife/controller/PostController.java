@@ -28,11 +28,11 @@ public class PostController {
         this.currentUserProvider = currentUserProvider;
     }
 
-    @PostMapping("/init")
+    @PostMapping(value = "/init", consumes = "multipart/form-data")
     @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
     public ResponseEntity<PostInitResponse> initPost(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @RequestBody PostInitRequest request) {
+            @Valid @ModelAttribute PostInitRequest request) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(postService.initPost(userId, request));
     }

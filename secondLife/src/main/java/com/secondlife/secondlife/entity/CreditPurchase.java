@@ -33,6 +33,7 @@ public class CreditPurchase {
     @Column(name = "valuation_unit_price", nullable = false, precision = 19, scale = 2)
     private BigDecimal valuationUnitPrice;
 
+    // Legacy snapshot columns are retained for old purchases; new purchases have no discount.
     @Column(name = "discount_tier_id")
     private UUID discountTierId;
 
@@ -43,13 +44,13 @@ public class CreditPurchase {
     private Integer discountMaxQuantity;
 
     @Column(name = "discount_rate", nullable = false, precision = 5, scale = 4)
-    private BigDecimal discountRate;
+    private BigDecimal discountRate = BigDecimal.ZERO;
 
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal subtotal;
 
     @Column(name = "discount_amount", nullable = false, precision = 19, scale = 2)
-    private BigDecimal discountAmount;
+    private BigDecimal discountAmount = BigDecimal.ZERO;
 
     @Column(name = "final_fee", nullable = false, precision = 19, scale = 2)
     private BigDecimal finalFee;
