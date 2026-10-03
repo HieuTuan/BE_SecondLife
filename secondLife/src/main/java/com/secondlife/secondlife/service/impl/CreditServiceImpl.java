@@ -7,7 +7,8 @@ import com.secondlife.secondlife.repository.TopupPackageRepository;
 import com.secondlife.secondlife.repository.UserCreditRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.CreditService;
-import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.service.WalletService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,13 +21,16 @@ public class CreditServiceImpl implements CreditService {
     private final UserCreditRepository userCreditRepository;
     private final TopupPackageRepository topupPackageRepository;
     private final UserRepository userRepository;
+    private final WalletService walletService;
 
     public CreditServiceImpl(UserCreditRepository userCreditRepository,
                              TopupPackageRepository topupPackageRepository,
-                             UserRepository userRepository) {
+                             UserRepository userRepository,
+                             WalletService walletService) {
         this.userCreditRepository = userCreditRepository;
         this.topupPackageRepository = topupPackageRepository;
         this.userRepository = userRepository;
+        this.walletService = walletService;
     }
 
     @Override
@@ -51,7 +55,18 @@ public class CreditServiceImpl implements CreditService {
     @Override
     @Transactional
     public UserCredit purchaseTopupPackage(UUID userId, UUID packageId) {
-        throw new ConflictException("Legacy topup purchase is unavailable until payment processing is integrated");
+        TopupPackage topupPackage = topupPackageRepository.findById(packageId)
+                .orElseThrow(() -> new NotFoundException("Topup package not found"));
+
+        // Deduct from wallet (throws exception if insufficient balance)
+        walletService.processPayment(userId, topupPackage.getPrice(), packageId);
+
+        // Add credits to user
+        UserCredit userCredit = getUserCredit(userId);
+        userCredit.setPostCredits(userCredit.getPostCredits() + topupPackage.getPostCredits());
+        userCredit.setChatCredits(userCredit.getChatCredits() + topupPackage.getChatCredits());
+        
+        return userCreditRepository.save(userCredit);
     }
 
     @Override
