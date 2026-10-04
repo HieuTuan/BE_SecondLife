@@ -63,6 +63,7 @@ class VnptEkycApiIntegrationTest {
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JwtTokenProvider jwtTokenProvider;
     @MockitoBean private VnptEkycOrchestrator orchestrator;
+    @MockitoBean private com.secondlife.secondlife.service.SellerOnboardingService onboarding;
 
     @Test
     void verifyRequiresBuyerPermissionAndAcceptsThreeImages() throws Exception {

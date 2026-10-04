@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.io.IOException;
@@ -34,7 +35,7 @@ class MediaServiceTest {
 
     @BeforeEach
     void setUp() {
-        mediaService = new MediaServiceImpl(cloudinary);
+        mediaService = new MediaServiceImpl(cloudinary, 10_485_760L, "secondlife/verifications");
     }
 
     @Test
@@ -99,5 +100,38 @@ class MediaServiceTest {
 
         assertEquals(2, responses.size());
         verify(uploader, times(2)).upload(any(byte[].class), anyMap());
+    }
+
+    @Test
+    void configuredByteLimitRejectsOversizedImageBeforeUpload() {
+        new ApplicationContextRunner()
+                .withBean(Cloudinary.class, () -> cloudinary)
+                .withBean(MediaServiceImpl.class)
+                .withPropertyValues("app.media.max-file-size-bytes=4", "app.media.default-folder=test-default")
+                .run(context -> {
+                    MockMultipartFile file = new MockMultipartFile("file", "photo.jpg", "image/jpeg", new byte[5]);
+                    assertThrows(BadRequestException.class,
+                            () -> context.getBean(MediaServiceImpl.class).uploadImage(file, null));
+                    verifyNoInteractions(cloudinary);
+                });
+    }
+
+    @Test
+    void configuredFolderIsUsedForAnImageAtTheByteLimit() throws IOException {
+        when(cloudinary.uploader()).thenReturn(uploader);
+        when(uploader.upload(any(byte[].class), anyMap())).thenAnswer(invocation -> {
+            Map<?, ?> options = invocation.getArgument(1);
+            return Map.of("secure_url", "https://image.example/photo.jpg", "public_id", options.get("folder") + "/photo",
+                    "format", "jpg", "bytes", 4L);
+        });
+        new ApplicationContextRunner()
+                .withBean(Cloudinary.class, () -> cloudinary)
+                .withBean(MediaServiceImpl.class)
+                .withPropertyValues("app.media.max-file-size-bytes=4", "app.media.default-folder=test-default")
+                .run(context -> {
+                    MockMultipartFile file = new MockMultipartFile("file", "photo.jpg", "image/jpeg", new byte[4]);
+                    assertEquals("test-default/photo",
+                            context.getBean(MediaServiceImpl.class).uploadImage(file, " ").publicId());
+                });
     }
 }

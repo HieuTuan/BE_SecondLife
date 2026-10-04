@@ -81,6 +81,7 @@ class Day04SellerVerificationIntegrationTest {
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JwtTokenProvider jwtTokenProvider;
     @MockitoBean private NotificationService notificationService;
+    @MockitoBean private com.secondlife.secondlife.service.SellerOnboardingService onboarding;
     @MockitoBean private PostService postService;
 
     @Test

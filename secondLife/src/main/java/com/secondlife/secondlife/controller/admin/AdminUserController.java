@@ -16,7 +16,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.web.PageableDefault;
+import org.springframework.data.web.SortDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -56,7 +56,7 @@ public class AdminUserController {
     @Operation(summary = "Read user role assignment audit history")
     public ResponseEntity<ApiResponse<PageResponse<UserRoleAuditResponse>>> getUserRoleAudit(
             @PathVariable UUID userId,
-            @org.springdoc.core.annotations.ParameterObject @PageableDefault(sort = "changedAt", direction = Sort.Direction.DESC) Pageable pageable) {
+            @org.springdoc.core.annotations.ParameterObject @SortDefault(sort = "changedAt", direction = Sort.Direction.DESC) Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success("Get user role audit successfully", adminUserRoleService.getUserRoleAudit(userId, pageable)));
     }
 
@@ -67,7 +67,7 @@ public class AdminUserController {
             @RequestParam(required = false) String email,
             @RequestParam(required = false) AccountStatus status,
             @RequestParam(required = false) String role,
-            @org.springdoc.core.annotations.ParameterObject @PageableDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
+            @org.springdoc.core.annotations.ParameterObject @SortDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         PageResponse<UserAdminResponse> response = userService.getAdminUsers(email, status, role, pageable);
         return ResponseEntity.ok(ApiResponse.success("Get users successfully", response));

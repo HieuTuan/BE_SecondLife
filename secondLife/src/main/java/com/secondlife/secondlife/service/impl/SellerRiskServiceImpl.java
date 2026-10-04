@@ -29,16 +29,45 @@ public class SellerRiskServiceImpl implements SellerRiskService {
     private final IdentityRestrictionRepository identityRestrictionRepository;
     private final boolean duplicateCheckEnabled;
     private final double reviewThreshold;
+    private final double duplicateIdentityScore;
+    private final double repeatedFailureScore;
+    private final double borderlineFaceMatchScore;
+    private final int repeatedFailureThreshold;
+    private final double borderlineFaceMatchThreshold;
 
     public SellerRiskServiceImpl(
             SellerVerificationRepository sellerVerificationRepository,
             IdentityRestrictionRepository identityRestrictionRepository,
             @Value("${app.risk.duplicate-check-enabled}") boolean duplicateCheckEnabled,
-            @Value("${app.risk.seller-review-threshold}") double reviewThreshold) {
+            @Value("${app.risk.seller-review-threshold}") double reviewThreshold,
+            @Value("${app.risk.duplicate-identity-score}") double duplicateIdentityScore,
+            @Value("${app.risk.repeated-failure-score}") double repeatedFailureScore,
+            @Value("${app.risk.borderline-face-match-score}") double borderlineFaceMatchScore,
+            @Value("${app.risk.repeated-failure-threshold}") int repeatedFailureThreshold,
+            @Value("${app.risk.borderline-face-match-threshold}") double borderlineFaceMatchThreshold) {
+        requireRange("app.risk.seller-review-threshold", reviewThreshold, 100.0);
+        requireRange("app.risk.duplicate-identity-score", duplicateIdentityScore, 100.0);
+        requireRange("app.risk.repeated-failure-score", repeatedFailureScore, 100.0);
+        requireRange("app.risk.borderline-face-match-score", borderlineFaceMatchScore, 100.0);
+        requireRange("app.risk.borderline-face-match-threshold", borderlineFaceMatchThreshold, 1.0);
+        if (repeatedFailureThreshold <= 0) {
+            throw new IllegalArgumentException("app.risk.repeated-failure-threshold must be positive");
+        }
         this.sellerVerificationRepository = sellerVerificationRepository;
         this.identityRestrictionRepository = identityRestrictionRepository;
         this.duplicateCheckEnabled = duplicateCheckEnabled;
         this.reviewThreshold = reviewThreshold;
+        this.duplicateIdentityScore = duplicateIdentityScore;
+        this.repeatedFailureScore = repeatedFailureScore;
+        this.borderlineFaceMatchScore = borderlineFaceMatchScore;
+        this.repeatedFailureThreshold = repeatedFailureThreshold;
+        this.borderlineFaceMatchThreshold = borderlineFaceMatchThreshold;
+    }
+
+    private static void requireRange(String property, double value, double maximum) {
+        if (!Double.isFinite(value) || value < 0.0 || value > maximum) {
+            throw new IllegalArgumentException(property + " must be a finite number between 0 and " + maximum);
+        }
     }
 
     @Override
@@ -74,23 +103,23 @@ public class SellerRiskServiceImpl implements SellerRiskService {
             if (duplicateWithAnotherUser) {
                 log.warn("Duplicate approved identity document detected for user: {}", user.getId());
                 reviewReasons.add(ReasonCode.DUPLICATE_IDENTITY);
-                calculatedRiskScore = Math.max(calculatedRiskScore, 85.0);
+                calculatedRiskScore = Math.max(calculatedRiskScore, duplicateIdentityScore);
             }
         }
 
         // 3. REPEATED FAILURES CHECK
         long previousFailures = sellerVerificationRepository.countByUserIdAndEkycStatus(user.getId(), EkycStatus.FAILED);
-        if (previousFailures >= 3) {
+        if (previousFailures >= repeatedFailureThreshold) {
             log.warn("User {} has {} previous failed eKYC attempts", user.getId(), previousFailures);
             reviewReasons.add(ReasonCode.REPEATED_EKYC_FAILURES);
-            calculatedRiskScore = Math.max(calculatedRiskScore, 65.0);
+            calculatedRiskScore = Math.max(calculatedRiskScore, repeatedFailureScore);
         }
 
         // 4. BORDERLINE eKYC SCORES CHECK
         if (ekycResult != null && !"VNPT_EKYC".equals(ekycResult.providerName())
-                && ekycResult.faceMatchScore() != null && ekycResult.faceMatchScore() < 0.85) {
+                && ekycResult.faceMatchScore() != null && ekycResult.faceMatchScore() < borderlineFaceMatchThreshold) {
             reviewReasons.add(ReasonCode.FACE_MATCH_BORDERLINE);
-            calculatedRiskScore = Math.max(calculatedRiskScore, 60.0);
+            calculatedRiskScore = Math.max(calculatedRiskScore, borderlineFaceMatchScore);
         }
 
         // 5. EVALUATE FINAL OUTCOME

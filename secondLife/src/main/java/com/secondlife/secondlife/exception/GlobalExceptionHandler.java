@@ -22,6 +22,16 @@ import java.util.List;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler(EmailDeliveryException.class)
+    public ResponseEntity<ErrorResponse> handleEmailDelivery(EmailDeliveryException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(ex.getMessage(), request.getRequestURI()));
+    }
+    @ExceptionHandler(ShippingProviderException.class)
+    public ResponseEntity<ErrorResponse> handleShippingProvider(ShippingProviderException ex,HttpServletRequest request) {
+        HttpStatus status = ex.getUpstreamStatus()==503 ? HttpStatus.SERVICE_UNAVAILABLE :
+                ex.getUpstreamStatus()==504 ? HttpStatus.GATEWAY_TIMEOUT : HttpStatus.BAD_GATEWAY;
+        return ResponseEntity.status(status).body(ErrorResponse.of(ex.getMessage(),request.getRequestURI()));
+    }
 
     @ExceptionHandler({org.springframework.web.servlet.resource.NoResourceFoundException.class,
             org.springframework.web.servlet.NoHandlerFoundException.class})

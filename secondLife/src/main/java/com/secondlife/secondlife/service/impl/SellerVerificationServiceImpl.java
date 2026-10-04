@@ -33,6 +33,7 @@ import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.RoleAssignmentService;
 import com.secondlife.secondlife.service.SellerRiskService;
 import com.secondlife.secondlife.service.SellerVerificationService;
+import com.secondlife.secondlife.service.SellerOnboardingService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -71,6 +72,7 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
     private final NotificationService notificationService;
     private final EkycRecoveryProperties recoveryProperties;
     private final int maxResubmissions;
+    private final SellerOnboardingService onboarding;
 
     public SellerVerificationServiceImpl(
             SellerVerificationRepository sellerVerificationRepository,
@@ -82,7 +84,8 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
             SellerVerificationMapper sellerVerificationMapper,
             NotificationService notificationService,
             EkycRecoveryProperties recoveryProperties,
-            @Value("${app.ekyc.max-resubmissions}") int maxResubmissions) {
+            @Value("${app.ekyc.max-resubmissions}") int maxResubmissions,
+            SellerOnboardingService onboarding) {
         this.sellerVerificationRepository = sellerVerificationRepository;
         this.sellerVerificationEventRepository = sellerVerificationEventRepository;
         this.userRepository = userRepository;
@@ -93,6 +96,7 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
         this.notificationService = notificationService;
         this.recoveryProperties = recoveryProperties;
         this.maxResubmissions = maxResubmissions;
+        this.onboarding = onboarding;
     }
 
     @Override
@@ -104,6 +108,8 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
         if (user.hasRole(RoleCode.SELLER.name())) {
             throw new ConflictException("Người dùng đã có vai trò SELLER trong hệ thống");
         }
+
+        onboarding.requireCompleted(userId);
 
         boolean hasActiveRequest = sellerVerificationRepository.existsByUserIdAndStatusIn(userId, ACTIVE_STATUSES);
         if (hasActiveRequest) {
@@ -155,6 +161,8 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
         if (!verification.getUser().getId().equals(userId)) {
             throw new ForbiddenException("Hồ sơ xác thực này không thuộc tài khoản hiện tại");
         }
+
+        onboarding.requireCompleted(userId);
 
         if (verification.getStatus() != SellerVerificationStatus.RESUBMIT_REQUIRED) {
             throw new ConflictException(String.format(

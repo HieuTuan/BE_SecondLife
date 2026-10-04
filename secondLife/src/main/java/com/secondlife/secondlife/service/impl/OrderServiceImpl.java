@@ -11,6 +11,10 @@ import com.secondlife.secondlife.enums.NegotiationStatus;
 import com.secondlife.secondlife.enums.OrderStatus;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.exception.ForbiddenException;
+import com.secondlife.secondlife.repository.ShipmentRepository;
+import com.secondlife.secondlife.service.shipping.ShippingQuoteService;
 import com.secondlife.secondlife.repository.NegotiationRepository;
 import com.secondlife.secondlife.repository.OrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
@@ -36,15 +40,28 @@ public class OrderServiceImpl implements OrderService {
     private final UserRepository userRepository;
     private final NegotiationRepository negotiationRepository;
     private final WalletService walletService;
+    private final ShippingQuoteService shippingQuotes;
+    private final ShipmentRepository shipments;
 
     @Override
     @Transactional
     public OrderResponseDTO createOrder(UUID buyerId, OrderRequestDTO requestDTO) {
-        Post post = postRepository.findById(requestDTO.getPostId())
+        if (requestDTO.getRequestId()==null) throw new BadRequestException("requestId is required for safe order retries");
+        Post post = postRepository.findByIdForUpdate(requestDTO.getPostId())
                 .orElseThrow(() -> new NotFoundException("Post not found"));
 
+        var replay=orderRepository.findByBuyerIdAndRequestId(buyerId,requestDTO.getRequestId());
+        if (replay.isPresent()) {
+            var previous=replay.get();
+            if (!previous.getPost().getId().equals(requestDTO.getPostId())
+                    || !java.util.Objects.equals(previous.getShippingQuoteId(),requestDTO.getShippingQuoteId())
+                    || !java.util.Objects.equals(previous.getNegotiation()==null?null:previous.getNegotiation().getId(),requestDTO.getNegotiationId()))
+                throw new ConflictException("requestId was already used with different order details");
+            return mapToDTO(previous);
+        }
+
         if (!"ACTIVE".equals(post.getStatus())) {
-            throw new BadRequestException("Post is not available for purchase");
+            throw new ConflictException("Post is not available for purchase");
         }
 
         if (post.getUser().getId().equals(buyerId)) {
@@ -83,13 +100,17 @@ public class OrderServiceImpl implements OrderService {
         order.setSeller(post.getUser());
         order.setNegotiation(negotiation);
         order.setFinalPrice(finalPrice);
+        order.setRequestId(requestDTO.getRequestId());
         order.setStatus(OrderStatus.PROCESSING); // assuming payment is immediate
         order.setEscrowStatus(EscrowStatus.HELD);
         
-        order = orderRepository.save(order);
+        order = orderRepository.saveAndFlush(order);
+        var shippingQuote=shippingQuotes.consume(buyerId,post.getId(),requestDTO.getShippingQuoteId(),order.getId(),finalPrice);
+        order.setShippingQuoteId(shippingQuote.getId()); order.setShippingFee(shippingQuote.getFee()); order.setDeliveryAddress(shippingQuote.getDeliveryAddress());
+        orderRepository.save(order);
 
         // Deduct money from buyer. This will throw an exception if insufficient balance
-        walletService.processPayment(buyerId, finalPrice, order.getId());
+        walletService.processPayment(buyerId, finalPrice.add(order.getShippingFee()), order.getId());
 
         // Update post status so it can't be bought again
         post.setStatus("SOLD");
@@ -107,7 +128,7 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public OrderResponseDTO markAsShipped(UUID sellerId, UUID orderId) {
-        Order order = orderRepository.findById(orderId)
+        Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new NotFoundException("Order not found"));
 
         if (!order.getSeller().getId().equals(sellerId)) {
@@ -118,26 +139,25 @@ public class OrderServiceImpl implements OrderService {
             throw new BadRequestException("Order is not in PROCESSING state");
         }
 
-        order.setStatus(OrderStatus.SHIPPED);
-        return mapToDTO(orderRepository.save(order));
+        throw new ConflictException("Shipment status is updated from GHN; create a shipment and wait for carrier pickup");
     }
 
     @Override
     @Transactional
     public OrderResponseDTO confirmDelivery(UUID buyerId, UUID orderId) {
-        Order order = orderRepository.findById(orderId)
+        Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new NotFoundException("Order not found"));
 
         if (!order.getBuyer().getId().equals(buyerId)) {
             throw new BadRequestException("Only the buyer can confirm delivery");
         }
 
-        if (order.getStatus() != OrderStatus.SHIPPED && order.getStatus() != OrderStatus.PROCESSING) {
-            throw new BadRequestException("Cannot confirm delivery in current status");
-        }
+        if (order.getStatus()==OrderStatus.COMPLETED && order.getEscrowStatus()==EscrowStatus.RELEASED) return mapToDTO(order);
+        if (order.getStatus()!=OrderStatus.DELIVERED || order.getShippingDeliveredAt()==null)
+            throw new ConflictException("GHN must confirm delivery before the buyer can release escrow");
 
         if (order.getEscrowStatus() != EscrowStatus.HELD) {
-            throw new BadRequestException("Escrow funds are not currently HELD");
+            throw new ConflictException("Escrow funds are not currently HELD; resolve the shipping issue or return decision first");
         }
 
         // Release funds to seller
@@ -151,13 +171,14 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public OrderResponseDTO cancelOrder(UUID userId, UUID orderId) {
-        Order order = orderRepository.findById(orderId)
+        Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new NotFoundException("Order not found"));
 
         if (!order.getBuyer().getId().equals(userId) && !order.getSeller().getId().equals(userId)) {
             throw new BadRequestException("You are not authorized to cancel this order");
         }
 
+        if (order.getStatus()==OrderStatus.CANCELLED && order.getEscrowStatus()==EscrowStatus.REFUNDED) return mapToDTO(order);
         if (order.getStatus() == OrderStatus.COMPLETED || order.getStatus() == OrderStatus.CANCELLED) {
             throw new BadRequestException("Order cannot be cancelled in current status");
         }
@@ -165,15 +186,21 @@ public class OrderServiceImpl implements OrderService {
         if (order.getEscrowStatus() != EscrowStatus.HELD) {
             throw new BadRequestException("Escrow funds are not HELD. Cannot cancel and refund.");
         }
+        var shipping=shipments.findByOrderIdOrderByCreatedAtAsc(orderId);
+        if (shipping.stream().anyMatch(s -> !"CANCELLED".equals(s.getStatus())) || order.getStatus()!=OrderStatus.PROCESSING)
+            throw new ConflictException("Cancel the carrier shipment before cancelling the order; shipped/delivered goods require return review");
 
         // Refund buyer
-        walletService.processRefund(order.getBuyer().getId(), order.getFinalPrice(), order.getId());
+        // Carrier-created shipments may incur pickup/cancellation charges; don't silently refund a consumed shipping fee.
+        BigDecimal refund=order.getFinalPrice();
+        if (shipping.isEmpty()) refund=refund.add(order.getShippingFee());
+        walletService.processRefund(order.getBuyer().getId(), refund, order.getId());
 
         order.setStatus(OrderStatus.CANCELLED);
         order.setEscrowStatus(EscrowStatus.REFUNDED);
 
         // Revert post status to ACTIVE
-        Post post = order.getPost();
+        Post post = postRepository.findByIdForUpdate(order.getPost().getId()).orElseThrow();
         post.setStatus("ACTIVE");
         postRepository.save(post);
 
@@ -199,6 +226,8 @@ public class OrderServiceImpl implements OrderService {
         dto.setSellerId(order.getSeller().getId());
         dto.setNegotiationId(order.getNegotiation() != null ? order.getNegotiation().getId() : null);
         dto.setFinalPrice(order.getFinalPrice());
+        dto.setShippingQuoteId(order.getShippingQuoteId()); dto.setShippingFee(order.getShippingFee());
+        dto.setTotalPaid(order.getFinalPrice().add(order.getShippingFee())); dto.setShippingDeliveredAt(order.getShippingDeliveredAt());
         dto.setStatus(order.getStatus());
         dto.setEscrowStatus(order.getEscrowStatus());
         dto.setCreatedAt(order.getCreatedAt());

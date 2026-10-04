@@ -8,6 +8,7 @@ import java.util.UUID;
 
 @Repository
 public interface PostRepository extends JpaRepository<Post, UUID>, org.springframework.data.jpa.repository.JpaSpecificationExecutor<Post> {
+    java.util.Optional<Post> findByIdAndStatus(UUID id, String status);
     long countByUser_IdAndStatusIn(UUID userId, java.util.Collection<String> statuses);
     long countByUser_IdAndPublishedAtAfter(UUID userId, java.time.Instant since);
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)

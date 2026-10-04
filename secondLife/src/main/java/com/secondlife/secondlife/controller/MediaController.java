@@ -30,8 +30,8 @@ public class MediaController {
     public ResponseEntity<ApiResponse<MediaUploadResponse>> uploadImage(
             @Parameter(description = "Image file to upload", required = true)
             @RequestParam("file") MultipartFile file,
-            @Parameter(description = "Target folder on Cloudinary (default: secondlife/verifications)")
-            @RequestParam(value = "folder", required = false, defaultValue = "secondlife/verifications") String folder
+            @Parameter(description = "Target folder on Cloudinary; omitted values use the configured media folder")
+            @RequestParam(value = "folder", required = false, defaultValue = "${app.media.default-folder}") String folder
     ) {
         MediaUploadResponse response = mediaService.uploadImage(file, folder);
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -43,8 +43,8 @@ public class MediaController {
     public ResponseEntity<ApiResponse<List<MediaUploadResponse>>> uploadMultipleImages(
             @Parameter(description = "List of image files to upload", required = true)
             @RequestParam("files") List<MultipartFile> files,
-            @Parameter(description = "Target folder on Cloudinary (default: secondlife/verifications)")
-            @RequestParam(value = "folder", required = false, defaultValue = "secondlife/verifications") String folder
+            @Parameter(description = "Target folder on Cloudinary; omitted values use the configured media folder")
+            @RequestParam(value = "folder", required = false, defaultValue = "${app.media.default-folder}") String folder
     ) {
         List<MediaUploadResponse> response = mediaService.uploadImages(files, folder);
         return ResponseEntity.status(HttpStatus.CREATED)

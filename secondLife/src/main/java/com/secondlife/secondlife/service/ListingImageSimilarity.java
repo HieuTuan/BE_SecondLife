@@ -1,5 +1,8 @@
 package com.secondlife.secondlife.service;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReadParam;
 import javax.imageio.ImageReader;
@@ -18,18 +21,45 @@ import java.util.List;
 import java.util.Locale;
 
 /** Approximate photo evidence for staff review; exact byte identity is handled separately. */
+@Component
 public final class ListingImageSimilarity {
-    private static final int MAX_DIMENSION = 16_000;
-    private static final long MAX_PIXELS = 25_000_000;
     private static final int SAMPLE_SIZE = 32;
     private static final double[][] COSINES = cosines();
 
-    private ListingImageSimilarity() { }
+    private final int maxDimension;
+    private final long maxPixels;
+    private final long maxBytes;
+    private final double minVariance;
+    private final int maxHashDistance;
+    private final int maxEdgeDistance;
+    private final int maxColorDistance;
+
+    public ListingImageSimilarity(
+            @Value("${app.listing.image-similarity.max-dimension}") int maxDimension,
+            @Value("${app.listing.image-similarity.max-pixels}") long maxPixels,
+            @Value("${app.listing.image-similarity.max-bytes}") long maxBytes,
+            @Value("${app.listing.image-similarity.min-variance}") double minVariance,
+            @Value("${app.listing.image-similarity.max-hash-distance}") int maxHashDistance,
+            @Value("${app.listing.image-similarity.max-edge-distance}") int maxEdgeDistance,
+            @Value("${app.listing.image-similarity.max-color-distance}") int maxColorDistance) {
+        if (maxDimension <= 0 || maxPixels <= 0 || maxBytes <= 0)
+            throw new IllegalArgumentException("Image dimension, pixel and byte limits must be positive");
+        if (!Double.isFinite(minVariance) || minVariance < 0 || maxHashDistance < 0 || maxHashDistance > 63
+                || maxEdgeDistance < 0 || maxEdgeDistance > 64 || maxColorDistance < 0 || maxColorDistance > 765)
+            throw new IllegalArgumentException("Image similarity thresholds are outside their supported ranges");
+        this.maxDimension = maxDimension;
+        this.maxPixels = maxPixels;
+        this.maxBytes = maxBytes;
+        this.minVariance = minVariance;
+        this.maxHashDistance = maxHashDistance;
+        this.maxEdgeDistance = maxEdgeDistance;
+        this.maxColorDistance = maxColorDistance;
+    }
 
     /** Returns null for undecodable or low-information images, including legacy fixture bytes. */
-    public static String fingerprint(byte[] bytes) {
+    public String fingerprint(byte[] bytes) {
         if (bytes == null || bytes.length == 0) return null;
-        if (bytes.length > 20 * 1024 * 1024) throw new IllegalArgumentException("Image file is too large");
+        if (bytes.length > maxBytes) throw new IllegalArgumentException("Image file is too large");
         BufferedImage image = decode(bytes);
         if (image == null) return null;
         Signature original = signature(image, 0, 0, image.getWidth(), image.getHeight());
@@ -49,7 +79,7 @@ public final class ListingImageSimilarity {
         return "v1:" + String.join(",", signatures.stream().map(Signature::serialize).toList());
     }
 
-    public static boolean similar(String first, String second) {
+    public boolean similar(String first, String second) {
         List<Signature> left = parse(first), right = parse(second);
         if (left.isEmpty() || right.isEmpty()) return false;
         // Require one entire photo to match: two unrelated images may share a plain corner.
@@ -58,7 +88,7 @@ public final class ListingImageSimilarity {
         return false;
     }
 
-    private static BufferedImage decode(byte[] bytes) {
+    private BufferedImage decode(byte[] bytes) {
         try (MemoryCacheImageInputStream input = new MemoryCacheImageInputStream(new ByteArrayInputStream(bytes))) {
             Iterator<ImageReader> readers = ImageIO.getImageReaders(input);
             if (!readers.hasNext()) return null;
@@ -66,8 +96,8 @@ public final class ListingImageSimilarity {
             try {
                 reader.setInput(input, true, true);
                 int width = reader.getWidth(0), height = reader.getHeight(0);
-                if (width <= 0 || height <= 0 || width > MAX_DIMENSION || height > MAX_DIMENSION
-                        || (long) width * height > MAX_PIXELS) {
+                if (width <= 0 || height <= 0 || width > maxDimension || height > maxDimension
+                        || (long) width * height > maxPixels) {
                     throw new IllegalArgumentException("Image dimensions exceed the supported limit");
                 }
                 ImageReadParam params = reader.getDefaultReadParam();
@@ -82,7 +112,7 @@ public final class ListingImageSimilarity {
         }
     }
 
-    private static Signature signature(BufferedImage source, int x, int y, int width, int height) {
+    private Signature signature(BufferedImage source, int x, int y, int width, int height) {
         BufferedImage sample = new BufferedImage(SAMPLE_SIZE, SAMPLE_SIZE, BufferedImage.TYPE_INT_RGB);
         Graphics2D graphics = sample.createGraphics();
         try {
@@ -108,7 +138,7 @@ public final class ListingImageSimilarity {
             }
         }
         int count = SAMPLE_SIZE * SAMPLE_SIZE;
-        if (squared / count - Math.pow(sum / count, 2) < 100) return null;
+        if (squared / count - Math.pow(sum / count, 2) < minVariance) return null;
         double[] coefficients = new double[63];
         int index = 0;
         for (int v = 0; v < 8; v++) {
@@ -140,11 +170,11 @@ public final class ListingImageSimilarity {
         return new Signature(hash, edges, red / count, green / count, blue / count);
     }
 
-    private static boolean matches(Signature first, Signature second) {
-        return Long.bitCount(first.hash ^ second.hash) <= 8
-                && Long.bitCount(first.edges ^ second.edges) <= 12
+    private boolean matches(Signature first, Signature second) {
+        return Long.bitCount(first.hash ^ second.hash) <= maxHashDistance
+                && Long.bitCount(first.edges ^ second.edges) <= maxEdgeDistance
                 && Math.abs(first.red - second.red) + Math.abs(first.green - second.green)
-                + Math.abs(first.blue - second.blue) <= 90;
+                + Math.abs(first.blue - second.blue) <= maxColorDistance;
     }
 
     private static List<Signature> parse(String descriptor) {

@@ -21,7 +21,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.web.PageableDefault;
+import org.springframework.data.web.SortDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -48,7 +48,7 @@ public class AdminSellerVerificationController {
             @RequestParam(required = false) EkycStatus ekycStatus,
             @RequestParam(required = false) RiskStatus riskStatus,
             @RequestParam(required = false) ReasonCode reasonCode,
-            @org.springdoc.core.annotations.ParameterObject @PageableDefault(sort = "submittedAt", direction = Sort.Direction.DESC) Pageable pageable
+            @org.springdoc.core.annotations.ParameterObject @SortDefault(sort = "submittedAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         PageResponse<SellerVerificationResponse> response = sellerVerificationService.getAdminVerifications(
                 status, ekycStatus, riskStatus, reasonCode, pageable

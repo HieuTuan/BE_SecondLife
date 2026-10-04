@@ -16,6 +16,10 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor
 public class Post {
+    private Integer shippingWeight;
+    private Integer shippingLength;
+    private Integer shippingWidth;
+    private Integer shippingHeight;
 
     @Id
     @GeneratedValue(generator = "UUID")

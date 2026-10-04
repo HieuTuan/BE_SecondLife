@@ -26,7 +26,7 @@ class AiPriceVisionTest {
     private final ChatModel text = mock(ChatModel.class);
     private final ChatModel vision = mock(ChatModel.class);
     private final AiPriceProvider provider = new OllamaAiPriceProvider(text, vision, JsonMapper.builder().build(),
-            "gemma4:31b-cloud", "gemini-2.5-flash", "secondlife-test");
+            "gemma4:31b-cloud", "gemini-2.5-flash", "secondlife-test", 6);
 
     @Test void sendsEverySavedImageAsGeminiMediaAlongsideProductSnapshot() throws Exception {
         when(vision.call(any(Prompt.class))).thenReturn(response(VALID));

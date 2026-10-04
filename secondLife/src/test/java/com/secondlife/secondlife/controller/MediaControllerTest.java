@@ -9,9 +9,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
+import org.springframework.context.expression.StandardBeanExpressionResolver;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.method.annotation.RequestParamMethodArgumentResolver;
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter;
 
 import java.util.List;
 
@@ -38,6 +43,15 @@ class MediaControllerTest {
         mockMvc = MockMvcBuilders.standaloneSetup(mediaController)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
+        DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
+        beanFactory.setBeanExpressionResolver(new StandardBeanExpressionResolver());
+        beanFactory.addEmbeddedValueResolver(new MockEnvironment()
+                .withProperty("app.media.default-folder", "configured-folder")::resolveRequiredPlaceholders);
+        RequestMappingHandlerAdapter adapter = mockMvc.getDispatcherServlet().getWebApplicationContext()
+                .getBean(RequestMappingHandlerAdapter.class);
+        adapter.setArgumentResolvers(adapter.getArgumentResolvers().stream()
+                .map(resolver -> resolver instanceof RequestParamMethodArgumentResolver
+                        ? new RequestParamMethodArgumentResolver(beanFactory, false) : resolver).toList());
     }
 
     @Test
@@ -85,5 +99,15 @@ class MediaControllerTest {
                 .andExpect(jsonPath("$.data").isArray())
                 .andExpect(jsonPath("$.data[0].url").value("https://url1.jpg"))
                 .andExpect(jsonPath("$.data[1].url").value("https://url2.jpg"));
+    }
+
+    @Test
+    void omittedFolderUsesConfiguredFolder() throws Exception {
+        when(mediaService.uploadImage(any(), any())).thenAnswer(invocation -> new MediaUploadResponse(
+                "https://image.example/photo.jpg", invocation.<String>getArgument(1) + "/photo", "jpg", 4L, "photo.jpg"));
+        mockMvc.perform(multipart("/api/v1/media/upload")
+                        .file(new MockMultipartFile("file", "photo.jpg", "image/jpeg", new byte[4])))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.publicId").value("configured-folder/photo"));
     }
 }

@@ -28,17 +28,16 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
     @PostConstruct
     public void init() {
         if (this.verifier == null) {
+            if (googleClientId == null || googleClientId.isBlank()) {
+                throw new IllegalArgumentException("Google OAuth client ID must be configured");
+            }
             GoogleIdTokenVerifier.Builder builder = new GoogleIdTokenVerifier.Builder(
                     new NetHttpTransport(),
                     GsonFactory.getDefaultInstance()
             );
 
-            if (googleClientId != null && !googleClientId.trim().isEmpty()) {
-                builder.setAudience(Collections.singletonList(googleClientId.trim()));
-                log.info("Google ID token verifier initialized with client ID: {}", googleClientId.trim());
-            } else {
-                log.warn("GOOGLE_CLIENT_ID is not configured. Token audience check skipped (Google signature & expiry still verified).");
-            }
+            builder.setAudience(Collections.singletonList(googleClientId.trim()));
+            log.info("Google ID token verifier initialized");
 
             this.verifier = builder.build();
         }

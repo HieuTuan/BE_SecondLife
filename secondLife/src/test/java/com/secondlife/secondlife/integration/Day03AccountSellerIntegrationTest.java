@@ -67,6 +67,7 @@ class Day03AccountSellerIntegrationTest {
     @Autowired private IdentityRestrictionRepository identityRestrictionRepository;
     @Autowired private RoleAssignmentService roleAssignmentService;
     @MockitoBean private NotificationService notificationService;
+    @MockitoBean private com.secondlife.secondlife.service.SellerOnboardingService onboarding;
 
     @Test
     void profileRoutesUseOnlyAuthenticatedOwner() throws Exception {

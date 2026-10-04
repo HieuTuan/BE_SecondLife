@@ -36,7 +36,8 @@ class MainFlowDescriptionTest {
         when(sessions.findById(session.getId())).thenReturn(Optional.of(session));
         when(messages.findBySessionIdOrderBySentAtAsc(session.getId())).thenReturn(List.of());
         when(ollama.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage("Mô tả sản phẩm")))));
-        var service = new AiChatServiceImpl(ollama, google, sessions, messages, users, posts);
+        var service = new AiChatServiceImpl(ollama, google, sessions, messages, users, posts,
+                10 * 1024 * 1024L, 6, 20, 60, 30, "gemma4:31b-cloud");
         var response = service.finalizeChat(session.getId(), owner.getId());
         assertEquals("Mô tả sản phẩm", response.getDescription());
         assertNull(response.getSuggestedPrice(), "Only the paid valuation endpoint may produce a price");

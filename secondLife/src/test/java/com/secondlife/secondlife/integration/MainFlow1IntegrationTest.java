@@ -20,8 +20,6 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.*;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-import org.testcontainers.junit.jupiter.*;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.util.*;
@@ -31,18 +29,20 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@Testcontainers(disabledWithoutDocker = true)
+@org.junit.jupiter.api.condition.EnabledIf("databaseAvailable")
 @SpringBootTest
 @AutoConfigureMockMvc
 @TestPropertySource(locations = "classpath:application-test.properties", properties = {
         "spring.flyway.enabled=true", "spring.jpa.hibernate.ddl-auto=none", "app.seeder.enabled=false"
 })
 class MainFlow1IntegrationTest {
-    @Container static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
+    private static final GhnTestDatabase database = new GhnTestDatabase("GHN_MAIN_FLOW_TEST_JDBC_URL");
+    static boolean databaseAvailable() { return GhnTestDatabase.available("GHN_MAIN_FLOW_TEST_JDBC_URL"); }
+    @AfterAll static void stopOwnContainer() { database.close(); }
     @DynamicPropertySource static void databaseProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.datasource.url", database::getJdbcUrl);
+        registry.add("spring.datasource.username", database::getUsername);
+        registry.add("spring.datasource.password", database::getPassword);
     }
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper mapper;
@@ -63,6 +63,7 @@ class MainFlow1IntegrationTest {
     @Autowired ListingDraftService drafts;
     @Autowired JdbcTemplate jdbc;
     @Autowired ListingReviewService reviews;
+    @Autowired ListingImageSimilarity imageSimilarity;
     @Autowired InspectionService inspectionService;
     @MockitoBean AiPriceProvider priceProvider;
     @MockitoBean CloudinaryService cloudinary;
@@ -433,12 +434,12 @@ class MainFlow1IntegrationTest {
         javax.imageio.ImageIO.write(image.getSubimage(40, 30, 320, 240), "jpeg", cropped);
         var firstSeller = user("SELLER", true); var first = draft(firstSeller);
         first.getImages().add(new PostImage(first.getImageUrl(), ListingFingerprint.sha256(full.toByteArray()),
-                ListingImageSimilarity.fingerprint(full.toByteArray()))); posts.saveAndFlush(first);
+                imageSimilarity.fingerprint(full.toByteArray()))); posts.saveAndFlush(first);
         grants.grant(firstSeller.getId(), CreditType.LISTING, 1);
         postService.submitPost(firstSeller.getId(), first.getId(), submit(first, "1000000"));
         var secondSeller = user("SELLER", true); var second = draft(secondSeller);
         second.getImages().add(new PostImage(second.getImageUrl(), ListingFingerprint.sha256(cropped.toByteArray()),
-                ListingImageSimilarity.fingerprint(cropped.toByteArray()))); posts.saveAndFlush(second);
+                imageSimilarity.fingerprint(cropped.toByteArray()))); posts.saveAndFlush(second);
         assertEquals("PENDING", postService.submitPost(secondSeller.getId(), second.getId(), submit(second, "1000000")).getStatus());
         assertTrue(reviews.detail(second.getId()).duplicateMatches().contains(first.getId()));
         assertEquals(0, consumes(secondSeller));

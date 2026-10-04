@@ -18,7 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.web.PageableDefault;
+import org.springframework.data.web.SortDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -106,7 +106,7 @@ public class AdminRbacController {
     @Operation(summary = "Get a role's permission change history")
     public ResponseEntity<ApiResponse<PageResponse<RolePermissionAuditResponse>>> getRolePermissionAudit(
             @PathVariable String roleCode,
-            @ParameterObject @PageableDefault(size = 20, sort = "changedAt", direction = Sort.Direction.DESC)
+            @ParameterObject @SortDefault(sort = "changedAt", direction = Sort.Direction.DESC)
             Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success(rbacService.getRolePermissionAudit(roleCode, pageable)));
     }

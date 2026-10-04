@@ -7,7 +7,7 @@ import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.*;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
@@ -18,11 +18,19 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/posts/{postId}")
-@RequiredArgsConstructor
 public class ListingValuationController {
     private final AiValuationService valuations;
     private final ListingDraftService drafts;
     private final CurrentUserProvider currentUser;
+    private final int maxPageSize;
+
+    public ListingValuationController(AiValuationService valuations, ListingDraftService drafts,
+            CurrentUserProvider currentUser, @Value("${app.pagination.max-size}") int maxPageSize) {
+        this.valuations = valuations;
+        this.drafts = drafts;
+        this.currentUser = currentUser;
+        this.maxPageSize = maxPageSize;
+    }
 
     @GetMapping
     @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
@@ -56,8 +64,10 @@ public class ListingValuationController {
     @GetMapping("/ai-price-estimation/history")
     @PreAuthorize("hasAuthority('LISTING_VALUATION_SELF')")
     public ApiResponse<Page<AiPriceEstimationResponse>> history(@AuthenticationPrincipal CustomUserDetails user,
-            @PathVariable UUID postId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
-        if (page < 0 || size < 1 || size > 100) throw new com.secondlife.secondlife.exception.BadRequestException("page >= 0 and size between 1 and 100 are required");
+            @PathVariable UUID postId, @RequestParam(defaultValue = "${app.pagination.default-page}") int page,
+            @RequestParam(defaultValue = "${app.pagination.default-size}") int size) {
+        if (page < 0 || size < 1 || size > maxPageSize) throw new com.secondlife.secondlife.exception.BadRequestException(
+                "page >= 0 and size between 1 and " + maxPageSize + " are required");
         return ApiResponse.success(valuations.history(currentUser.resolveUserId(user), postId, PageRequest.of(page, size)));
     }
 }

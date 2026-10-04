@@ -53,16 +53,16 @@ public class RbacDataSeeder implements ApplicationRunner {
     @Value("${app.seeder.seller.full-name}")
     private String sellerFullName;
 
-    @Value("${app.seeder.buyer.enabled:false}")
+    @Value("${app.seeder.buyer.enabled}")
     private boolean buyerSeederEnabled;
 
-    @Value("${app.seeder.buyer.email:}")
+    @Value("${app.seeder.buyer.email}")
     private String buyerEmail;
 
-    @Value("${app.seeder.buyer.password:}")
+    @Value("${app.seeder.buyer.password}")
     private String buyerPassword;
 
-    @Value("${app.seeder.buyer.full-name:}")
+    @Value("${app.seeder.buyer.full-name}")
     private String buyerFullName;
 
     @Override

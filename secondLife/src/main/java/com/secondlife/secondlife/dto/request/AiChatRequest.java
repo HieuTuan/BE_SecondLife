@@ -13,6 +13,5 @@ public class AiChatRequest {
     @jakarta.validation.constraints.Size(max = 4000)
     private String message;
 
-    @jakarta.validation.constraints.Size(max = 6)
     private java.util.List<org.springframework.web.multipart.MultipartFile> images;
 }

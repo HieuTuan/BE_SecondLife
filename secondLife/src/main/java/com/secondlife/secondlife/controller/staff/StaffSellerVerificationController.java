@@ -14,7 +14,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.web.PageableDefault;
+import org.springframework.data.web.SortDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -42,7 +42,7 @@ public class StaffSellerVerificationController {
             @RequestParam(required = false) RiskStatus riskStatus,
             @RequestParam(required = false) ReasonCode reasonCode,
             @org.springdoc.core.annotations.ParameterObject
-            @PageableDefault(sort = "submittedAt", direction = Sort.Direction.DESC) Pageable pageable) {
+            @SortDefault(sort = "submittedAt", direction = Sort.Direction.DESC) Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success("Get seller verifications successfully",
                 sellerVerificationService.getAdminVerifications(
                         status, ekycStatus, riskStatus, reasonCode, pageable)));

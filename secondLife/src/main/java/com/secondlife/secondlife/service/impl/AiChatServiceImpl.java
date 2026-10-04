@@ -22,6 +22,7 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,19 +40,45 @@ public class AiChatServiceImpl implements AiChatService {
     private final AiChatMessageRepository messageRepository;
     private final UserRepository userRepository;
     private final PostRepository postRepository;
+    private final long maxImageBytes;
+    private final int maxImages;
+    private final int rateLimitMaxMessages;
+    private final long rateLimitWindowSeconds;
+    private final int sessionMaxMessages;
+    private final String ollamaModel;
 
     public AiChatServiceImpl(@org.springframework.beans.factory.annotation.Qualifier("ollamaChatModel") org.springframework.ai.chat.model.ChatModel ollamaChatModel,
             @org.springframework.beans.factory.annotation.Qualifier("googleGenAiChatModel") org.springframework.ai.chat.model.ChatModel googleChatModel,
             AiChatSessionRepository sessionRepository,
             AiChatMessageRepository messageRepository,
             UserRepository userRepository,
-            PostRepository postRepository) {
+            PostRepository postRepository,
+            @Value("${app.listing.max-image-bytes}") long maxImageBytes,
+            @Value("${app.listing.max-images}") int maxImages,
+            @Value("${app.ai.chat.rate-limit-max-messages}") int rateLimitMaxMessages,
+            @Value("${app.ai.chat.rate-limit-window-seconds}") long rateLimitWindowSeconds,
+            @Value("${app.ai.chat.session-max-messages}") int sessionMaxMessages,
+            @Value("${spring.ai.ollama.chat.options.model}") String ollamaModel) {
+        requirePositive("app.listing.max-image-bytes", maxImageBytes);
+        requirePositive("app.listing.max-images", maxImages);
+        requirePositive("app.ai.chat.rate-limit-max-messages", rateLimitMaxMessages);
+        requirePositive("app.ai.chat.rate-limit-window-seconds", rateLimitWindowSeconds);
+        requirePositive("app.ai.chat.session-max-messages", sessionMaxMessages);
+        if (ollamaModel == null || ollamaModel.isBlank()) {
+            throw new IllegalArgumentException("spring.ai.ollama.chat.options.model must not be blank");
+        }
         this.ollamaChatClient = ChatClient.builder(ollamaChatModel).build();
         this.googleChatClient = ChatClient.builder(googleChatModel).build();
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
         this.userRepository = userRepository;
         this.postRepository = postRepository;
+        this.maxImageBytes = maxImageBytes;
+        this.maxImages = maxImages;
+        this.rateLimitMaxMessages = rateLimitMaxMessages;
+        this.rateLimitWindowSeconds = rateLimitWindowSeconds;
+        this.sessionMaxMessages = sessionMaxMessages;
+        this.ollamaModel = ollamaModel;
     }
 
     @Override
@@ -61,8 +88,8 @@ public class AiChatServiceImpl implements AiChatService {
             throw new com.secondlife.secondlife.exception.BadRequestException("Message is required and must not exceed 4000 characters");
         User user = userRepository.findByIdForRoleUpdate(currentUserId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
-        if (messageRepository.countRecentUserMessages(currentUserId, Instant.now().minusSeconds(60)) >= 20)
-            throw new ConflictException("AI chat rate limit reached; retry after one minute");
+        if (messageRepository.countRecentUserMessages(currentUserId, Instant.now().minusSeconds(rateLimitWindowSeconds)) >= rateLimitMaxMessages)
+            throw new ConflictException("AI chat rate limit reached; retry after " + rateLimitWindowSeconds + " seconds");
 
         AiChatSession session;
         if (request.getSessionId() != null) {
@@ -71,8 +98,8 @@ public class AiChatServiceImpl implements AiChatService {
             requireSessionOwner(session, currentUserId);
             requirePostOwner(session.getPostId(), currentUserId);
             if (session.isCompleted()) throw new ConflictException("Session is already completed");
-            if (session.getMessageCount() >= 30)
-                throw new ConflictException("This chat session has reached its 30-message limit; finalize the description");
+            if (session.getMessageCount() >= sessionMaxMessages)
+                throw new ConflictException("This chat session has reached its " + sessionMaxMessages + "-message limit; finalize the description");
         } else {
             requirePostOwner(request.getPostId(), currentUserId);
             session = new AiChatSession();
@@ -107,12 +134,12 @@ public class AiChatServiceImpl implements AiChatService {
         var files = new ArrayList<org.springframework.web.multipart.MultipartFile>();
         if (request.getImages() != null) files.addAll(request.getImages());
         files.removeIf(file -> file == null || file.isEmpty());
-        if (files.size() > 6) throw new com.secondlife.secondlife.exception.BadRequestException("At most 6 images are allowed");
+        if (files.size() > maxImages) throw new com.secondlife.secondlife.exception.BadRequestException("At most " + maxImages + " images are allowed");
         var media = new ArrayList<org.springframework.ai.content.Media>();
         for (var image : files) {
-            if (image == null || image.isEmpty() || image.getContentType() == null || image.getSize() > 10 * 1024 * 1024L
+            if (image == null || image.isEmpty() || image.getContentType() == null || image.getSize() > maxImageBytes
                     || !java.util.Set.of("image/jpeg", "image/png", "image/webp").contains(image.getContentType()))
-                throw new com.secondlife.secondlife.exception.BadRequestException("Image must be a non-empty JPEG, PNG or WebP no larger than 10 MB");
+                throw new com.secondlife.secondlife.exception.BadRequestException("Image must be a non-empty JPEG, PNG or WebP no larger than " + maxImageBytes + " bytes");
             try {
                 media.add(new org.springframework.ai.content.Media(
                         org.springframework.util.MimeTypeUtils.parseMimeType(image.getContentType()),
@@ -149,7 +176,7 @@ public class AiChatServiceImpl implements AiChatService {
             aiReply = call(googleChatClient, prompt);
         } else {
             // Use Ollama for text
-            Prompt prompt = new Prompt(aiMessages, org.springframework.ai.ollama.api.OllamaChatOptions.builder().model("gemma4:31b-cloud").build());
+            Prompt prompt = new Prompt(aiMessages, OllamaChatOptions.builder().model(ollamaModel).build());
             aiReply = call(ollamaChatClient, prompt);
         }
 
@@ -196,7 +223,7 @@ public class AiChatServiceImpl implements AiChatService {
         String finalizePrompt = "Dựa vào toàn bộ cuộc trò chuyện trên, hãy tổng hợp và viết ra một đoạn mô tả hoàn chỉnh cho sản phẩm này để đăng bán. Trả về đúng nội dung mô tả, tối đa 10000 ký tự, không đề xuất giá, không cần giải thích hay thêm bình luận gì khác.";
         aiMessages.add(new UserMessage(finalizePrompt));
 
-        Prompt prompt = new Prompt(aiMessages, org.springframework.ai.ollama.api.OllamaChatOptions.builder().model("gemma4:31b-cloud").build());
+        Prompt prompt = new Prompt(aiMessages, OllamaChatOptions.builder().model(ollamaModel).build());
         String finalDescription = call(ollamaChatClient, prompt);
 
         if (finalDescription == null || finalDescription.isBlank() || finalDescription.length() > 10000)
@@ -206,6 +233,12 @@ public class AiChatServiceImpl implements AiChatService {
         sessionRepository.save(session);
         
         return new PostFinalizeResponse(finalDescription, null);
+    }
+
+    private static void requirePositive(String property, long value) {
+        if (value <= 0) {
+            throw new IllegalArgumentException(property + " must be positive");
+        }
     }
 
     private void requireSessionOwner(AiChatSession session, UUID userId) {

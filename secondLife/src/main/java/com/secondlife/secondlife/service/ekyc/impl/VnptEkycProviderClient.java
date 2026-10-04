@@ -29,18 +29,20 @@ import java.util.UUID;
 @ConditionalOnProperty(name = "app.ekyc.provider", havingValue = "VNPT")
 public class VnptEkycProviderClient implements EkycProviderClient {
     private static final String PROVIDER_NAME = "VNPT_EKYC";
-    private static final int MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
     private final VnptEkycOrchestrator orchestrator;
     private final RestTemplate restTemplate;
     private final String cloudName;
+    private final long maxImageBytes;
 
     public VnptEkycProviderClient(VnptEkycOrchestrator orchestrator,
                                   @Qualifier("vnptRestTemplate") RestTemplate restTemplate,
-                                  @Value("${app.cloudinary.cloud-name}") String cloudName) {
+                                  @Value("${app.cloudinary.cloud-name}") String cloudName,
+                                  @Value("${app.ekyc.vnpt.max-image-bytes}") long maxImageBytes) {
         this.orchestrator = orchestrator;
         this.restTemplate = restTemplate;
         this.cloudName = cloudName;
+        this.maxImageBytes = maxImageBytes;
     }
 
     @Override
@@ -145,7 +147,7 @@ public class VnptEkycProviderClient implements EkycProviderClient {
             byte[] bytes = response.getBody();
             MediaType type = response.getHeaders().getContentType();
             if (!response.getStatusCode().is2xxSuccessful() || bytes == null || bytes.length == 0
-                    || bytes.length > MAX_IMAGE_BYTES || type == null
+                    || bytes.length > maxImageBytes || type == null
                     || (!MediaType.IMAGE_JPEG.isCompatibleWith(type)
                     && !MediaType.IMAGE_PNG.isCompatibleWith(type))) {
                 throw new InvalidImageException();

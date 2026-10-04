@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "app.catalog.seed-enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "app.catalog.seed-enabled", havingValue = "true")
 public class CatalogDataSeeder implements ApplicationRunner {
     private final CatalogSeedService catalog;
     @Override public void run(ApplicationArguments args) { catalog.seedDefaults(); }

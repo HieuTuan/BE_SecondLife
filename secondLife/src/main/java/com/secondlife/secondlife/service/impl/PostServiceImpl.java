@@ -21,6 +21,7 @@ import com.secondlife.secondlife.service.AiChatService;
 import com.secondlife.secondlife.service.ListingAccessService;
 import com.secondlife.secondlife.service.ListingCreditService;
 import com.secondlife.secondlife.service.ListingFingerprint;
+import com.secondlife.secondlife.service.ListingImageSimilarity;
 import com.secondlife.secondlife.enums.CreditType;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
@@ -39,14 +40,13 @@ import java.util.UUID;
 @Service
 public class PostServiceImpl implements PostService {
 
-    @Value("${app.inspection.high-value-threshold:5000000}")
-    private BigDecimal highValueThreshold;
-
-    @Value("${app.inspection.inspection-fee:200000}")
-    private BigDecimal inspectionFee;
-
-    @Value("${app.inspection.shipping-fee:50000}")
-    private BigDecimal shippingFee;
+    private final BigDecimal inspectionFee;
+    private final BigDecimal shippingFee;
+    private final int maxUnfinishedDrafts;
+    private final long maxImageBytes;
+    private final int minImages;
+    private final int maxImages;
+    private final ListingImageSimilarity imageSimilarity;
 
     private final PostRepository postRepository;
     private final UserRepository userRepository;
@@ -81,7 +81,20 @@ public class PostServiceImpl implements PostService {
                            org.springframework.ai.chat.model.ChatModel googleChatModel,
                            com.secondlife.secondlife.service.ListingPublicationService publication,
                            com.secondlife.secondlife.service.ListingReviewService reviews,
-                           com.secondlife.secondlife.service.ListingSubmissionLock submissionLock) {
+                           com.secondlife.secondlife.service.ListingSubmissionLock submissionLock,
+                           ListingImageSimilarity imageSimilarity,
+                           @Value("${app.inspection.inspection-fee}") BigDecimal inspectionFee,
+                           @Value("${app.inspection.shipping-fee}") BigDecimal shippingFee,
+                           @Value("${app.listing.max-unfinished-drafts}") int maxUnfinishedDrafts,
+                           @Value("${app.listing.max-image-bytes}") long maxImageBytes,
+                           @Value("${app.listing.min-images}") int minImages,
+                           @Value("${app.listing.max-images}") int maxImages) {
+        if (inspectionFee.signum() < 0 || shippingFee.signum() < 0)
+            throw new IllegalArgumentException("Inspection and shipping fees must be non-negative");
+        if (maxUnfinishedDrafts <= 0 || maxImageBytes <= 0)
+            throw new IllegalArgumentException("Listing draft and image byte limits must be positive");
+        if (minImages <= 0 || maxImages < minImages)
+            throw new IllegalArgumentException("Listing image bounds require a positive minimum and maximum at least the minimum");
         this.postRepository = postRepository;
         this.userRepository = userRepository;
         this.listingCredits = listingCredits;
@@ -98,6 +111,13 @@ public class PostServiceImpl implements PostService {
         this.publication = publication;
         this.reviews = reviews;
         this.submissionLock = submissionLock;
+        this.imageSimilarity = imageSimilarity;
+        this.inspectionFee = inspectionFee;
+        this.shippingFee = shippingFee;
+        this.maxUnfinishedDrafts = maxUnfinishedDrafts;
+        this.maxImageBytes = maxImageBytes;
+        this.minImages = minImages;
+        this.maxImages = maxImages;
     }
 
     @Override
@@ -112,14 +132,14 @@ public class PostServiceImpl implements PostService {
             if (!request.getCategoryId().equals(item.getCategory().getId()))
                 throw new BadRequestException("itemId does not belong to categoryId");
         }
-        if (postRepository.countByUser_IdAndStatusIn(userId, java.util.List.of("DRAFT", "REJECTED", "PENDING", "PENDING_INSPECTION")) >= 30)
-            throw new ConflictException("Maximum 30 unfinished drafts; finish an existing draft first");
-        if (request.getImages() == null || request.getImages().size() < 3 || request.getImages().size() > 6)
-            throw new BadRequestException("Upload between 3 and 6 product images");
+        if (postRepository.countByUser_IdAndStatusIn(userId, java.util.List.of("DRAFT", "REJECTED", "PENDING", "PENDING_INSPECTION")) >= maxUnfinishedDrafts)
+            throw new ConflictException("Maximum " + maxUnfinishedDrafts + " unfinished drafts; finish an existing draft first");
+        if (request.getImages() == null || request.getImages().size() < minImages || request.getImages().size() > maxImages)
+            throw new BadRequestException("Upload between " + minImages + " and " + maxImages + " product images");
         for (var image : request.getImages()) {
-            if (image == null || image.isEmpty() || image.getSize() > 10 * 1024 * 1024L || image.getContentType() == null
+            if (image == null || image.isEmpty() || image.getSize() > maxImageBytes || image.getContentType() == null
                     || !java.util.Set.of("image/jpeg", "image/png", "image/webp").contains(image.getContentType()))
-                throw new BadRequestException("Every image must be a non-empty JPEG, PNG or WebP no larger than 10 MB");
+                throw new BadRequestException("Every image must be a non-empty JPEG, PNG or WebP no larger than " + maxImageBytes + " bytes");
         }
 
         Post post = new Post();
@@ -131,7 +151,7 @@ public class PostServiceImpl implements PostService {
         for (var image : request.getImages()) {
             try {
                 byte[] imageBytes = image.getBytes();
-                String perceptualFingerprint = com.secondlife.secondlife.service.ListingImageSimilarity.fingerprint(imageBytes);
+                String perceptualFingerprint = imageSimilarity.fingerprint(imageBytes);
                 String imageUrl = cloudinaryService.uploadImage(image);
                 if (imageUrl == null || imageUrl.isBlank()) throw new IllegalStateException("Image upload returned an empty URL");
                 post.getImages().add(new com.secondlife.secondlife.entity.PostImage(imageUrl,
@@ -254,8 +274,7 @@ public class PostServiceImpl implements PostService {
         if (!post.isDescriptionAccepted() || !ListingFingerprint.normalize(request.getDescription()).equals(ListingFingerprint.normalize(post.getDescription())))
             throw new ConflictException("Accept the latest product description before submitting");
         if (post.getImageUrl() == null || post.getImageUrl().isBlank()) throw new BadRequestException("A product image is required");
-        if (postRepository.countByUser_IdAndPublishedAtAfter(userId, java.time.Instant.now().minusSeconds(600)) >= 5)
-            throw new ConflictException("Publish rate limit reached; maximum 5 accepted posts per 10 minutes");
+        publication.requirePublishAvailable(userId);
         post.setTitle(request.getTitle().trim());
         post.setDescription(request.getDescription().trim());
         post.setPrice(request.getPrice());
@@ -265,7 +284,7 @@ public class PostServiceImpl implements PostService {
                 java.util.List.of("ACTIVE", "PENDING_INSPECTION", "PENDING"))) {
             boolean sameImage = !java.util.Collections.disjoint(post.getImageFingerprints(), other.getImageFingerprints());
             boolean visuallySimilar = post.getImages().stream().anyMatch(image -> other.getImages().stream().anyMatch(candidate ->
-                    com.secondlife.secondlife.service.ListingImageSimilarity.similar(image.getPerceptualFingerprint(), candidate.getPerceptualFingerprint())));
+                    imageSimilarity.similar(image.getPerceptualFingerprint(), candidate.getPerceptualFingerprint())));
             boolean sameProduct = userId.equals(other.getUser().getId()) && java.util.Objects.equals(post.getCategoryId(), other.getCategoryId())
                     && java.util.Objects.equals(post.getItemId(), other.getItemId())
                     && ListingFingerprint.normalize(post.getTitle()).equals(ListingFingerprint.normalize(other.getTitle()))

@@ -29,19 +29,22 @@ public class OllamaAiPriceProvider implements AiPriceProvider {
     private final ChatModel visionModel;
     private final String visionModelVersion;
     private final String cloudName;
+    private final int maxImages;
 
-    public OllamaAiPriceProvider(ChatModel model, ObjectMapper mapper, String modelVersion) {
-        this(model, null, mapper, modelVersion, null, null);
+    public OllamaAiPriceProvider(ChatModel model, ObjectMapper mapper, String modelVersion, int maxImages) {
+        this(model, null, mapper, modelVersion, null, null, maxImages);
     }
 
     @Autowired
     public OllamaAiPriceProvider(@Qualifier("ollamaChatModel") ChatModel model,
             @Qualifier("googleGenAiChatModel") ChatModel visionModel, ObjectMapper mapper,
-            @Value("${spring.ai.ollama.chat.options.model:gemma4:31b-cloud}") String modelVersion,
+            @Value("${spring.ai.ollama.chat.options.model}") String modelVersion,
             @Value("${spring.ai.google.genai.chat.options.model}") String visionModelVersion,
-            @Value("${app.cloudinary.cloud-name:demo}") String cloudName) {
+            @Value("${app.cloudinary.cloud-name}") String cloudName,
+            @Value("${app.listing.max-images}") int maxImages) {
         this.model = model; this.mapper = mapper; this.modelVersion = modelVersion;
         this.visionModel = visionModel; this.visionModelVersion = visionModelVersion; this.cloudName = cloudName;
+        this.maxImages = maxImages;
     }
 
     @Override
@@ -52,7 +55,7 @@ public class OllamaAiPriceProvider implements AiPriceProvider {
     @Override
     public PriceSuggestion estimate(String inputSnapshot, List<String> imageUrls) {
         if (imageUrls == null || imageUrls.isEmpty()) return estimate(inputSnapshot);
-        if (imageUrls.size() > 6) throw new AiProviderException("AI valuation supports at most six product images");
+        if (imageUrls.size() > maxImages) throw new AiProviderException("AI valuation supports at most " + maxImages + " product images");
         try {
             List<Media> media = imageUrls.stream().map(this::trustedImage).toList();
             return estimateWithModel(inputSnapshot, media, visionModel, visionModelVersion);

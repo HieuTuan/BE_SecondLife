@@ -58,7 +58,7 @@ public class DotenvEnvironmentPostProcessor implements EnvironmentPostProcessor 
                 }
             }
         } catch (IOException e) {
-            System.err.println("Notice: Could not read .env file: " + e.getMessage());
+            throw new IllegalStateException("Cannot read local environment configuration", e);
         }
 
         if (!envMap.isEmpty()) {

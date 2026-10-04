@@ -36,6 +36,7 @@ public class InspectionServiceImpl implements InspectionService {
 
     private final InspectionOrderRepository inspectionOrderRepository;
     private final PostRepository postRepository;
+    private final com.secondlife.secondlife.repository.ShipmentRepository shipments;
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
@@ -97,6 +98,10 @@ public class InspectionServiceImpl implements InspectionService {
         if (!"PENDING".equals(order.getStatus())) {
             throw new ConflictException("Order is already completed");
         }
+        var carrierLegs=shipments.findByInspectionOrderIdOrderByCreatedAtAsc(orderId).stream()
+                .filter(s -> "SELLER_TO_CENTER".equals(s.getLeg()) && !"CANCELLED".equals(s.getStatus())).toList();
+        if (!carrierLegs.isEmpty() && !"DELIVERED".equals(carrierLegs.getLast().getStatus()))
+            throw new ConflictException("GHN must confirm delivery to the inspection center before the inspection result");
 
         order.setNote(request.getNote());
 

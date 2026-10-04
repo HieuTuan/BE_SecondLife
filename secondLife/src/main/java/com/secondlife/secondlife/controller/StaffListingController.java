@@ -7,7 +7,7 @@ import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.ListingReviewService;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.*;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -16,15 +16,23 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/staff/listings")
-@RequiredArgsConstructor
 @PreAuthorize("(hasRole('STAFF') and hasAuthority('STAFF_LISTING_REVIEW')) or (hasRole('ADMIN') and hasAuthority('POST_REVIEW'))")
 public class StaffListingController {
     private final ListingReviewService reviews;
     private final CurrentUserProvider currentUser;
+    private final int maxPageSize;
+
+    public StaffListingController(ListingReviewService reviews, CurrentUserProvider currentUser,
+            @Value("${app.pagination.max-size}") int maxPageSize) {
+        this.reviews = reviews;
+        this.currentUser = currentUser;
+        this.maxPageSize = maxPageSize;
+    }
+
     @GetMapping
-    public ApiResponse<Page<ListingDraftResponse>> queue(@RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        if (page < 0 || size < 1 || size > 100) throw new com.secondlife.secondlife.exception.BadRequestException("Invalid page or size");
+    public ApiResponse<Page<ListingDraftResponse>> queue(@RequestParam(defaultValue = "${app.pagination.default-page}") int page,
+            @RequestParam(defaultValue = "${app.pagination.default-size}") int size) {
+        if (page < 0 || size < 1 || size > maxPageSize) throw new com.secondlife.secondlife.exception.BadRequestException("Invalid page or size");
         return ApiResponse.success(reviews.queue(PageRequest.of(page, size, Sort.by("createdAt").ascending())));
     }
     @GetMapping("/{postId}")
