@@ -99,9 +99,9 @@ public class PostServiceImpl implements PostService {
         post.setItemId(request.getItemId());
         post.setStatus("DRAFT");
         
-        if (request.getImage() != null && !request.getImage().isEmpty()) {
+        if (request.getImages() != null && !request.getImages().isEmpty()) {
             try {
-                String imageUrl = cloudinaryService.uploadImage(request.getImage());
+                String imageUrl = cloudinaryService.uploadImage(request.getImages().get(0));
                 post.setImageUrl(imageUrl);
             } catch (java.io.IOException e) {
                 throw new RuntimeException("Failed to upload image to Cloudinary", e);
@@ -116,7 +116,9 @@ public class PostServiceImpl implements PostService {
         aiRequest.setPostId(post.getId());
         // Prompt for Llava to only describe the visual condition
         aiRequest.setMessage("Dựa vào hình ảnh được cung cấp, hãy chỉ nhận xét ngắn gọn về ngoại hình và tình trạng vật lý của sản phẩm này. Không cần thêm lời chào hay bình luận gì khác.");
-        aiRequest.setImage(request.getImage());
+        if (request.getImages() != null && !request.getImages().isEmpty()) {
+            aiRequest.setImage(request.getImages().get(0));
+        }
 
         // This will deduct 1 chat credit if applicable, or we might say the first message doesn't cost a chat credit? 
         // User said: "Mỗi bài đăng đi kèm 5 lượt chat". So it might cost a chat credit. 
@@ -356,6 +358,13 @@ public class PostServiceImpl implements PostService {
         if (itemId != null) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("itemId"), itemId));
         }
+        return postRepository.findAll(spec, pageable);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<Post> getMyPosts(UUID userId, org.springframework.data.domain.Pageable pageable) {
+        org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> cb.equal(root.get("user").get("id"), userId);
         return postRepository.findAll(spec, pageable);
     }
 }

@@ -73,6 +73,9 @@ public class Post {
     @Column(name = "rejection_reason", columnDefinition = "TEXT")
     private String rejectionReason; // Lý do Admin từ chối
 
+    @Column(name = "listing_credit_charged", nullable = false)
+    private Boolean listingCreditCharged = false;
+
     @PrePersist
     protected void onCreate() {
         this.createdAt = Instant.now();

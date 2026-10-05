@@ -32,7 +32,7 @@ public class PostController {
     @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
     public ResponseEntity<PostInitResponse> initPost(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @RequestBody PostInitRequest request) {
+            @ModelAttribute PostInitRequest request) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(postService.initPost(userId, request));
     }
@@ -54,5 +54,22 @@ public class PostController {
             @Valid @RequestBody PostSubmitRequest request) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(postService.submitPost(userId, postId, request));
+    }
+
+    @GetMapping("/public")
+    public ResponseEntity<org.springframework.data.domain.Page<com.secondlife.secondlife.entity.Post>> getPublicPosts(
+            @RequestParam(required = false) UUID categoryId,
+            @RequestParam(required = false) UUID itemId,
+            org.springframework.data.domain.Pageable pageable) {
+        return ResponseEntity.ok(postService.getPublicPosts(categoryId, itemId, pageable));
+    }
+
+    @GetMapping("/my-posts")
+    @PreAuthorize("hasAuthority('PROFILE_READ_SELF')")
+    public ResponseEntity<org.springframework.data.domain.Page<com.secondlife.secondlife.entity.Post>> getMyPosts(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            org.springframework.data.domain.Pageable pageable) {
+        UUID userId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(postService.getMyPosts(userId, pageable));
     }
 }
