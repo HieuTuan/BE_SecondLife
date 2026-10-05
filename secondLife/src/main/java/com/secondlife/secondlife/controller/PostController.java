@@ -56,7 +56,7 @@ public class PostController {
         return ResponseEntity.ok(postService.submitPost(userId, postId, request));
     }
 
-    @GetMapping("/public")
+    @GetMapping
     public ResponseEntity<org.springframework.data.domain.Page<com.secondlife.secondlife.entity.Post>> getPublicPosts(
             @RequestParam(required = false) UUID categoryId,
             @RequestParam(required = false) UUID itemId,
