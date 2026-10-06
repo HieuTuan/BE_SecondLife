@@ -14,7 +14,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/listings")
-@PreAuthorize("isAuthenticated()")
 public class MarketplaceListingController {
     private final MarketplaceListingService listings;
     private final int maxPageSize;

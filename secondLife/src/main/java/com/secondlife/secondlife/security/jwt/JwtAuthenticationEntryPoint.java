@@ -21,13 +21,28 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
 
     private final ObjectMapper objectMapper;
 
+    private final java.util.concurrent.ConcurrentHashMap<String, Long> lastLogTime = new java.util.concurrent.ConcurrentHashMap<>();
+
     @Override
     public void commence(
             HttpServletRequest request,
             HttpServletResponse response,
             AuthenticationException authException
     ) throws IOException, ServletException {
-        log.warn("Unauthorized request at {}", request.getRequestURI());
+        String origin = request.getHeader("Origin");
+        String referer = request.getHeader("Referer");
+        String userAgent = request.getHeader("User-Agent");
+
+        String logKey = request.getMethod() + ":" + request.getRequestURI() + ":" + request.getRemoteAddr();
+        long now = System.currentTimeMillis();
+        Long lastTime = lastLogTime.get(logKey);
+        if (lastTime == null || (now - lastTime) > 5000) {
+            lastLogTime.put(logKey, now);
+            log.warn("Unauthorized {} request at {} [RemoteAddr={}, Origin={}, Referer={}, User-Agent={}]",
+                    request.getMethod(), request.getRequestURI(), request.getRemoteAddr(), origin, referer, userAgent);
+        } else {
+            log.debug("Repeated unauthorized {} request at {}", request.getMethod(), request.getRequestURI());
+        }
 
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
