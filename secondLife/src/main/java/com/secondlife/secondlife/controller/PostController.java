@@ -64,6 +64,11 @@ public class PostController {
         return ResponseEntity.ok(postService.getPublicPosts(categoryId, itemId, pageable));
     }
 
+    @GetMapping("/{postId}")
+    public ResponseEntity<com.secondlife.secondlife.dto.response.PostDto> getPostDetail(@PathVariable UUID postId) {
+        return ResponseEntity.ok(postService.getPostDetail(postId));
+    }
+
     @GetMapping("/my-posts")
     @PreAuthorize("hasAuthority('PROFILE_READ_SELF')")
     public ResponseEntity<org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto>> getMyPosts(

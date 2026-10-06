@@ -25,5 +25,7 @@ public interface PostService {
 
     Page<com.secondlife.secondlife.dto.response.PostDto> getPublicPosts(UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable);
 
+    com.secondlife.secondlife.dto.response.PostDto getPostDetail(UUID postId);
+
     Page<com.secondlife.secondlife.dto.response.PostDto> getMyPosts(UUID userId, org.springframework.data.domain.Pageable pageable);
 }
