@@ -54,6 +54,22 @@ public class GlobalExceptionHandler {
                 .body(ErrorResponse.of("Malformed request body or parameter", request.getRequestURI()));
     }
 
+    @ExceptionHandler(org.springframework.data.core.PropertyReferenceException.class)
+    public ResponseEntity<ErrorResponse> handlePropertyReferenceException(
+            org.springframework.data.core.PropertyReferenceException ex, HttpServletRequest request) {
+        log.warn("Invalid sort property at {}: {}", request.getRequestURI(), ex.getMessage());
+        return ResponseEntity.badRequest()
+                .body(ErrorResponse.of("Invalid sort parameter: " + ex.getPropertyName(), request.getRequestURI()));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalArgumentException(
+            IllegalArgumentException ex, HttpServletRequest request) {
+        log.warn("Illegal argument at {}: {}", request.getRequestURI(), ex.getMessage());
+        return ResponseEntity.badRequest()
+                .body(ErrorResponse.of(ex.getMessage(), request.getRequestURI()));
+    }
+
     @ExceptionHandler(AiProviderException.class)
     public ResponseEntity<ErrorResponse> handleAiProvider(AiProviderException ex, HttpServletRequest request) {
         log.warn("AI provider failed at {}", request.getRequestURI());

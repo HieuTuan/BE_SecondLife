@@ -1,13 +1,12 @@
 package com.secondlife.secondlife.dto.request;
 
-import com.secondlife.secondlife.dto.shipping.ShippingAddress;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import java.util.Locale;
 
 public record SellerOnboardingRequest(
         @NotBlank @Size(max = 30) String shopName,
-        @NotNull @Valid ShippingAddress pickupAddress,
+        @NotNull @Valid SellerPickupAddressRequest pickupAddress,
         @NotBlank @Email @Size(max = 255) String email,
         @NotBlank @Pattern(regexp = "\\+?[0-9]{9,15}") String phone) {
     public SellerOnboardingRequest {

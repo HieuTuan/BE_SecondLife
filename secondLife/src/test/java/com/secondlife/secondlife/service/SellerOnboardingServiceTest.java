@@ -2,12 +2,14 @@ package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.config.SellerOnboardingProperties;
 import com.secondlife.secondlife.dto.request.SellerOnboardingRequest;
+import com.secondlife.secondlife.dto.request.SellerPickupAddressRequest;
 import com.secondlife.secondlife.dto.shipping.ShippingAddress;
 import com.secondlife.secondlife.entity.SellerOnboarding;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.exception.*;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.shipping.ShippingQuoteService;
+import com.secondlife.secondlife.service.shipping.GhnPickupAddressResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,12 +30,14 @@ class SellerOnboardingServiceTest {
     @Mock SellerVerificationRepository verifications;
     @Mock ShippingQuoteService shipping;
     @Mock SellerOnboardingMailer mailer;
+    @Mock GhnPickupAddressResolver pickupAddresses;
     final UUID userId = UUID.randomUUID();
     final JsonMapper mapper = JsonMapper.builder().findAndAddModules().build();
     final BCryptPasswordEncoder passwords = new BCryptPasswordEncoder();
     SellerOnboardingService service;
     SellerOnboarding row;
     ShippingAddress address;
+    SellerPickupAddressRequest pickupRequest;
 
     @BeforeEach
     void setup() {
@@ -41,12 +45,15 @@ class SellerOnboardingServiceTest {
         properties.setOtpTtlSeconds(600);
         properties.setResendCooldownSeconds(60);
         properties.setMaxAttempts(2);
-        service = new SellerOnboardingService(onboarding, users, verifications, shipping, mailer, properties, passwords, mapper);
+        service = new SellerOnboardingService(onboarding, users, verifications, shipping, mailer, properties, passwords, mapper, pickupAddresses);
         address = new ShippingAddress("Nguyễn A", "+84976404178", "123, Ấp Vĩnh Thành",
                 "Cần Thơ", null, "Phường Ngã Năm", null, null, true);
         row = new SellerOnboarding();
         row.setUserId(userId); row.setShopName("Shop A"); row.setEmail("shop@example.test");
         row.setPhone("+84976404178"); row.setPickupAddressJson(mapper.writeValueAsString(address));
+        pickupRequest = new SellerPickupAddressRequest(address.name(), address.phone(), address.address(), 1000001, 1003646);
+        row.setPickupProvinceId(1000001); row.setPickupWardId(1003646);
+        lenient().when(pickupAddresses.resolve(pickupRequest)).thenReturn(address);
         lenient().when(users.findByIdForRoleUpdate(userId)).thenReturn(Optional.of(new User()));
         lenient().when(onboarding.findById(userId)).thenReturn(Optional.of(row));
     }
@@ -64,7 +71,7 @@ class SellerOnboardingServiceTest {
         row.setEmailVerifiedAt(Instant.now());
         row.setEmailOtpHash(passwords.encode("123456"));
         row.setEmailOtpSentAt(Instant.now());
-        var result = service.save(userId, new SellerOnboardingRequest("  Shop B  ", address, " NEW@example.test ", "+84976404178"));
+        var result = service.save(userId, new SellerOnboardingRequest("  Shop B  ", pickupRequest, " NEW@example.test ", "+84976404178"));
         assertEquals("Shop B", result.shopName());
         assertEquals("new@example.test", result.email());
         assertFalse(result.canStartEkyc());
@@ -75,14 +82,14 @@ class SellerOnboardingServiceTest {
 
     @Test void identicalInformationKeepsEmailConfirmation() {
         row.setEmailVerifiedAt(Instant.now());
-        assertTrue(service.save(userId, new SellerOnboardingRequest("Shop A", address, row.getEmail(), row.getPhone())).canStartEkyc());
+        assertTrue(service.save(userId, new SellerOnboardingRequest("Shop A", pickupRequest, row.getEmail(), row.getPhone())).canStartEkyc());
         verify(onboarding, never()).save(any());
     }
 
     @Test void cannotChangeShopDuringAnActiveVerification() {
         when(verifications.existsByUserIdAndStatusIn(eq(userId), anyCollection())).thenReturn(true);
         assertThrows(ConflictException.class, () -> service.save(userId,
-                new SellerOnboardingRequest("Changed shop", address, row.getEmail(), row.getPhone())));
+                new SellerOnboardingRequest("Changed shop", pickupRequest, row.getEmail(), row.getPhone())));
         verify(onboarding, never()).save(any());
     }
 
@@ -99,7 +106,7 @@ class SellerOnboardingServiceTest {
 
     @Test void cooldownStopsRepeatedSendsIncludingAfterEmailChange() {
         row.setEmailOtpSentAt(Instant.now());
-        service.save(userId, new SellerOnboardingRequest("Shop A", address, "other@example.test", row.getPhone()));
+        service.save(userId, new SellerOnboardingRequest("Shop A", pickupRequest, "other@example.test", row.getPhone()));
         assertThrows(ConflictException.class, () -> service.sendEmailCode(userId));
         verifyNoInteractions(mailer);
     }
@@ -134,7 +141,7 @@ class SellerOnboardingServiceTest {
 
     @Test void changedInformationInvalidatesPreviouslySentCode() {
         pendingCode();
-        service.save(userId, new SellerOnboardingRequest("Changed shop", address, row.getEmail(), row.getPhone()));
+        service.save(userId, new SellerOnboardingRequest("Changed shop", pickupRequest, row.getEmail(), row.getPhone()));
         assertThrows(BadRequestException.class, () -> service.verifyEmailCode(userId, "123456"));
         verifyNoInteractions(shipping);
     }

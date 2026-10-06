@@ -21,19 +21,27 @@ import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.OrderService;
 import com.secondlife.secondlife.service.WalletService;
+import com.secondlife.secondlife.common.PageableUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class OrderServiceImpl implements OrderService {
+
+    private static final Set<String> ALLOWED_ORDER_SORT_PROPERTIES = Set.of(
+            "id", "finalPrice", "status", "escrowStatus", "shippingFee", "createdAt", "updatedAt", "shippingDeliveredAt"
+    );
+    private static final Sort DEFAULT_ORDER_SORT = Sort.by(Sort.Direction.DESC, "createdAt");
 
     private final OrderRepository orderRepository;
     private final PostRepository postRepository;
@@ -209,12 +217,14 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public Page<OrderResponseDTO> getBuyerOrders(UUID buyerId, Pageable pageable) {
-        return orderRepository.findByBuyerId(buyerId, pageable).map(this::mapToDTO);
+        Pageable safePageable = PageableUtils.sanitize(pageable, ALLOWED_ORDER_SORT_PROPERTIES, DEFAULT_ORDER_SORT);
+        return orderRepository.findByBuyerId(buyerId, safePageable).map(this::mapToDTO);
     }
 
     @Override
     public Page<OrderResponseDTO> getSellerOrders(UUID sellerId, Pageable pageable) {
-        return orderRepository.findBySellerId(sellerId, pageable).map(this::mapToDTO);
+        Pageable safePageable = PageableUtils.sanitize(pageable, ALLOWED_ORDER_SORT_PROPERTIES, DEFAULT_ORDER_SORT);
+        return orderRepository.findBySellerId(sellerId, safePageable).map(this::mapToDTO);
     }
 
     private OrderResponseDTO mapToDTO(Order order) {

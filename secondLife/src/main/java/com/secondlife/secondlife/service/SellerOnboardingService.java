@@ -11,6 +11,7 @@ import com.secondlife.secondlife.enums.SellerVerificationStatus;
 import com.secondlife.secondlife.exception.*;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.shipping.ShippingQuoteService;
+import com.secondlife.secondlife.service.shipping.GhnPickupAddressResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -39,23 +40,26 @@ public class SellerOnboardingService {
     private final SellerOnboardingProperties properties;
     private final PasswordEncoder passwords;
     private final ObjectMapper mapper;
+    private final GhnPickupAddressResolver pickupAddresses;
 
     @Transactional(readOnly = true)
     public SellerOnboardingResponse get(UUID userId) {
         return onboarding.findById(userId).map(this::response)
                 .orElseGet(() -> new SellerOnboardingResponse(null, null, null, null,
-                        false, false, "SHOP_INFORMATION", null));
+                        false, false, "SHOP_INFORMATION", null, null, null));
     }
 
     @Transactional
     public SellerOnboardingResponse save(UUID userId, SellerOnboardingRequest request) {
         User user = lockUser(userId);
         var row = onboarding.findById(userId).orElseGet(SellerOnboarding::new);
-        String addressJson = mapper.writeValueAsString(normalized(request.pickupAddress()));
+        String addressJson = mapper.writeValueAsString(pickupAddresses.resolve(request.pickupAddress()));
         boolean changed = !Objects.equals(row.getShopName(), request.shopName())
                 || !Objects.equals(row.getEmail(), request.email())
                 || !Objects.equals(row.getPhone(), request.phone())
-                || !Objects.equals(row.getPickupAddressJson(), addressJson);
+                || !Objects.equals(row.getPickupAddressJson(), addressJson)
+                || !Objects.equals(row.getPickupProvinceId(), request.pickupAddress().provinceId())
+                || !Objects.equals(row.getPickupWardId(), request.pickupAddress().wardId());
         if (!changed) return response(row);
         if (user.hasRole("SELLER") || verifications.existsByUserIdAndStatusIn(userId, STARTED_VERIFICATION)) {
             throw new ConflictException("Shop information cannot be changed after seller verification has started");
@@ -65,6 +69,8 @@ public class SellerOnboardingService {
         row.setEmail(request.email());
         row.setPhone(request.phone());
         row.setPickupAddressJson(addressJson);
+        row.setPickupProvinceId(request.pickupAddress().provinceId());
+        row.setPickupWardId(request.pickupAddress().wardId());
         row.setEmailVerifiedAt(null);
         clearCode(row);
         // Keep the last send time so changing email cannot bypass the resend cooldown.
@@ -146,14 +152,8 @@ public class SellerOnboardingService {
         boolean verified = row.getEmailVerifiedAt() != null;
         return new SellerOnboardingResponse(row.getShopName(),
                 mapper.readValue(row.getPickupAddressJson(), ShippingAddress.class), row.getEmail(), row.getPhone(),
-                verified, verified, verified ? "EKYC" : "EMAIL_VERIFICATION", row.getEmailVerifiedAt());
+                verified, verified, verified ? "EKYC" : "EMAIL_VERIFICATION", row.getEmailVerifiedAt(),
+                row.getPickupProvinceId(), row.getPickupWardId());
     }
 
-    private ShippingAddress normalized(ShippingAddress address) {
-        return new ShippingAddress(trim(address.name()), trim(address.phone()), trim(address.address()),
-                trim(address.provinceName()), trim(address.districtName()), trim(address.wardName()),
-                address.districtId(), trim(address.wardCode()), address.newAddress());
-    }
-
-    private String trim(String value) { return value == null ? null : value.strip(); }
 }

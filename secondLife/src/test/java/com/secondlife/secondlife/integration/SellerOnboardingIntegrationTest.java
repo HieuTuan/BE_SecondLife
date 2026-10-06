@@ -11,6 +11,9 @@ import com.secondlife.secondlife.service.EkycService;
 import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.ekyc.vnpt.VnptEkycOrchestrator;
 import com.secondlife.secondlife.service.shipping.ShippingQuoteService;
+import com.secondlife.secondlife.service.shipping.ShippingProvider;
+import com.secondlife.secondlife.exception.ShippingProviderException;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
@@ -60,14 +63,26 @@ class SellerOnboardingIntegrationTest {
     @Autowired RoleRepository roles;
     @Autowired SellerOnboardingRepository onboarding;
     @Autowired SellerVerificationRepository verifications;
+    @Autowired PostRepository posts;
     @Autowired JwtTokenProvider tokens;
     @Autowired PasswordEncoder passwords;
     @Autowired ShippingQuoteService shipping;
     @Autowired JdbcTemplate jdbc;
+    @Autowired tools.jackson.databind.ObjectMapper mapper;
+    @MockitoBean ShippingProvider carrier;
     @MockitoBean JavaMailSender mail;
     @MockitoBean NotificationService notifications;
     @MockitoBean EkycService ekyc;
     @MockitoBean VnptEkycOrchestrator directEkyc;
+
+    @BeforeEach void ghnCatalogue() {
+        when(carrier.provinces()).thenReturn(mapper.readTree("""
+                [{"_id":1000001,"name":"Cần Thơ","type":"province","status":1}]
+                """));
+        when(carrier.wards(1000001)).thenReturn(mapper.readTree("""
+                [{"_id":1003646,"name":"Phường Ngã Năm","type":"ward","status":1,"parent_id":1000001}]
+                """));
+    }
 
     @Test void informationAndEmailAreRequiredForBothEkycEntryPoints() throws Exception {
         User buyer = buyer();
@@ -84,6 +99,8 @@ class SellerOnboardingIntegrationTest {
         User buyer = buyer();
         save(buyer, "Shop A", "shop@example.test");
         String otp = sendCode(buyer);
+        assertEquals(1000001, onboarding.findById(buyer.getId()).orElseThrow().getPickupProvinceId());
+        assertEquals(1003646, onboarding.findById(buyer.getId()).orElseThrow().getPickupWardId());
         assertTrue(passwords.matches(otp, onboarding.findById(buyer.getId()).orElseThrow().getEmailOtpHash()));
         mvc.perform(verifyRequest(buyer, otp)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.emailVerified").value(true))
@@ -174,6 +191,55 @@ class SellerOnboardingIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    @Test void rejectsWrongWardAndDoesNotSaveInformationWhenGhnIsUnavailable() throws Exception {
+        User buyer = buyer();
+        mvc.perform(put("/api/seller-onboarding/me").header("Authorization", bearer(buyer))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(profile("Shop A", "shop@example.test").replace("1003646", "9999999")))
+                .andExpect(status().isBadRequest());
+        assertTrue(onboarding.findById(buyer.getId()).isEmpty());
+        when(carrier.provinces()).thenThrow(new ShippingProviderException("GHN is unavailable"));
+        mvc.perform(put("/api/seller-onboarding/me").header("Authorization", bearer(buyer))
+                .contentType(MediaType.APPLICATION_JSON).content(profile("Shop A", "shop@example.test")))
+                .andExpect(status().isBadGateway());
+        assertTrue(onboarding.findById(buyer.getId()).isEmpty());
+    }
+
+    @Test void buyerCanLoadGhnCatalogueBeforeBecomingSeller() throws Exception {
+        User buyer = buyer();
+        mvc.perform(get("/api/v1/shipping/provinces").header("Authorization", bearer(buyer)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data[0]._id").value(1000001));
+        mvc.perform(get("/api/v1/shipping/wards").param("provinceId", "1000001").header("Authorization", bearer(buyer)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].parent_id").value(1000001));
+    }
+
+    @Test void buyerQuoteUsesOnboardingPickupWithoutSavingItAgain() throws Exception {
+        User seller = buyer();
+        save(seller, "Shop A", "shop@example.test");
+        mvc.perform(verifyRequest(seller, sendCode(seller))).andExpect(status().isOk());
+        seller = users.findByIdWithAuthorities(seller.getId()).orElseThrow();
+        seller.addRole(roles.findByCode("SELLER").orElseThrow());
+        seller = users.saveAndFlush(seller);
+        var post = new com.secondlife.secondlife.entity.Post();
+        post.setUser(seller); post.setTitle("Test product"); post.setStatus("ACTIVE");
+        post.setPrice(new java.math.BigDecimal("1000000"));
+        post.setShippingWeight(5000); post.setShippingLength(50); post.setShippingWidth(40); post.setShippingHeight(35);
+        post = posts.saveAndFlush(post);
+        when(carrier.preview(anyMap())).thenReturn(mapper.readTree("{\"total_fee\":27000}"));
+        User buyer = buyer();
+        mvc.perform(post("/api/v1/shipping/quotes").header("Authorization", bearer(buyer))
+                .contentType(MediaType.APPLICATION_JSON).content("""
+                        {"postId":"%s","deliveryAddress":{"name":"Buyer","phone":"0912345678",
+                         "address":"456 Street","provinceName":"Hồ Chí Minh","wardName":"Phường Sài Gòn","newAddress":true}}
+                        """.formatted(post.getId())))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.shippingFee").value(27000));
+        var payload = ArgumentCaptor.forClass(java.util.Map.class);
+        verify(carrier).preview(payload.capture());
+        assertEquals("Cần Thơ", payload.getValue().get("from_province_name"));
+        assertEquals("Phường Ngã Năm", payload.getValue().get("from_ward_name"));
+        assertEquals("123, Ấp Vĩnh Thành", payload.getValue().get("from_address"));
+    }
+
     private void assertEkycBlocked(User buyer) throws Exception {
         mvc.perform(applicationRequest(buyer)).andExpect(status().isConflict());
         mvc.perform(directRequest().header("Authorization", bearer(buyer))).andExpect(status().isConflict());
@@ -212,7 +278,7 @@ class SellerOnboardingIntegrationTest {
         return """
                 {"shopName":"%s","email":"%s","phone":"+84976404178",
                  "pickupAddress":{"name":"Nguyễn A","phone":"+84976404178","address":"123, Ấp Vĩnh Thành",
-                 "provinceName":"Cần Thơ","wardName":"Phường Ngã Năm","newAddress":true}}
+                 "provinceId":1000001,"wardId":1003646}}
                 """.formatted(name, email);
     }
     private User buyer() { return user("BUYER"); }

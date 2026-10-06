@@ -259,9 +259,11 @@ public class ShipmentService {
     @Transactional public void receive(JsonNode body) {
         if (!body.isObject() || body.path("ShopID").asInt()!=config.getShopId() || config.getShopId()<=0) throw new ForbiddenException("Webhook shop does not match");
         String code=body.path("OrderCode").asText(),type=body.path("Type").asText();
-        if (code.isBlank() || code.length()>100 || type.isBlank() || type.length()>100) throw new BadRequestException("Webhook order code and type are required");
+        if (type.isBlank()) type="switch_status";
+        if (code.isBlank() || code.length()>100 || type.length()>100) throw new BadRequestException("Webhook order code and type are required");
         Instant time=parseProviderTime(body.get("Time"));
-        if (time==null || time.isAfter(Instant.now().plusSeconds(config.getWebhookMaxFutureSkewSeconds()))) throw new BadRequestException("Webhook time is invalid");
+        if (time==null) time=Instant.now();
+        else if (time.isAfter(Instant.now().plusSeconds(config.getWebhookMaxFutureSkewSeconds()))) throw new BadRequestException("Webhook time is invalid");
         var found=shipments.findByOrderCode(code);
         if (found.isEmpty()) found=shipments.findByClientOrderCode(body.path("ClientOrderCode").asText());
         if (found.isEmpty()) throw new ShippingProviderException("Shipment is not committed yet; retry callback",503);
@@ -329,6 +331,20 @@ public class ShipmentService {
     }
     private Instant parseProviderTime(JsonNode node) {
         if (node==null || node.isNull()) return null;
-        try { return node.isNumber()?Instant.ofEpochSecond(node.longValue()):Instant.parse(node.asText()); } catch (RuntimeException ex) { return null; }
+        try {
+            if (node.isNumber()) {
+                long v = node.longValue();
+                return v > 100_000_000_000L ? Instant.ofEpochMilli(v) : Instant.ofEpochSecond(v);
+            }
+            String text = node.asText().trim();
+            if (text.isEmpty()) return null;
+            try {
+                return Instant.parse(text);
+            } catch (RuntimeException ignored) {
+                return java.time.OffsetDateTime.parse(text.contains(" ") ? text.replace(" ", "T") : text).toInstant();
+            }
+        } catch (RuntimeException ex) {
+            return null;
+        }
     }
 }

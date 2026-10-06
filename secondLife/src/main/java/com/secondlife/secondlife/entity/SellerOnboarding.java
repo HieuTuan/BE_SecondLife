@@ -18,6 +18,8 @@ public class SellerOnboarding {
     @Column(nullable = false, length = 255) private String email;
     @Column(nullable = false, length = 16) private String phone;
     @Column(nullable = false, columnDefinition = "TEXT") private String pickupAddressJson;
+    private Integer pickupProvinceId;
+    private Integer pickupWardId;
     private Instant emailVerifiedAt;
     @com.fasterxml.jackson.annotation.JsonIgnore
     @Column(length = 255) private String emailOtpHash;

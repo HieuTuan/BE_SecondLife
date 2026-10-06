@@ -27,4 +27,22 @@ class OrderShippingSafetyTest {
         assertThrows(ConflictException.class, () -> service.confirmDelivery(buyer.getId(), order.getId()));
         verifyNoInteractions(wallets);
     }
+
+    @Test void getSellerOrdersWithMalformedSortFallsBackGracefully() {
+        OrderRepository orders = mock(OrderRepository.class);
+        var sellerId = UUID.randomUUID();
+        when(orders.findBySellerId(eq(sellerId), any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of()));
+        var service = new OrderServiceImpl(orders, mock(PostRepository.class), mock(UserRepository.class), mock(NegotiationRepository.class),
+                mock(WalletService.class), mock(com.secondlife.secondlife.service.shipping.ShippingQuoteService.class), mock(ShipmentRepository.class));
+
+        // When client sends sort=[""]
+        org.springframework.data.domain.Pageable malformed = org.springframework.data.domain.PageRequest.of(0, 1, org.springframework.data.domain.Sort.by("[\"\"]"));
+        var result = service.getSellerOrders(sellerId, malformed);
+
+        assertNotNull(result);
+        var captor = org.mockito.ArgumentCaptor.forClass(org.springframework.data.domain.Pageable.class);
+        verify(orders).findBySellerId(eq(sellerId), captor.capture());
+        assertEquals("createdAt: DESC", captor.getValue().getSort().toString());
+    }
 }
