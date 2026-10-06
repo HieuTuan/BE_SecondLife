@@ -65,6 +65,42 @@ public class RbacDataSeeder implements ApplicationRunner {
     @Value("${app.seeder.buyer.full-name}")
     private String buyerFullName;
 
+    @Value("${app.seeder.inspection-center.enabled:true}")
+    private boolean inspectionCenterSeederEnabled;
+
+    @Value("${app.seeder.inspection-center.email:center@secondlife.com}")
+    private String inspectionCenterEmail;
+
+    @Value("${app.seeder.inspection-center.password:123456}")
+    private String inspectionCenterPassword;
+
+    @Value("${app.seeder.inspection-center.full-name:Trung Tam Kiem Dinh Chinh}")
+    private String inspectionCenterFullName;
+
+    @Value("${app.seeder.inspector.enabled:true}")
+    private boolean inspectorSeederEnabled;
+
+    @Value("${app.seeder.inspector.email:inspector@secondlife.com}")
+    private String inspectorEmail;
+
+    @Value("${app.seeder.inspector.password:123456}")
+    private String inspectorPassword;
+
+    @Value("${app.seeder.inspector.full-name:Kiem Dinh Vien 1}")
+    private String inspectorFullName;
+
+    @Value("${app.seeder.staff.enabled:true}")
+    private boolean staffSeederEnabled;
+
+    @Value("${app.seeder.staff.email:staff@secondlife.com}")
+    private String staffEmail;
+
+    @Value("${app.seeder.staff.password:123456}")
+    private String staffPassword;
+
+    @Value("${app.seeder.staff.full-name:Dieu Phoi Vien}")
+    private String staffFullName;
+
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
@@ -86,6 +122,9 @@ public class RbacDataSeeder implements ApplicationRunner {
         seedAdminUser(roles.get(RoleCode.ADMIN));
         seedSellerUser(roles.get(RoleCode.SELLER), roles.get(RoleCode.BUYER));
         seedBuyerUser(roles.get(RoleCode.BUYER));
+        seedInspectionCenterUser(roles.get(RoleCode.INSPECTION_CENTER));
+        seedInspectorUser(roles.get(RoleCode.INSPECTOR));
+        seedStaffUser(roles.get(RoleCode.STAFF));
 
         log.info("RBAC and Initial Data Seeding completed successfully.");
     }
@@ -338,5 +377,65 @@ public class RbacDataSeeder implements ApplicationRunner {
         buyerUser.addRole(buyerRole);
         userRepository.save(buyerUser);
         log.info("Successfully seeded Buyer user [{}] from environment variables.", normalizedBuyerEmail);
+    }
+
+    private void seedInspectionCenterUser(Role centerRole) {
+        if (!inspectionCenterSeederEnabled) {
+            return;
+        }
+        if (centerRole == null) return;
+        
+        String normalizedEmail = inspectionCenterEmail.trim().toLowerCase(Locale.ROOT);
+        if (userRepository.existsByEmailIgnoreCase(normalizedEmail)) {
+            log.info("Inspection Center seed account [{}] already exists; skipping", normalizedEmail);
+            return;
+        }
+
+        User centerUser = new User(normalizedEmail, passwordEncoder.encode(inspectionCenterPassword), AccountStatus.ACTIVE);
+        centerUser.setEmailVerified(true);
+        centerUser.setProfile(new UserProfile(centerUser, inspectionCenterFullName.trim(), null, null));
+        centerUser.addRole(centerRole);
+        userRepository.save(centerUser);
+        log.info("Successfully seeded Inspection Center user [{}]", normalizedEmail);
+    }
+
+    private void seedInspectorUser(Role inspectorRole) {
+        if (!inspectorSeederEnabled) {
+            return;
+        }
+        if (inspectorRole == null) return;
+        
+        String normalizedEmail = inspectorEmail.trim().toLowerCase(Locale.ROOT);
+        if (userRepository.existsByEmailIgnoreCase(normalizedEmail)) {
+            log.info("Inspector seed account [{}] already exists; skipping", normalizedEmail);
+            return;
+        }
+
+        User inspectorUser = new User(normalizedEmail, passwordEncoder.encode(inspectorPassword), AccountStatus.ACTIVE);
+        inspectorUser.setEmailVerified(true);
+        inspectorUser.setProfile(new UserProfile(inspectorUser, inspectorFullName.trim(), null, null));
+        inspectorUser.addRole(inspectorRole);
+        userRepository.save(inspectorUser);
+        log.info("Successfully seeded Inspector user [{}]", normalizedEmail);
+    }
+
+    private void seedStaffUser(Role staffRole) {
+        if (!staffSeederEnabled) {
+            return;
+        }
+        if (staffRole == null) return;
+        
+        String normalizedEmail = staffEmail.trim().toLowerCase(Locale.ROOT);
+        if (userRepository.existsByEmailIgnoreCase(normalizedEmail)) {
+            log.info("Staff seed account [{}] already exists; skipping", normalizedEmail);
+            return;
+        }
+
+        User staffUser = new User(normalizedEmail, passwordEncoder.encode(staffPassword), AccountStatus.ACTIVE);
+        staffUser.setEmailVerified(true);
+        staffUser.setProfile(new UserProfile(staffUser, staffFullName.trim(), null, null));
+        staffUser.addRole(staffRole);
+        userRepository.save(staffUser);
+        log.info("Successfully seeded Staff user [{}]", normalizedEmail);
     }
 }

@@ -164,7 +164,7 @@ public class PostServiceImpl implements PostService {
         }
         post.setImageUrl(post.getImages().getFirst().getImageUrl());
         post.setImageFingerprint(post.getImages().getFirst().getImageFingerprint());
-        
+
         post = postRepository.save(post);
 
         // 3. Call AI to analyze image
@@ -391,6 +391,20 @@ public class PostServiceImpl implements PostService {
         if (itemId != null) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("itemId"), itemId));
         }
-        return postRepository.findAll(spec, pageable);
+        return postRepository.findAll(spec, pageable).map(com.secondlife.secondlife.dto.response.PostDto::fromEntity);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public com.secondlife.secondlife.dto.response.PostDto getPostDetail(UUID postId) {
+        Post post = postRepository.findById(postId).orElseThrow(() -> new NotFoundException("Post not found"));
+        return com.secondlife.secondlife.dto.response.PostDto.fromEntity(post);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto> getMyPosts(UUID userId, org.springframework.data.domain.Pageable pageable) {
+        org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> cb.equal(root.get("user").get("id"), userId);
+        return postRepository.findAll(spec, pageable).map(com.secondlife.secondlife.dto.response.PostDto::fromEntity);
     }
 }
