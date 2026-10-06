@@ -178,7 +178,7 @@ public class AiChatServiceImpl implements AiChatService {
         }
         
         // Add final prompt to summarize
-        String finalizePrompt = "Dựa vào toàn bộ cuộc trò chuyện trên, hãy tổng hợp và viết ra một đoạn mô tả hoàn chỉnh, hấp dẫn cho sản phẩm này để đăng bán. Trả về đúng nội dung mô tả, không cần giải thích hay thêm bình luận gì khác.";
+        String finalizePrompt = "Dựa vào toàn bộ cuộc trò chuyện trên, hãy tổng hợp và viết ra một đoạn mô tả hoàn chỉnh, hấp dẫn cho sản phẩm này để đăng bán. YÊU CẦU QUAN TRỌNG: CHỈ trả về đúng nội dung mô tả sản phẩm để người dùng có thể copy paste trực tiếp. TUYỆT ĐỐI KHÔNG thêm bất kỳ câu dẫn dắt nào như 'Dưới đây là...', 'Đây là đoạn mô tả...', v.v.";
         aiMessages.add(new UserMessage(finalizePrompt));
 
         Prompt prompt = new Prompt(aiMessages, org.springframework.ai.ollama.api.OllamaChatOptions.builder().model("gemma4:31b-cloud").build());

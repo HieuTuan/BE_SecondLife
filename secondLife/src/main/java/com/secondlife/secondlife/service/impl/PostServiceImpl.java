@@ -271,19 +271,40 @@ public class PostServiceImpl implements PostService {
                     null
             );
         } else {
-            // Hàng giá thường → AI đã duyệt, đăng luôn
-            post.setStatus("ACTIVE");
-            postRepository.save(post);
+            // Hàng giá thường → AI đã duyệt
+            // BƯỚC C: Kiểm tra trùng lặp ảnh
+            boolean isDuplicate = checkDuplicateImage(post);
+            if (isDuplicate) {
+                post.setStatus("PENDING");
+                postRepository.save(post);
+                return new PostSubmitResponse(
+                        "PENDING",
+                        false,
+                        null,
+                        null,
+                        "Hệ thống phát hiện ảnh có dấu hiệu trùng lặp. Bài đăng đang chờ nhân viên kiểm duyệt thủ công.",
+                        null
+                );
+            } else {
+                post.setStatus("ACTIVE");
+                postRepository.save(post);
 
-            return new PostSubmitResponse(
-                    "ACTIVE",
-                    false,
-                    null,
-                    null,
-                    "Bài đăng đã được AI duyệt và hiển thị trên sàn.",
-                    null
-            );
+                return new PostSubmitResponse(
+                        "ACTIVE",
+                        false,
+                        null,
+                        null,
+                        "Bài đăng đã được duyệt và hiển thị trên sàn.",
+                        null
+                );
+            }
         }
+    }
+
+    private boolean checkDuplicateImage(Post post) {
+        // TODO: Thay thế bằng code gọi API check trùng ảnh thực tế 
+        // (Do hiện tại chưa thấy class gọi API trong source code)
+        return false;
     }
 
     /**
