@@ -216,7 +216,14 @@ public class PostServiceImpl implements PostService {
             post.setStatus("REJECTED");
             post.setRejectionReason("AI tự động từ chối: " + reason);
             postRepository.save(post);
-            throw new RuntimeException("Bài đăng bị từ chối bởi hệ thống AI: " + reason);
+            return new PostSubmitResponse(
+                    "REJECTED",
+                    false,
+                    null,
+                    null,
+                    "Bài đăng bị từ chối bởi hệ thống AI: " + reason,
+                    null
+            );
         }
 
         // BƯỚC B: Kiểm tra ngưỡng giá
