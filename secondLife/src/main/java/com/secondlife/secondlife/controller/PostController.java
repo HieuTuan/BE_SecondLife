@@ -57,7 +57,7 @@ public class PostController {
     }
 
     @GetMapping
-    public ResponseEntity<org.springframework.data.domain.Page<com.secondlife.secondlife.entity.Post>> getPublicPosts(
+    public ResponseEntity<org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto>> getPublicPosts(
             @RequestParam(required = false) UUID categoryId,
             @RequestParam(required = false) UUID itemId,
             org.springframework.data.domain.Pageable pageable) {
@@ -66,7 +66,7 @@ public class PostController {
 
     @GetMapping("/my-posts")
     @PreAuthorize("hasAuthority('PROFILE_READ_SELF')")
-    public ResponseEntity<org.springframework.data.domain.Page<com.secondlife.secondlife.entity.Post>> getMyPosts(
+    public ResponseEntity<org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto>> getMyPosts(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             org.springframework.data.domain.Pageable pageable) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);

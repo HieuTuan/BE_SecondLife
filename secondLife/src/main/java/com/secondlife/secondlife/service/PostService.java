@@ -21,9 +21,9 @@ public interface PostService {
 
     void rejectPost(UUID postId, String reason);
 
-    Page<Post> getAdminPosts(String status, UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable);
+    Page<com.secondlife.secondlife.dto.response.PostDto> getAdminPosts(String status, UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable);
 
-    Page<com.secondlife.secondlife.entity.Post> getPublicPosts(UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable);
+    Page<com.secondlife.secondlife.dto.response.PostDto> getPublicPosts(UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable);
 
-    Page<com.secondlife.secondlife.entity.Post> getMyPosts(UUID userId, org.springframework.data.domain.Pageable pageable);
+    Page<com.secondlife.secondlife.dto.response.PostDto> getMyPosts(UUID userId, org.springframework.data.domain.Pageable pageable);
 }

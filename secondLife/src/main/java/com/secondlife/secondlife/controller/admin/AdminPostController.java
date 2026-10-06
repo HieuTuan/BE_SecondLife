@@ -19,7 +19,7 @@ public class AdminPostController {
 
     @GetMapping
     @PreAuthorize("hasAuthority('POST_REVIEW')")
-    public ResponseEntity<org.springframework.data.domain.Page<com.secondlife.secondlife.entity.Post>> getAdminPosts(
+    public ResponseEntity<org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto>> getAdminPosts(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) UUID categoryId,
             @RequestParam(required = false) UUID itemId,
