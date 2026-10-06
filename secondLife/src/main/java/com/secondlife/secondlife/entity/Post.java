@@ -39,7 +39,7 @@ public class Post {
     private String description;
 
     @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "post_images", joinColumns = @JoinColumn(name = "post_id"))
+    @CollectionTable(name = "post_image_urls", joinColumns = @JoinColumn(name = "post_id"))
     @Column(name = "image_url")
     private java.util.List<String> imageUrls = new java.util.ArrayList<>();
     @Column(name = "status", nullable = false)
