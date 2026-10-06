@@ -38,9 +38,10 @@ public class Post {
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "post_images", joinColumns = @JoinColumn(name = "post_id"))
     @Column(name = "image_url")
-    private String imageUrl; // the original image uploaded by the user
-
+    private java.util.List<String> imageUrls = new java.util.ArrayList<>();
     @Column(name = "status", nullable = false)
     private String status = "DRAFT"; // DRAFT, PENDING, ACTIVE, REJECTED
 

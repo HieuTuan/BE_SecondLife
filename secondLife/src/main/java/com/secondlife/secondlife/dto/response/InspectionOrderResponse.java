@@ -12,7 +12,7 @@ public class InspectionOrderResponse {
     private UUID id;
     private UUID postId;
     private String postTitle;
-    private String postImageUrl;
+    private java.util.List<String> postImageUrls;
     private BigDecimal postPrice;
     private UUID inspectorId;
     private String inspectorName;
@@ -29,7 +29,7 @@ public class InspectionOrderResponse {
         if (order.getPost() != null) {
             res.setPostId(order.getPost().getId());
             res.setPostTitle(order.getPost().getTitle());
-            res.setPostImageUrl(order.getPost().getImageUrl());
+            res.setPostImageUrls(order.getPost().getImageUrls());
             res.setPostPrice(order.getPost().getPrice());
         }
         if (order.getInspector() != null) {

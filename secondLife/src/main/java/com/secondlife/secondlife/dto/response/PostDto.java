@@ -16,7 +16,7 @@ public class PostDto {
     private UUID itemId;
     private String title;
     private String description;
-    private String imageUrl;
+    private java.util.List<String> imageUrls;
     private String status;
     private Instant createdAt;
     private Instant updatedAt;
@@ -53,7 +53,7 @@ public class PostDto {
                 .itemId(post.getItemId())
                 .title(post.getTitle())
                 .description(post.getDescription())
-                .imageUrl(post.getImageUrl())
+                .imageUrls(post.getImageUrls())
                 .status(post.getStatus())
                 .createdAt(post.getCreatedAt())
                 .updatedAt(post.getUpdatedAt())

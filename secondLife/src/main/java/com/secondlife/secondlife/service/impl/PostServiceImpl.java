@@ -100,12 +100,16 @@ public class PostServiceImpl implements PostService {
         post.setStatus("DRAFT");
         
         if (request.getImages() != null && !request.getImages().isEmpty()) {
-            try {
-                String imageUrl = cloudinaryService.uploadImage(request.getImages().get(0));
-                post.setImageUrl(imageUrl);
-            } catch (java.io.IOException e) {
-                throw new RuntimeException("Failed to upload image to Cloudinary", e);
+            java.util.List<String> uploadedUrls = new java.util.ArrayList<>();
+            for (org.springframework.web.multipart.MultipartFile file : request.getImages()) {
+                try {
+                    String imageUrl = cloudinaryService.uploadImage(file);
+                    uploadedUrls.add(imageUrl);
+                } catch (java.io.IOException e) {
+                    throw new RuntimeException("Failed to upload image to Cloudinary", e);
+                }
             }
+            post.setImageUrls(uploadedUrls);
         }
         
         post = postRepository.save(post);
