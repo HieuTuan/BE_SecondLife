@@ -19,12 +19,12 @@ public class AdminPostController {
 
     @GetMapping
     @PreAuthorize("hasAuthority('POST_REVIEW')")
-    public ResponseEntity<org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto>> getAdminPosts(
+    public ResponseEntity<com.secondlife.secondlife.common.PageResponse<com.secondlife.secondlife.dto.response.PostDto>> getAdminPosts(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) UUID categoryId,
             @RequestParam(required = false) UUID itemId,
             org.springframework.data.domain.Pageable pageable) {
-        return ResponseEntity.ok(postService.getAdminPosts(status, categoryId, itemId, pageable));
+        return ResponseEntity.ok(com.secondlife.secondlife.common.PageResponse.from(postService.getAdminPosts(status, categoryId, itemId, pageable)));
     }
 
     @PostMapping("/{postId}/approve")

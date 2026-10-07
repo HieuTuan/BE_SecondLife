@@ -53,7 +53,7 @@ public class PostDto {
                 .itemId(post.getItemId())
                 .title(post.getTitle())
                 .description(post.getDescription())
-                .imageUrls(post.getImageUrls())
+                .imageUrls(post.getImageUrls() != null ? new java.util.ArrayList<>(post.getImageUrls()) : null)
                 .status(post.getStatus())
                 .createdAt(post.getCreatedAt())
                 .updatedAt(post.getUpdatedAt())

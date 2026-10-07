@@ -20,6 +20,10 @@ public interface PostService {
 
     AiPriceEstimationResponse estimatePrice(UUID userId, UUID postId, String requestId);
 
+    com.secondlife.secondlife.dto.response.PostDto updateDraft(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.UpdateDraftRequest request);
+
+    com.secondlife.secondlife.dto.response.PostDto acceptDescription(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.AcceptDescriptionRequest request);
+
     void approvePost(UUID postId);
 
     void rejectPost(UUID postId, String reason);

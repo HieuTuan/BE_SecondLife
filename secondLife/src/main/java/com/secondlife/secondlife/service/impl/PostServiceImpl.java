@@ -69,7 +69,8 @@ public class PostServiceImpl implements PostService {
                            ChatClient.Builder chatClientBuilder,
                            com.secondlife.secondlife.service.CloudinaryService cloudinaryService,
                            InspectionOrderRepository inspectionOrderRepository,
-                           @org.springframework.beans.factory.annotation.Qualifier("googleGenAiChatModel") org.springframework.ai.chat.model.ChatModel googleChatModel,`n                           com.secondlife.secondlife.repository.AiChatMessageRepository chatMessageRepository) {
+                           @org.springframework.beans.factory.annotation.Qualifier("googleGenAiChatModel") org.springframework.ai.chat.model.ChatModel googleChatModel,
+                           com.secondlife.secondlife.repository.AiChatMessageRepository chatMessageRepository) {
         this.postRepository = postRepository;
         this.userRepository = userRepository;
         this.creditService = creditService;
@@ -118,11 +119,11 @@ public class PostServiceImpl implements PostService {
 
         // Extract names early
         final String categoryName = categoryRepository.findById(request.getCategoryId())
-                .map(com.secondlife.secondlife.entity.Category::getName).orElse("Không xác định");
+                .map(com.secondlife.secondlife.entity.Category::getName).orElse("KhÃ´ng xÃ¡c Ä‘á»‹nh");
         final String itemName = request.getItemId() != null ? 
                 itemRepository.findById(request.getItemId())
-                    .map(com.secondlife.secondlife.entity.Item::getName).orElse("Không xác định") 
-                : "Không xác định";
+                    .map(com.secondlife.secondlife.entity.Item::getName).orElse("KhÃ´ng xÃ¡c Ä‘á»‹nh") 
+                : "KhÃ´ng xÃ¡c Ä‘á»‹nh";
 
         // 3. Call AI to analyze image
         AiChatRequest aiRequest = new AiChatRequest();
@@ -130,9 +131,9 @@ public class PostServiceImpl implements PostService {
         aiRequest.setPostId(post.getId());
         // Prompt for Llava/Gemini to check if the image actually matches the item, and describe it.
         String messagePrompt = String.format(
-                "Dựa vào hình ảnh, sản phẩm này được người dùng chọn là loại: '%s'. Hãy kiểm tra xem hình ảnh có thực sự là '%s' không. " +
-                "NẾU KHÔNG PHẢI (ví dụ: ảnh là nồi cơm điện nhưng người dùng chọn lò vi sóng), BẮT BUỘC bắt đầu câu trả lời của bạn bằng đúng cụm từ '[CẢNH BÁO]' và giải thích sự sai lệch rõ ràng. " +
-                "NẾU ĐÚNG, hãy nhận xét ngắn gọn về ngoại hình và tình trạng vật lý của sản phẩm trong ảnh. Không cần thêm lời chào hay bình luận thừa.",
+                "Dá»±a vÃ o hÃ¬nh áº£nh, sáº£n pháº©m nÃ y Ä‘Æ°á»£c ngÆ°á»i dÃ¹ng chá»n lÃ  loáº¡i: '%s'. HÃ£y kiá»ƒm tra xem hÃ¬nh áº£nh cÃ³ thá»±c sá»± lÃ  '%s' khÃ´ng. " +
+                "Náº¾U KHÃ”NG PHáº¢I (vÃ­ dá»¥: áº£nh lÃ  ná»“i cÆ¡m Ä‘iá»‡n nhÆ°ng ngÆ°á»i dÃ¹ng chá»n lÃ² vi sÃ³ng), Báº®T BUá»˜C báº¯t Ä‘áº§u cÃ¢u tráº£ lá»i cá»§a báº¡n báº±ng Ä‘Ãºng cá»¥m tá»« '[Cáº¢NH BÃO]' vÃ  giáº£i thÃ­ch sá»± sai lá»‡ch rÃµ rÃ ng. " +
+                "Náº¾U ÄÃšNG, hÃ£y nháº­n xÃ©t ngáº¯n gá»n vá» ngoáº¡i hÃ¬nh vÃ  tÃ¬nh tráº¡ng váº­t lÃ½ cá»§a sáº£n pháº©m trong áº£nh. KhÃ´ng cáº§n thÃªm lá»i chÃ o hay bÃ¬nh luáº­n thá»«a.",
                 itemName, itemName);
         aiRequest.setMessage(messagePrompt);
         if (request.getImages() != null && !request.getImages().isEmpty()) {
@@ -141,7 +142,7 @@ public class PostServiceImpl implements PostService {
 
         // This will deduct 1 chat credit if applicable, or we might say the first
         // message doesn't cost a chat credit?
-        // User said: "Mỗi bài đăng đi kèm 5 lượt chat". So it might cost a chat credit.
+        // User said: "Má»—i bÃ i Ä‘Äƒng Ä‘i kÃ¨m 5 lÆ°á»£t chat". So it might cost a chat credit.
         // Actually, AiChatService will create a new session and count=1.
         AiChatResponse aiResponse = aiChatService.processChat(aiRequest, userId);
 
@@ -151,17 +152,17 @@ public class PostServiceImpl implements PostService {
                 .orElseGet(() -> {
                     // Generate new template
                     String promptText = String.format(
-                            "Bạn là chuyên gia về đồ cũ. Hãy tạo một đoạn mẫu câu hỏi (template) bằng tiếng Việt để hỏi người dùng các thông tin cần thiết khi họ muốn đăng bán một sản phẩm thuộc danh mục '%s', loại sản phẩm '%s'. \n" +
+                            "Báº¡n lÃ  chuyÃªn gia vá» Ä‘á»“ cÅ©. HÃ£y táº¡o má»™t Ä‘oáº¡n máº«u cÃ¢u há»i (template) báº±ng tiáº¿ng Viá»‡t Ä‘á»ƒ há»i ngÆ°á»i dÃ¹ng cÃ¡c thÃ´ng tin cáº§n thiáº¿t khi há» muá»‘n Ä‘Äƒng bÃ¡n má»™t sáº£n pháº©m thuá»™c danh má»¥c '%s', loáº¡i sáº£n pháº©m '%s'. \n" +
                                     "\n" +
-                                    "YÊU CẦU ĐỊNH DẠNG BẮT BUỘC:\n" +
-                                    "Mỗi câu hỏi phải theo ĐÚNG định dạng sau, trên từng dòng riêng biệt:\n" +
-                                    "**[Tên thông tin cần hỏi]** (Ví dụ: gợi ý 1, gợi ý 2, gợi ý 3)\n" +
+                                    "YÃŠU Cáº¦U Äá»ŠNH Dáº NG Báº®T BUá»˜C:\n" +
+                                    "Má»—i cÃ¢u há»i pháº£i theo ÄÃšNG Ä‘á»‹nh dáº¡ng sau, trÃªn tá»«ng dÃ²ng riÃªng biá»‡t:\n" +
+                                    "**[TÃªn thÃ´ng tin cáº§n há»i]** (VÃ­ dá»¥: gá»£i Ã½ 1, gá»£i Ã½ 2, gá»£i Ã½ 3)\n" +
                                     "\n" +
-                                    "Lưu ý:\n" +
-                                    "- Bắt buộc phải có từ 'Ví dụ:' trong ngoặc đơn, các gợi ý trả lời (quick replies) ngăn cách nhau bằng dấu phẩy.\n" +
-                                    "- Đưa ra 3-5 câu hỏi quan trọng nhất về tình trạng sản phẩm.\n" +
-                                    "- KHÔNG ĐƯỢC HỎI về thương hiệu, hãng sản xuất hay tên sản phẩm vì người dùng đã chọn hoặc cung cấp thông tin này rồi.\n" +
-                                    "- Không viết thêm câu dẫn dắt hay kết luận. Chỉ trả về danh sách câu hỏi.",
+                                    "LÆ°u Ã½:\n" +
+                                    "- Báº¯t buá»™c pháº£i cÃ³ tá»« 'VÃ­ dá»¥:' trong ngoáº·c Ä‘Æ¡n, cÃ¡c gá»£i Ã½ tráº£ lá»i (quick replies) ngÄƒn cÃ¡ch nhau báº±ng dáº¥u pháº©y.\n" +
+                                    "- ÄÆ°a ra 3-5 cÃ¢u há»i quan trá»ng nháº¥t vá» tÃ¬nh tráº¡ng sáº£n pháº©m.\n" +
+                                    "- KHÃ”NG ÄÆ¯á»¢C Há»ŽI vá» thÆ°Æ¡ng hiá»‡u, hÃ£ng sáº£n xuáº¥t hay tÃªn sáº£n pháº©m vÃ¬ ngÆ°á»i dÃ¹ng Ä‘Ã£ chá»n hoáº·c cung cáº¥p thÃ´ng tin nÃ y rá»“i.\n" +
+                                    "- KhÃ´ng viáº¿t thÃªm cÃ¢u dáº«n dáº¯t hay káº¿t luáº­n. Chá»‰ tráº£ vá» danh sÃ¡ch cÃ¢u há»i.",
                             categoryName, itemName);
 
                     String generatedTemplate = chatClient.prompt(promptText).call().content();
@@ -184,8 +185,8 @@ public class PostServiceImpl implements PostService {
         postRepository.save(post);
 
         String combinedResponse;
-        if (aiResponse.getReply().contains("[CẢNH BÁO]")) {
-            combinedResponse = aiResponse.getReply() + "\n\n*(Hệ thống đã tạm dừng đưa ra câu hỏi gợi ý vì hình ảnh không khớp. Vui lòng kiểm tra lại hình ảnh hoặc danh mục bạn đã chọn!)*";
+        if (aiResponse.getReply().contains("[Cáº¢NH BÃO]")) {
+            combinedResponse = aiResponse.getReply() + "\n\n*(Há»‡ thá»‘ng Ä‘Ã£ táº¡m dá»«ng Ä‘Æ°a ra cÃ¢u há»i gá»£i Ã½ vÃ¬ hÃ¬nh áº£nh khÃ´ng khá»›p. Vui lÃ²ng kiá»ƒm tra láº¡i hÃ¬nh áº£nh hoáº·c danh má»¥c báº¡n Ä‘Ã£ chá»n!)*";
         } else {
             combinedResponse = aiResponse.getReply() + "\n\n" + templateText;
         }
@@ -237,39 +238,39 @@ public class PostServiceImpl implements PostService {
             throw new ForbiddenException("This post belongs to another user");
         }
 
-        // Cập nhật thông tin người dùng chốt
+        // Cáº­p nháº­t thÃ´ng tin ngÆ°á»i dÃ¹ng chá»‘t
         post.setTitle(request.getTitle());
         post.setDescription(request.getDescription());
         post.setPrice(request.getPrice());
         postRepository.save(post);
 
-        // BƯỚC A: AI Scan bài đăng
+        // BÆ¯á»šC A: AI Scan bÃ i Ä‘Äƒng
         String scanResult = aiScanPost(post);
         if (scanResult.startsWith("REJECTED")) {
             String reason = scanResult.contains(":") ? scanResult.substring(scanResult.indexOf(":") + 1).trim()
-                    : "Nội dung bài đăng không hợp lệ";
+                    : "Ná»™i dung bÃ i Ä‘Äƒng khÃ´ng há»£p lá»‡";
             post.setStatus("REJECTED");
-            post.setRejectionReason("AI tự động từ chối: " + reason);
+            post.setRejectionReason("AI tá»± Ä‘á»™ng tá»« chá»‘i: " + reason);
             postRepository.save(post);
             return new PostSubmitResponse(
                     "REJECTED",
                     false,
                     null,
                     null,
-                    "Bài đăng bị từ chối bởi hệ thống AI: " + reason,
+                    "BÃ i Ä‘Äƒng bá»‹ tá»« chá»‘i bá»Ÿi há»‡ thá»‘ng AI: " + reason,
                     null);
         }
 
-        // BƯỚC B: Kiểm tra ngưỡng giá
+        // BÆ¯á»šC B: Kiá»ƒm tra ngÆ°á»¡ng giÃ¡
         if (post.getPrice() != null && post.getPrice().compareTo(highValueThreshold) > 0) {
-            // Hàng giá trị cao → kiểm định
+            // HÃ ng giÃ¡ trá»‹ cao â†’ kiá»ƒm Ä‘á»‹nh
             BigDecimal totalFee = inspectionFee.add(shippingFee);
 
-            // Kiểm tra credit của Seller
+            // Kiá»ƒm tra credit cá»§a Seller
             UserCredit userCredit = creditService.getUserCredit(userId);
-            // Dùng post_credits như một đơn vị tương đương tiền (1 credit = 1000 VNĐ)
-            // Nếu không đủ credit, trả về response kèm số tiền còn thiếu để FE hiển thị lựa
-            // chọn
+            // DÃ¹ng post_credits nhÆ° má»™t Ä‘Æ¡n vá»‹ tÆ°Æ¡ng Ä‘Æ°Æ¡ng tiá»n (1 credit = 1000 VNÄ)
+            // Náº¿u khÃ´ng Ä‘á»§ credit, tráº£ vá» response kÃ¨m sá»‘ tiá»n cÃ²n thiáº¿u Ä‘á»ƒ FE hiá»ƒn thá»‹ lá»±a
+            // chá»n
             long requiredCredits = totalFee.longValue() / 1000;
             if (userCredit.getPostCredits() < requiredCredits) {
                 BigDecimal shortfall = totalFee.subtract(BigDecimal.valueOf(userCredit.getPostCredits() * 1000L));
@@ -278,14 +279,14 @@ public class PostServiceImpl implements PostService {
                         true,
                         inspectionFee,
                         shippingFee,
-                        "Không đủ credit để thanh toán phí kiểm định và vận chuyển. Vui lòng nạp thêm hoặc thanh toán trực tiếp qua chuyển khoản.",
+                        "KhÃ´ng Ä‘á»§ credit Ä‘á»ƒ thanh toÃ¡n phÃ­ kiá»ƒm Ä‘á»‹nh vÃ  váº­n chuyá»ƒn. Vui lÃ²ng náº¡p thÃªm hoáº·c thanh toÃ¡n trá»±c tiáº¿p qua chuyá»ƒn khoáº£n.",
                         shortfall);
             }
 
-            // Trừ credit
+            // Trá»« credit
             userCredit.setPostCredits((int) (userCredit.getPostCredits() - requiredCredits));
 
-            // Tạo InspectionOrder
+            // Táº¡o InspectionOrder
             InspectionOrder order = new InspectionOrder();
             order.setPost(post);
             order.setInspectionFee(inspectionFee);
@@ -301,11 +302,11 @@ public class PostServiceImpl implements PostService {
                     true,
                     inspectionFee,
                     shippingFee,
-                    "Sản phẩm có giá trị cao. Đã tạo đơn kiểm định. Vui lòng gửi sản phẩm đến trung tâm kiểm định theo hướng dẫn.",
+                    "Sáº£n pháº©m cÃ³ giÃ¡ trá»‹ cao. ÄÃ£ táº¡o Ä‘Æ¡n kiá»ƒm Ä‘á»‹nh. Vui lÃ²ng gá»­i sáº£n pháº©m Ä‘áº¿n trung tÃ¢m kiá»ƒm Ä‘á»‹nh theo hÆ°á»›ng dáº«n.",
                     null);
         } else {
-            // Hàng giá thường → AI đã duyệt
-            // BƯỚC C: Kiểm tra trùng lặp ảnh
+            // HÃ ng giÃ¡ thÆ°á»ng â†’ AI Ä‘Ã£ duyá»‡t
+            // BÆ¯á»šC C: Kiá»ƒm tra trÃ¹ng láº·p áº£nh
             boolean isDuplicate = checkDuplicateImage(post);
             if (isDuplicate) {
                 post.setStatus("PENDING");
@@ -315,7 +316,7 @@ public class PostServiceImpl implements PostService {
                         false,
                         null,
                         null,
-                        "Hệ thống phát hiện ảnh có dấu hiệu trùng lặp. Bài đăng đang chờ nhân viên kiểm duyệt thủ công.",
+                        "Há»‡ thá»‘ng phÃ¡t hiá»‡n áº£nh cÃ³ dáº¥u hiá»‡u trÃ¹ng láº·p. BÃ i Ä‘Äƒng Ä‘ang chá» nhÃ¢n viÃªn kiá»ƒm duyá»‡t thá»§ cÃ´ng.",
                         null);
             } else {
                 post.setStatus("ACTIVE");
@@ -326,32 +327,32 @@ public class PostServiceImpl implements PostService {
                         false,
                         null,
                         null,
-                        "Bài đăng đã được duyệt và hiển thị trên sàn.",
+                        "BÃ i Ä‘Äƒng Ä‘Ã£ Ä‘Æ°á»£c duyá»‡t vÃ  hiá»ƒn thá»‹ trÃªn sÃ n.",
                         null);
             }
         }
     }
 
     private boolean checkDuplicateImage(Post post) {
-        // TODO: Thay thế bằng code gọi API check trùng ảnh thực tế
-        // (Do hiện tại chưa thấy class gọi API trong source code)
+        // TODO: Thay tháº¿ báº±ng code gá»i API check trÃ¹ng áº£nh thá»±c táº¿
+        // (Do hiá»‡n táº¡i chÆ°a tháº¥y class gá»i API trong source code)
         return false;
     }
 
     /**
-     * Gọi Google Gemini để scan bài đăng.
-     * Returns "APPROVED" hoặc "REJECTED:<reason>"
+     * Gá»i Google Gemini Ä‘á»ƒ scan bÃ i Ä‘Äƒng.
+     * Returns "APPROVED" hoáº·c "REJECTED:<reason>"
      */
     private String aiScanPost(Post post) {
         ChatClient client = ChatClient.builder(googleChatModel).build();
         String prompt = String.format(
-                "Bạn là hệ thống kiểm duyệt tự động của sàn mua bán đồ cũ SecondLife. " +
-                        "Hãy đánh giá bài đăng sản phẩm sau có phù hợp để hiển thị trên sàn không? " +
-                        "Kiểm tra: (1) Mô tả có khớp với loại sản phẩm, (2) Không có dấu hiệu lừa đảo, " +
-                        "(3) Không vi phạm nội quy (hàng cấm, hàng giả, thông tin sai lệch). " +
-                        "Tiêu đề: %s. Mô tả: %s. Giá: %s VNĐ. " +
-                        "CHỈ trả về đúng một trong hai dạng sau, không giải thích thêm: " +
-                        "APPROVED hoặc REJECTED:<lý do ngắn gọn bằng tiếng Việt>",
+                "Báº¡n lÃ  há»‡ thá»‘ng kiá»ƒm duyá»‡t tá»± Ä‘á»™ng cá»§a sÃ n mua bÃ¡n Ä‘á»“ cÅ© SecondLife. " +
+                        "HÃ£y Ä‘Ã¡nh giÃ¡ bÃ i Ä‘Äƒng sáº£n pháº©m sau cÃ³ phÃ¹ há»£p Ä‘á»ƒ hiá»ƒn thá»‹ trÃªn sÃ n khÃ´ng? " +
+                        "Kiá»ƒm tra: (1) MÃ´ táº£ cÃ³ khá»›p vá»›i loáº¡i sáº£n pháº©m, (2) KhÃ´ng cÃ³ dáº¥u hiá»‡u lá»«a Ä‘áº£o, " +
+                        "(3) KhÃ´ng vi pháº¡m ná»™i quy (hÃ ng cáº¥m, hÃ ng giáº£, thÃ´ng tin sai lá»‡ch). " +
+                        "TiÃªu Ä‘á»: %s. MÃ´ táº£: %s. GiÃ¡: %s VNÄ. " +
+                        "CHá»ˆ tráº£ vá» Ä‘Ãºng má»™t trong hai dáº¡ng sau, khÃ´ng giáº£i thÃ­ch thÃªm: " +
+                        "APPROVED hoáº·c REJECTED:<lÃ½ do ngáº¯n gá»n báº±ng tiáº¿ng Viá»‡t>",
                 post.getTitle(), post.getDescription(), post.getPrice());
         Prompt aiPrompt = new Prompt(new UserMessage(prompt));
         ChatClient googleClient = ChatClient.builder(googleChatModel).build();
@@ -391,8 +392,7 @@ public class PostServiceImpl implements PostService {
     @Transactional(readOnly = true)
     public org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto> getAdminPosts(
             String status, UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable) {
-        org.springframework.data.jpa.domain.Specification<Post> spec = org.springframework.data.jpa.domain.Specification
-                .where((org.springframework.data.jpa.domain.Specification<Post>) null);
+        org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> cb.conjunction();
         if (status != null && !status.isEmpty()) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), status));
         }
@@ -441,35 +441,46 @@ public class PostServiceImpl implements PostService {
         // Build context from post data
         String itemName = post.getItemId() != null ?
                 itemRepository.findById(post.getItemId())
-                        .map(com.secondlife.secondlife.entity.Item::getName).orElse("Không xác định")
-                : "Không xác định";
-
+                        .map(com.secondlife.secondlife.entity.Item::getName).orElse("KhÃ´ng xÃ¡c Ä‘á»‹nh")
+                : "KhÃ´ng xÃ¡c Ä‘á»‹nh";
         String description = post.getDescription() != null ? post.getDescription() : "Không có mô tả";
         String priceContext = post.getAiSuggestedPrice() != null
                 ? "Giá mà người bán đã đề xuất: " + post.getAiSuggestedPrice() + " VNĐ."
                 : "";
 
-        String pricePrompt = String.format(
-                "B?n l� chuy�n gia d?nh gi� d? gia d?ng cu d� qua s? d?ng t?i th? tru?ng Vi?t Nam. " +
-                "H�y d?nh gi� s?n ph?m sau d?a tr�n th�ng tin du?c cung c?p. " +
-                "S?n ph?m: %s.\nM� t? hi?n t?i: %s.\n%s\nTh�ng tin ngu?i b�n d� cung c?p th�m:\n%s\n\n" +
-                "QUY T?C �?NH GI� B?T BU?C:\n" +
-                "- Gi� d? cu PH?I TH?P HON gi� mua m?i t? 30%% d?n 70%% tu? t�nh tr?ng.\n" +
-                "- N?u s?n ph?m m?i 99%% (d�ng < 1 tu?n): gi?m 20-30%% so v?i gi� mua m?i.\n" +
-                "- N?u s?n ph?m t?t (d�ng v�i th�ng): gi?m 40-50%% so v?i gi� mua m?i.\n" +
-                "- N?u s?n ph?m d� d�ng l�u (> 1 nam): gi?m 50-70%%.\n" +
-                "- TUY?T �?I KH�NG dua ra gi� b?ng ho?c cao hon gi� mua m?i.\n\n" +
-                "Tr? v? K?T QU? THEO ��NG �?NH D?NG JSON sau, kh�ng gi?i th�ch g� th�m:\n" +
-                "{\"fairPriceMin\": <s? nguy�n VN�>, \"fairPriceMax\": <s? nguy�n VN�>, \"suggestedPrice\": <s? nguy�n VN�>, \"expectedSellTime\": \"<v� d?: 3-5 ng�y>\"}" ,
-                itemName, description, priceContext, chatContext.toString());
+        StringBuilder chatContext = new StringBuilder();
+        if (requestId != null && !requestId.trim().isEmpty()) {
+            try {
+                java.util.UUID sessionId = java.util.UUID.fromString(requestId);
+                java.util.List<com.secondlife.secondlife.entity.AiChatMessage> messages = chatMessageRepository.findBySessionIdOrderBySentAtAsc(sessionId);
+                for (com.secondlife.secondlife.entity.AiChatMessage msg : messages) {
+                    chatContext.append(msg.getRole()).append(": ").append(msg.getMessageContent()).append("\n");
+                }
+            } catch (Exception e) {
+                // Ignore invalid requestId or other exceptions
+            }
+        }
 
+        String pricePrompt = String.format(
+                "Bạn là chuyên gia định giá đồ gia dụng cũ đã qua sử dụng tại thị trường Việt Nam. " +
+                "Hãy định giá sản phẩm sau dựa trên thông tin được cung cấp. " +
+                "Sản phẩm: %s.\nMô tả hiện tại: %s.\n%s\nThông tin người bán đã cung cấp thêm:\n%s\n\n" +
+                "QUY TẮC ĐỊNH GIÁ BẮT BUỘC:\n" +
+                "- Giá đồ cũ PHẢI THẤP HƠN giá mua mới từ 30%% đến 70%% tuỳ tình trạng.\n" +
+                "- Nếu sản phẩm mới 99%% (dùng < 1 tuần): giảm 20-30%% so với giá mua mới.\n" +
+                "- Nếu sản phẩm tốt (dùng vài tháng): giảm 40-50%% so với giá mua mới.\n" +
+                "- Nếu sản phẩm đã dùng lâu (> 1 năm): giảm 50-70%%.\n" +
+                "- TUYỆT ĐỐI KHÔNG đưa ra giá bằng hoặc cao hơn giá mua mới.\n\n" +
+                "Trả về KẾT QUẢ THEO ĐÚNG ĐỊNH DẠNG JSON sau, không giải thích gì thêm:\n" +
+                "{\"fairPriceMin\": <số nguyên VND>, \"fairPriceMax\": <số nguyên VND>, \"suggestedPrice\": <số nguyên VND>, \"expectedSellTime\": \"<ví dụ: 3-5 ngày>\"}" ,
+                itemName, description, priceContext, chatContext.toString());
         ChatClient googleClient = ChatClient.builder(googleChatModel).build();
         String aiResult = googleClient.prompt(pricePrompt).call().content();
 
         BigDecimal fairPriceMin = BigDecimal.ZERO;
         BigDecimal fairPriceMax = BigDecimal.ZERO;
         BigDecimal suggestedPrice = BigDecimal.ZERO;
-        String expectedSellTime = "3-5 ngày";
+        String expectedSellTime = "3-5 ngÃ y";
 
         try {
             // Extract JSON from the AI response
@@ -515,5 +526,41 @@ public class PostServiceImpl implements PostService {
         org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> cb
                 .equal(root.get("user").get("id"), userId);
         return postRepository.findAll(spec, pageable).map(com.secondlife.secondlife.dto.response.PostDto::fromEntity);
+    }
+
+    @Override
+    @Transactional
+    public com.secondlife.secondlife.dto.response.PostDto updateDraft(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.UpdateDraftRequest request) {
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new NotFoundException("Post not found"));
+        if (post.getUser() == null || !userId.equals(post.getUser().getId())) {
+            throw new ForbiddenException("This post belongs to another user");
+        }
+        
+        post.setTitle(request.getTitle());
+        post.setDescription(request.getDescription());
+        post.setItemCondition(request.getItemCondition());
+        post.setPrice(request.getPrice());
+        
+        // Status may remain DRAFT or whatever it is, unless we explicitly change it.
+        // Frontend sends "status": 'DRAFT', let's assume it should stay DRAFT if it was DRAFT
+        post = postRepository.save(post);
+        return com.secondlife.secondlife.dto.response.PostDto.fromEntity(post);
+    }
+
+    @Override
+    @Transactional
+    public com.secondlife.secondlife.dto.response.PostDto acceptDescription(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.AcceptDescriptionRequest request) {
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new NotFoundException("Post not found"));
+        if (post.getUser() == null || !userId.equals(post.getUser().getId())) {
+            throw new ForbiddenException("This post belongs to another user");
+        }
+        
+        post.setDescription(request.getDescription());
+        // For 'descriptionAccepted' behavior, we save it to description.
+        // If there is an 'aiDescription' we might want to keep it unchanged.
+        post = postRepository.save(post);
+        return com.secondlife.secondlife.dto.response.PostDto.fromEntity(post);
     }
 }
