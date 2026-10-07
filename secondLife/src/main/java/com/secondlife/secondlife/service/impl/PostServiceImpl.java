@@ -174,11 +174,11 @@ public class PostServiceImpl implements PostService {
 
         // Extract names early
         final String categoryName = categoryRepository.findById(request.getCategoryId())
-                .map(com.secondlife.secondlife.entity.Category::getName).orElse("KhÃ´ng xÃ¡c Ä‘á»‹nh");
+                .map(com.secondlife.secondlife.entity.Category::getName).orElse("Không xác định");
         final String itemName = request.getItemId() != null ?
                 itemRepository.findById(request.getItemId())
-                    .map(com.secondlife.secondlife.entity.Item::getName).orElse("KhÃ´ng xÃ¡c Ä‘á»‹nh")
-                : "KhÃ´ng xÃ¡c Ä‘á»‹nh";
+                    .map(com.secondlife.secondlife.entity.Item::getName).orElse("Không xác định")
+                : "Không xác định";
 
         // 3. Call AI to analyze image
         AiChatRequest aiRequest = new AiChatRequest();
@@ -465,8 +465,8 @@ public class PostServiceImpl implements PostService {
         // Build context from post data
         String itemName = post.getItemId() != null ?
                 itemRepository.findById(post.getItemId())
-                        .map(com.secondlife.secondlife.entity.Item::getName).orElse("KhÃ´ng xÃ¡c Ä‘á»‹nh")
-                : "KhÃ´ng xÃ¡c Ä‘á»‹nh";
+                        .map(com.secondlife.secondlife.entity.Item::getName).orElse("Không xác định")
+                : "Không xác định";
         String description = post.getDescription() != null ? post.getDescription() : "Không có mô tả";
         String priceContext = post.getAiSuggestedPrice() != null
                 ? "Giá mà người bán đã đề xuất: " + post.getAiSuggestedPrice() + " VNĐ."
@@ -486,15 +486,17 @@ public class PostServiceImpl implements PostService {
         }
 
         String pricePrompt = String.format(
-                "Bạn là chuyên gia định giá đồ gia dụng cũ đã qua sử dụng tại thị trường Việt Nam. " +
-                "Hãy định giá sản phẩm sau dựa trên thông tin được cung cấp. " +
+                "Bạn là chuyên gia thẩm định và định giá đồ gia dụng cũ tại thị trường Việt Nam. " +
+                "Nhiệm vụ của bạn là định giá sản phẩm dựa trên KIẾN THỨC THỊ TRƯỜNG THỰC TẾ của bạn, kết hợp với thông tin của người bán.\n\n" +
                 "Sản phẩm: %s.\nMô tả hiện tại: %s.\n%s\nThông tin người bán đã cung cấp thêm:\n%s\n\n" +
                 "QUY TẮC ĐỊNH GIÁ BẮT BUỘC:\n" +
-                "- Giá đồ cũ PHẢI THẤP HƠN giá mua mới từ 30%% đến 70%% tuỳ tình trạng.\n" +
-                "- Nếu sản phẩm mới 99%% (dùng < 1 tuần): giảm 20-30%% so với giá mua mới.\n" +
-                "- Nếu sản phẩm tốt (dùng vài tháng): giảm 40-50%% so với giá mua mới.\n" +
-                "- Nếu sản phẩm đã dùng lâu (> 1 năm): giảm 50-70%%.\n" +
-                "- TUYỆT ĐỐI KHÔNG đưa ra giá bằng hoặc cao hơn giá mua mới.\n\n" +
+                "1. KIỂM CHỨNG LẠI GIÁ (CRITICAL): BẠN PHẢI TỰ ước lượng giá mua MỚI của sản phẩm này trên thị trường hiện tại. NẾU mức giá gốc người bán cung cấp là vô lý (quá rẻ hoặc quá đắt so với thực tế, ví dụ: tủ lạnh 350L mà giá mới chỉ 2 triệu), BẠN PHẢI BỎ QUA giá của người bán và lấy mức giá thị trường chuẩn mà bạn biết làm mốc.\n" +
+                "2. ÁP DỤNG KHẤU HAO (Dựa trên giá chuẩn ở Bước 1):\n" +
+                "   - Hàng Like New 99%% (dùng < 1 tuần): giảm 20-30%%.\n" +
+                "   - Hàng còn Tốt (dùng vài tháng): giảm 40-50%%.\n" +
+                "   - Hàng Đã dùng lâu (> 1 năm): giảm 50-70%%.\n" +
+                "3. ĐIỀU CHỈNH THỰC TẾ: Đảm bảo mức giá đưa ra (suggestedPrice) là mức giá thanh lý thực tế, dễ bán nhất trên các chợ đồ cũ Việt Nam hiện tại.\n" +
+                "TUYỆT ĐỐI KHÔNG định giá đồ cũ cao hơn hoặc bằng giá mua mới trên thị trường.\n\n" +
                 "Trả về KẾT QUẢ THEO ĐÚNG ĐỊNH DẠNG JSON sau, không giải thích gì thêm:\n" +
                 "{\"fairPriceMin\": <số nguyên VND>, \"fairPriceMax\": <số nguyên VND>, \"suggestedPrice\": <số nguyên VND>, \"expectedSellTime\": \"<ví dụ: 3-5 ngày>\"}" ,
                 itemName, description, priceContext, chatContext.toString());
