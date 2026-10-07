@@ -276,7 +276,7 @@ class MainFlow1IntegrationTest {
     @Test void simultaneousRetryReturnsSameValuationAndOnlyChargesOnce() throws Exception {
         var seller = user("SELLER", true); var draft = draft(seller);
         grants.grant(seller.getId(), CreditType.VALUATION, 2); UUID request = UUID.randomUUID();
-        var results = parallel(() -> valuations.create(seller.getId(), draft.getId(), request).estimateId());
+        var results = parallel(() -> valuations.create(seller.getId(), draft.getId(), request).getEstimateId());
         assertEquals(results.get(0), results.get(1));
         assertEquals(1, balance(seller, CreditType.VALUATION)); assertEquals(1, consumes(seller));
         verify(priceProvider, times(1)).estimate(anyString(), anyList());

@@ -74,6 +74,7 @@ public class PostServiceImpl implements PostService {
                            AiChatService aiChatService,
                            CategoryQuestionTemplateRepository templateRepository,
                            com.secondlife.secondlife.repository.AiChatSessionRepository sessionRepository,
+                           com.secondlife.secondlife.repository.AiChatMessageRepository chatMessageRepository,
                            CategoryRepository categoryRepository,
                            ItemRepository itemRepository,
                            ChatClient.Builder chatClientBuilder,
@@ -261,12 +262,6 @@ public class PostServiceImpl implements PostService {
         if (session.getUser() == null || !userId.equals(session.getUser().getId())) {
             throw new ForbiddenException("This chat session belongs to another user");
         }
-        Post post = session.getPostId() == null ? null
-                : postRepository.findById(session.getPostId())
-                .orElseThrow(() -> new NotFoundException("Post not found"));
-        if (post != null && (post.getUser() == null || !userId.equals(post.getUser().getId()))) {
-            throw new ForbiddenException("This post belongs to another user");
-        }
         Post post = session.getPostId() == null ? null : listingAccess.owned(userId, session.getPostId(), true);
         if (post != null) listingAccess.requireDraft(post);
         var finalizeResponse = aiChatService.finalizeChat(sessionId, userId);
@@ -333,6 +328,7 @@ public class PostServiceImpl implements PostService {
         }
         String scanResult = aiScanPost(post);
         if (scanResult.startsWith("REJECTED:")) {
+            String reason = scanResult.substring("REJECTED:".length()).trim();
             post.setStatus("REJECTED");
             post.setRejectionReason("AI tự động từ chối: " + reason);
             postRepository.save(post);
@@ -346,79 +342,9 @@ public class PostServiceImpl implements PostService {
             );
         }
 
-        // BƯỚC B: Kiểm tra ngưỡng giá
-        if (post.getPrice() != null && post.getPrice().compareTo(highValueThreshold) > 0) {
-            // Hàng giá trị cao → kiểm định
-            BigDecimal totalFee = inspectionFee.add(shippingFee);
-
-            // Kiểm tra credit của Seller
-            UserCredit userCredit = creditService.getUserCredit(userId);
-            // Dùng post_credits như một đơn vị tương đương tiền (1 credit = 1000 VNĐ)
-            // Nếu không đủ credit, trả về response kèm số tiền còn thiếu để FE hiển thị lựa chọn
-            long requiredCredits = totalFee.longValue() / 1000;
-            if (userCredit.getPostCredits() < requiredCredits) {
-                BigDecimal shortfall = totalFee.subtract(BigDecimal.valueOf(userCredit.getPostCredits() * 1000L));
-                return new PostSubmitResponse(
-                        "INSUFFICIENT_CREDIT",
-                        true,
-                        inspectionFee,
-                        shippingFee,
-                        "Không đủ credit để thanh toán phí kiểm định và vận chuyển. Vui lòng nạp thêm hoặc thanh toán trực tiếp qua chuyển khoản.",
-                        shortfall
-                );
-            }
-
-            // Trừ credit
-            userCredit.setPostCredits((int)(userCredit.getPostCredits() - requiredCredits));
-
-            // Tạo InspectionOrder
-            InspectionOrder order = new InspectionOrder();
-            order.setPost(post);
-            order.setInspectionFee(inspectionFee);
-            order.setShippingFee(shippingFee);
-            order.setStatus("PENDING");
-            inspectionOrderRepository.save(order);
-
-            post.setStatus("PENDING_INSPECTION");
-            postRepository.save(post);
-
-            return new PostSubmitResponse(
-                    "PENDING_INSPECTION",
-                    true,
-                    inspectionFee,
-                    shippingFee,
-                    "Sản phẩm có giá trị cao. Đã tạo đơn kiểm định. Vui lòng gửi sản phẩm đến trung tâm kiểm định theo hướng dẫn.",
-                    null
-            );
-        } else {
-            // Hàng giá thường → AI đã duyệt
-            // BƯỚC C: Kiểm tra trùng lặp ảnh
-            boolean isDuplicate = checkDuplicateImage(post);
-            if (isDuplicate) {
-                post.setStatus("PENDING");
-                postRepository.save(post);
-                return new PostSubmitResponse(
-                        "PENDING",
-                        false,
-                        null,
-                        null,
-                        "Hệ thống phát hiện ảnh có dấu hiệu trùng lặp. Bài đăng đang chờ nhân viên kiểm duyệt thủ công.",
-                        null
-                );
-            } else {
-                post.setStatus("ACTIVE");
-                postRepository.save(post);
-
-                return new PostSubmitResponse(
-                        "ACTIVE",
-                        false,
-                        null,
-                        null,
-                        "Bài đăng đã được duyệt và hiển thị trên sàn.",
-                        null
-                );
-            }
-        }
+        publication.accept(post);
+        postRepository.save(post);
+        return submitResponse(post);
     }
 
     private PostSubmitResponse submitResponse(Post post) {
