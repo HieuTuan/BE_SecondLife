@@ -37,18 +37,18 @@ public class ListingValuationController {
     public ApiResponse<ListingDraftResponse> get(@AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID postId) {
         return ApiResponse.success(drafts.get(currentUser.resolveUserId(user), postId));
     }
-    @PutMapping("/draft")
-    @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
-    public ApiResponse<ListingDraftResponse> update(@AuthenticationPrincipal CustomUserDetails user,
-            @PathVariable UUID postId, @Valid @RequestBody ListingDraftRequest request) {
-        return ApiResponse.success(drafts.update(currentUser.resolveUserId(user), postId, request));
-    }
-    @PostMapping("/ai-price-estimation")
-    @PreAuthorize("hasAuthority('LISTING_VALUATION_SELF')")
-    public ResponseEntity<ApiResponse<AiPriceEstimationResponse>> estimate(@AuthenticationPrincipal CustomUserDetails user,
-            @PathVariable UUID postId, @Valid @RequestBody AiPriceEstimationRequest request) {
-        return ResponseEntity.ok(ApiResponse.success(valuations.create(currentUser.resolveUserId(user), postId, request.requestId())));
-    }
+//    @PutMapping("/draft")
+//    @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
+//    public ApiResponse<ListingDraftResponse> update(@AuthenticationPrincipal CustomUserDetails user,
+//            @PathVariable UUID postId, @Valid @RequestBody ListingDraftRequest request) {
+//        return ApiResponse.success(drafts.update(currentUser.resolveUserId(user), postId, request));
+//    }
+//    @PostMapping("/ai-price-estimation")
+//    @PreAuthorize("hasAuthority('LISTING_VALUATION_SELF')")
+//    public ResponseEntity<ApiResponse<AiPriceEstimationResponse>> estimate(@AuthenticationPrincipal CustomUserDetails user,
+//            @PathVariable UUID postId, @Valid @RequestBody AiPriceEstimationRequest request) {
+//        return ResponseEntity.ok(ApiResponse.success(valuations.create(currentUser.resolveUserId(user), postId, request.requestId())));
+//    }
 
     @PostMapping("/accept-description")
     @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
@@ -56,11 +56,11 @@ public class ListingValuationController {
             @PathVariable UUID postId, @Valid @RequestBody(required = false) AcceptListingDescriptionRequest request) {
         return ApiResponse.success(drafts.acceptDescription(currentUser.resolveUserId(user), postId, request));
     }
-    @GetMapping("/ai-price-estimation")
-    @PreAuthorize("hasAuthority('LISTING_VALUATION_SELF')")
-    public ApiResponse<AiPriceEstimationResponse> latest(@AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID postId) {
-        return ApiResponse.success(valuations.latest(currentUser.resolveUserId(user), postId));
-    }
+//    @GetMapping("/ai-price-estimation")
+//    @PreAuthorize("hasAuthority('LISTING_VALUATION_SELF')")
+//    public ApiResponse<AiPriceEstimationResponse> latest(@AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID postId) {
+//        return ApiResponse.success(valuations.latest(currentUser.resolveUserId(user), postId));
+//    }
     @GetMapping("/ai-price-estimation/history")
     @PreAuthorize("hasAuthority('LISTING_VALUATION_SELF')")
     public ApiResponse<Page<AiPriceEstimationResponse>> history(@AuthenticationPrincipal CustomUserDetails user,
