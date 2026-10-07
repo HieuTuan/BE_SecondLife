@@ -91,6 +91,19 @@ public class AdminSellerVerificationController {
         return ResponseEntity.ok(ApiResponse.success("Seller verification rejected", response));
     }
 
+    @PostMapping("/seller-verifications/{id}/request-resubmit")
+    @Operation(summary = "Request seller to resubmit documents with reason")
+    @PreAuthorize("hasRole('ADMIN') and hasAuthority('SELLER_VERIFICATION_REVIEW')")
+    public ResponseEntity<ApiResponse<SellerVerificationResponse>> requestResubmitSellerVerification(
+            @AuthenticationPrincipal CustomUserDetails currentAdmin,
+            @PathVariable UUID id,
+            @Valid @RequestBody SellerVerificationReviewRequest request
+    ) {
+        UUID adminId = currentUserProvider.resolveAdminId(currentAdmin);
+        SellerVerificationResponse response = sellerVerificationService.requestResubmitVerification(adminId, id, request);
+        return ResponseEntity.ok(ApiResponse.success("Seller verification requested to resubmit", response));
+    }
+
     @PostMapping("/seller-verifications/{id}/retry-ekyc")
     @Operation(summary = "Retry eKYC for a pending verification after a provider error")
     @PreAuthorize("hasRole('ADMIN') and hasAuthority('SELLER_VERIFICATION_REVIEW')")

@@ -12,6 +12,7 @@ import com.secondlife.secondlife.enums.RiskStatus;
 import com.secondlife.secondlife.enums.SellerVerificationStatus;
 import org.springframework.data.domain.Pageable;
 
+import java.util.List;
 import java.util.UUID;
 
 public interface SellerVerificationService {
@@ -19,6 +20,14 @@ public interface SellerVerificationService {
     SellerVerificationResponse submitVerification(UUID userId, SellerVerificationRequest request);
 
     SellerVerificationResponse getCurrentVerification(UUID userId);
+
+    List<SellerVerificationResponse> getVerificationHistory(UUID userId);
+
+    SellerVerificationResponse getVerificationById(UUID userId, UUID verificationId);
+
+    SellerVerificationResponse getVerificationByStatus(UUID userId, SellerVerificationStatus status);
+
+    AdminSellerVerificationDetailResponse getStaffVerificationByUserId(UUID userId);
 
     SellerVerificationResponse resubmitVerification(UUID userId, UUID verificationId, SellerVerificationResubmitRequest request);
 
@@ -38,6 +47,8 @@ public interface SellerVerificationService {
     SellerVerificationResponse approveVerification(UUID adminId, UUID verificationId);
 
     SellerVerificationResponse rejectVerification(UUID adminId, UUID verificationId, SellerVerificationReviewRequest request);
+
+    SellerVerificationResponse requestResubmitVerification(UUID reviewerId, UUID verificationId, SellerVerificationReviewRequest request);
 
     SellerVerificationResponse retryPendingVerification(UUID adminId, UUID verificationId);
 

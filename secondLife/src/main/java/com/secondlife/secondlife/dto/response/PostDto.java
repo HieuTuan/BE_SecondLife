@@ -62,7 +62,7 @@ public class PostDto {
                 .aiDescription(post.getAiDescription())
                 .aiSuggestedPrice(post.getAiSuggestedPrice())
                 .rejectionReason(post.getRejectionReason())
-                .listingCreditCharged(post.getListingCreditCharged())
+                .listingCreditCharged(post.isListingCreditCharged())
                 .user(seller)
                 .build();
     }

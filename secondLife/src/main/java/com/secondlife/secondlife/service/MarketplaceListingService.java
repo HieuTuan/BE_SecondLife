@@ -22,7 +22,13 @@ public class MarketplaceListingService {
         Specification<Post> filter = (root, query, cb) -> cb.equal(root.get("status"), "ACTIVE");
         if (categoryId != null) filter = filter.and((root, query, cb) -> cb.equal(root.get("categoryId"), categoryId));
         if (itemId != null) filter = filter.and((root, query, cb) -> cb.equal(root.get("itemId"), itemId));
-        return posts.findAll(filter, pageable).map(this::response);
+        Page<Post> page = posts.findAll(filter, pageable);
+        if (!page.isEmpty()) {
+            // Hydrate images for the managed page entities after database pagination.
+            // Fetching a collection in the paged query would paginate in memory.
+            posts.findAllWithImagesByIdIn(page.getContent().stream().map(Post::getId).toList());
+        }
+        return page.map(this::response);
     }
 
     public MarketplaceListingResponse get(UUID postId) {

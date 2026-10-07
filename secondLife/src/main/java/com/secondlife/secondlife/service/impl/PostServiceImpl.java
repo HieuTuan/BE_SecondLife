@@ -365,7 +365,7 @@ public class PostServiceImpl implements PostService {
 
     @Override
     @Transactional(readOnly = true)
-    public org.springframework.data.domain.Page<Post> getAdminPosts(String status, UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable) {
+    public org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto> getAdminPosts(String status, UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable) {
         org.springframework.data.jpa.domain.Specification<Post> spec = org.springframework.data.jpa.domain.Specification.where((org.springframework.data.jpa.domain.Specification<Post>) null);
         if (status != null && !status.isEmpty()) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), status));
@@ -376,12 +376,12 @@ public class PostServiceImpl implements PostService {
         if (itemId != null) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("itemId"), itemId));
         }
-        return postRepository.findAll(spec, pageable);
+        return postRepository.findAll(spec, pageable).map(com.secondlife.secondlife.dto.response.PostDto::fromEntity);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public org.springframework.data.domain.Page<Post> getPublicPosts(UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable) {
+    public org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto> getPublicPosts(UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable) {
         // Public posts should only return ACTIVE ones
         org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> cb.equal(root.get("status"), "ACTIVE");
         

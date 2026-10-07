@@ -3,10 +3,10 @@ package com.secondlife.secondlife.controller.admin;
 import com.secondlife.secondlife.dto.request.CategoryRequest;
 import com.secondlife.secondlife.dto.request.CategoryQuestionTemplateRequest;
 import com.secondlife.secondlife.dto.request.ItemRequest;
-import com.secondlife.secondlife.entity.Category;
+import com.secondlife.secondlife.dto.response.CategoryResponse;
 import com.secondlife.secondlife.entity.CategoryQuestionTemplate;
-import com.secondlife.secondlife.entity.Item;
-import com.secondlife.secondlife.service.CatalogService;
+import com.secondlife.secondlife.dto.response.ItemResponse;
+import com.secondlife.secondlife.service.impl.CatalogServiceImpl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -19,20 +19,20 @@ import java.util.UUID;
 @PreAuthorize("hasAuthority('ADMIN_CONFIG_MANAGE')")
 public class AdminCatalogController {
 
-    private final CatalogService catalogService;
+    private final CatalogServiceImpl catalogService;
 
-    public AdminCatalogController(CatalogService catalogService) {
+    public AdminCatalogController(CatalogServiceImpl catalogService) {
         this.catalogService = catalogService;
     }
 
     // Category Endpoints
     @PostMapping("/categories")
-    public ResponseEntity<Category> createCategory(@RequestBody CategoryRequest request) {
+    public ResponseEntity<CategoryResponse> createCategory(@RequestBody CategoryRequest request) {
         return ResponseEntity.ok(catalogService.createCategory(request));
     }
 
     @PutMapping("/categories/{id}")
-    public ResponseEntity<Category> updateCategory(@PathVariable UUID id, @RequestBody CategoryRequest request) {
+    public ResponseEntity<CategoryResponse> updateCategory(@PathVariable UUID id, @RequestBody CategoryRequest request) {
         return ResponseEntity.ok(catalogService.updateCategory(id, request));
     }
 
@@ -43,18 +43,18 @@ public class AdminCatalogController {
     }
 
     @GetMapping("/categories")
-    public ResponseEntity<List<Category>> getAllCategories() {
+    public ResponseEntity<List<CategoryResponse>> getAllCategories() {
         return ResponseEntity.ok(catalogService.getAllCategories());
     }
 
     // Item Endpoints
     @PostMapping("/items")
-    public ResponseEntity<Item> createItem(@RequestBody ItemRequest request) {
+    public ResponseEntity<ItemResponse> createItem(@RequestBody ItemRequest request) {
         return ResponseEntity.ok(catalogService.createItem(request));
     }
 
     @PutMapping("/items/{id}")
-    public ResponseEntity<Item> updateItem(@PathVariable UUID id, @RequestBody ItemRequest request) {
+    public ResponseEntity<ItemResponse> updateItem(@PathVariable UUID id, @RequestBody ItemRequest request) {
         return ResponseEntity.ok(catalogService.updateItem(id, request));
     }
 
@@ -65,12 +65,12 @@ public class AdminCatalogController {
     }
 
     @GetMapping("/items")
-    public ResponseEntity<List<Item>> getAllItems() {
+    public ResponseEntity<List<ItemResponse>> getAllItems() {
         return ResponseEntity.ok(catalogService.getAllItems());
     }
 
     @GetMapping("/categories/{categoryId}/items")
-    public ResponseEntity<List<Item>> getItemsByCategory(@PathVariable UUID categoryId) {
+    public ResponseEntity<List<ItemResponse>> getItemsByCategory(@PathVariable UUID categoryId) {
         return ResponseEntity.ok(catalogService.getItemsByCategory(categoryId));
     }
 

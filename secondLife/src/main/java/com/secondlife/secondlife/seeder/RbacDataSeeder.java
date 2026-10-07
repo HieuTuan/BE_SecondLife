@@ -65,40 +65,40 @@ public class RbacDataSeeder implements ApplicationRunner {
     @Value("${app.seeder.buyer.full-name}")
     private String buyerFullName;
 
-    @Value("${app.seeder.inspection-center.enabled:true}")
+    @Value("${app.seeder.inspection-center.enabled}")
     private boolean inspectionCenterSeederEnabled;
 
-    @Value("${app.seeder.inspection-center.email:center@secondlife.com}")
+    @Value("${app.seeder.inspection-center.email}")
     private String inspectionCenterEmail;
 
-    @Value("${app.seeder.inspection-center.password:123456}")
+    @Value("${app.seeder.inspection-center.password}")
     private String inspectionCenterPassword;
 
-    @Value("${app.seeder.inspection-center.full-name:Trung Tam Kiem Dinh Chinh}")
+    @Value("${app.seeder.inspection-center.full-name}")
     private String inspectionCenterFullName;
 
-    @Value("${app.seeder.inspector.enabled:true}")
+    @Value("${app.seeder.inspector.enabled}")
     private boolean inspectorSeederEnabled;
 
-    @Value("${app.seeder.inspector.email:inspector@secondlife.com}")
+    @Value("${app.seeder.inspector.email}")
     private String inspectorEmail;
 
-    @Value("${app.seeder.inspector.password:123456}")
+    @Value("${app.seeder.inspector.password}")
     private String inspectorPassword;
 
-    @Value("${app.seeder.inspector.full-name:Kiem Dinh Vien 1}")
+    @Value("${app.seeder.inspector.full-name}")
     private String inspectorFullName;
 
-    @Value("${app.seeder.staff.enabled:true}")
+    @Value("${app.seeder.staff.enabled}")
     private boolean staffSeederEnabled;
 
-    @Value("${app.seeder.staff.email:staff@secondlife.com}")
+    @Value("${app.seeder.staff.email}")
     private String staffEmail;
 
-    @Value("${app.seeder.staff.password:123456}")
+    @Value("${app.seeder.staff.password}")
     private String staffPassword;
 
-    @Value("${app.seeder.staff.full-name:Dieu Phoi Vien}")
+    @Value("${app.seeder.staff.full-name}")
     private String staffFullName;
 
     @Override

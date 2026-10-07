@@ -8,7 +8,11 @@ import java.util.UUID;
 
 @Repository
 public interface PostRepository extends JpaRepository<Post, UUID>, org.springframework.data.jpa.repository.JpaSpecificationExecutor<Post> {
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = "images")
     java.util.Optional<Post> findByIdAndStatus(UUID id, String status);
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = "images")
+    @org.springframework.data.jpa.repository.Query("select p from Post p where p.id in :ids")
+    java.util.List<Post> findAllWithImagesByIdIn(@org.springframework.data.repository.query.Param("ids") java.util.Collection<UUID> ids);
     long countByUser_IdAndStatusIn(UUID userId, java.util.Collection<String> statuses);
     long countByUser_IdAndPublishedAtAfter(UUID userId, java.time.Instant since);
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)

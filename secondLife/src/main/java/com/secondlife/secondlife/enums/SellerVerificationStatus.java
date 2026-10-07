@@ -18,7 +18,7 @@ public enum SellerVerificationStatus {
             case SUBMITTED -> Set.of(EKYC_PENDING, RESUBMIT_REQUIRED, NEEDS_REVIEW, APPROVED, REJECTED).contains(target);
             case EKYC_PENDING -> Set.of(RESUBMIT_REQUIRED, NEEDS_REVIEW, APPROVED, REJECTED).contains(target);
             case RESUBMIT_REQUIRED -> Set.of(SUBMITTED, EKYC_PENDING).contains(target);
-            case NEEDS_REVIEW -> Set.of(APPROVED, REJECTED).contains(target);
+            case NEEDS_REVIEW -> Set.of(APPROVED, REJECTED, RESUBMIT_REQUIRED).contains(target);
             case APPROVED, REJECTED -> false;
         };
     }

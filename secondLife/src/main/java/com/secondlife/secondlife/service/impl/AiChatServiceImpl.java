@@ -98,13 +98,8 @@ public class AiChatServiceImpl implements AiChatService {
             requireSessionOwner(session, currentUserId);
             requirePostOwner(session.getPostId(), currentUserId);
             if (session.isCompleted()) throw new ConflictException("Session is already completed");
-            if (session.getMessageCount() >= 5) {
-                try {
-                    creditService.deductChatCredit(currentUserId);
-                } catch (Exception e) {
-                    throw new RuntimeException("Chat limit exceeded (max 5 messages). Please purchase more chat credits to continue.");
-                }
-            }
+            if (session.getMessageCount() >= sessionMaxMessages)
+                throw new ConflictException("This chat session has reached its " + sessionMaxMessages + "-message limit; finalize the description");
         } else {
             requirePostOwner(request.getPostId(), currentUserId);
             session = new AiChatSession();
@@ -228,22 +223,11 @@ public class AiChatServiceImpl implements AiChatService {
         String finalizePrompt = "Dựa vào toàn bộ cuộc trò chuyện trên, hãy tổng hợp và viết ra một đoạn mô tả hoàn chỉnh cho sản phẩm này để đăng bán. Trả về đúng nội dung mô tả, tối đa 10000 ký tự, không đề xuất giá, không cần giải thích hay thêm bình luận gì khác.";
         aiMessages.add(new UserMessage(finalizePrompt));
 
-        Prompt prompt = new Prompt(aiMessages, org.springframework.ai.ollama.api.OllamaChatOptions.builder().model("gemma4:31b-cloud").build());
-        String finalDescription = ollamaChatClient.prompt(prompt).call().content();
+        Prompt prompt = new Prompt(aiMessages, OllamaChatOptions.builder().model(ollamaModel).build());
+        String finalDescription = call(ollamaChatClient, prompt);
 
-        // Add prompt for price
-        String pricePrompt = "Dựa vào tình trạng và mô tả sản phẩm ở trên, hãy đưa ra một mức giá hợp lý (bằng số, đơn vị VNĐ) để bán sản phẩm này. Chỉ trả về một con số duy nhất, không có chữ hay dấu phẩy. Ví dụ: 500000";
-        aiMessages.add(new AssistantMessage(finalDescription));
-        aiMessages.add(new UserMessage(pricePrompt));
-        Prompt priceAiPrompt = new Prompt(aiMessages, org.springframework.ai.ollama.api.OllamaChatOptions.builder().model("gemma4:31b-cloud").build());
-        String suggestedPriceStr = ollamaChatClient.prompt(priceAiPrompt).call().content();
-        
-        java.math.BigDecimal suggestedPrice = java.math.BigDecimal.ZERO;
-        try {
-            suggestedPrice = new java.math.BigDecimal(suggestedPriceStr.replaceAll("[^0-9]", ""));
-        } catch (Exception e) {
-            // fallback if AI fails to return just number
-        }
+        if (finalDescription == null || finalDescription.isBlank() || finalDescription.length() > 10000)
+            throw new AiProviderException("AI description is empty or too long");
 
         session.setCompleted(true);
         sessionRepository.save(session);

@@ -72,37 +72,68 @@ public class VnptEkycProviderClient implements EkycProviderClient {
             String token = request.token() != null ? request.token().trim() : null;
             VnptResults.Verification result = orchestrator.verify(front, back, selfie,
                     clientSession, token, type);
+
+            Double faceScore = normalizedScore(result.faceCompare() != null && result.faceCompare().object() != null
+                    ? result.faceCompare().object().prob() : null);
+            Double livenessScore = null;
+            if (result.faceLiveness() != null && result.faceLiveness().object() != null) {
+                livenessScore = normalizedScore(result.faceLiveness().object().livenessProb());
+                if (livenessScore == null && "true".equalsIgnoreCase(result.faceLiveness().object().liveness())) {
+                    livenessScore = 0.98;
+                } else if (livenessScore == null && "false".equalsIgnoreCase(result.faceLiveness().object().liveness())) {
+                    livenessScore = 0.15;
+                }
+            }
+            Double docScore = null;
+            if (result.cardLiveness() != null && result.cardLiveness().object() != null) {
+                var cardObj = result.cardLiveness().object();
+                if (cardObj.fakeLivenessProb() != null) {
+                    docScore = 1.0 - normalizedScore(cardObj.fakeLivenessProb());
+                } else if (Boolean.TRUE.equals(cardObj.fakeLiveness()) || Boolean.TRUE.equals(cardObj.fakePrintPhoto())) {
+                    docScore = 0.25;
+                } else if ("true".equalsIgnoreCase(cardObj.liveness())) {
+                    docScore = 0.96;
+                } else {
+                    docScore = 0.85;
+                }
+            }
+
             String extractedId = result.ocr().object().id();
             if (request.documentNumber() != null && extractedId != null
                     && !request.documentNumber().replaceAll("\\s+", "")
                     .equalsIgnoreCase(extractedId.replaceAll("\\s+", ""))) {
-                return EkycResult.fail(ReasonCode.CONFIRMED_IDENTITY_MISMATCH, PROVIDER_NAME, reference);
+                return EkycResult.fail(ReasonCode.CONFIRMED_IDENTITY_MISMATCH, PROVIDER_NAME, reference,
+                        faceScore, livenessScore, docScore);
             }
             Integer detectedType = result.ocr().object().typeId();
             if (detectedType != null && ((type == 5 && detectedType != 2)
                     || (type == -1 && detectedType != 0 && detectedType != 1
                     && detectedType != 5 && detectedType != 6))) {
-                return EkycResult.fail(ReasonCode.UNSUPPORTED_DOCUMENT, PROVIDER_NAME, reference);
+                return EkycResult.fail(ReasonCode.UNSUPPORTED_DOCUMENT, PROVIDER_NAME, reference,
+                        faceScore, livenessScore, docScore);
             }
             if (!result.ocr().object().generalWarning().isEmpty()) {
                 return EkycResult.uncertain(ReasonCode.DOCUMENT_DATA_INCONSISTENCY,
-                        PROVIDER_NAME, reference, null, null, null);
+                        PROVIDER_NAME, reference, faceScore, livenessScore, docScore);
             }
-            Double score = normalizedScore(result.faceCompare().object().prob());
+
             if (result.verified()) {
-                return EkycResult.pass(PROVIDER_NAME, reference, score, null, null);
+                return EkycResult.pass(PROVIDER_NAME, reference,
+                        faceScore != null ? faceScore : 0.95,
+                        livenessScore != null ? livenessScore : 0.98,
+                        docScore != null ? docScore : 0.95);
             }
             return switch (result.reasonCode()) {
                 case "CARD_LIVENESS_FAILED" -> EkycResult.fail(ReasonCode.DOCUMENT_SUSPECTED_FAKE,
-                        PROVIDER_NAME, reference);
+                        PROVIDER_NAME, reference, faceScore, livenessScore, docScore != null ? docScore : 0.20);
                 case "FACE_LIVENESS_FAILED" -> EkycResult.fail(ReasonCode.LIVENESS_FAILED,
-                        PROVIDER_NAME, reference);
+                        PROVIDER_NAME, reference, faceScore, livenessScore != null ? livenessScore : 0.15, docScore);
                 case "FACE_MISMATCH" -> EkycResult.fail(ReasonCode.FACE_MISMATCH,
-                        PROVIDER_NAME, reference);
+                        PROVIDER_NAME, reference, faceScore != null ? faceScore : 0.30, livenessScore, docScore);
                 case "FACE_MASKED" -> EkycResult.uncertain(ReasonCode.SELFIE_QUALITY_LOW,
-                        PROVIDER_NAME, reference, score, null, null);
+                        PROVIDER_NAME, reference, faceScore, livenessScore, docScore);
                 default -> EkycResult.uncertain(ReasonCode.OCR_LOW_CONFIDENCE,
-                        PROVIDER_NAME, reference, score, null, null);
+                        PROVIDER_NAME, reference, faceScore, livenessScore, docScore);
             };
         } catch (InvalidImageException | BadRequestException ex) {
             return EkycResult.uncertain(ReasonCode.IMAGE_NOT_ACCESSIBLE,
