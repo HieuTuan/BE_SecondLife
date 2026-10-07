@@ -63,6 +63,8 @@ class SellerVerificationServiceTest {
     @Mock
     private NotificationService notificationService;
 
+    @Mock private SellerOnboardingService onboarding;
+
     private SellerVerificationServiceImpl service;
 
     private User buyer;
@@ -84,7 +86,8 @@ class SellerVerificationServiceTest {
                 sellerVerificationMapper,
                 notificationService,
                 new EkycRecoveryProperties(false, 60000, 1000, 3, 10),
-                3 // maxResubmissions
+                3, // maxResubmissions
+                onboarding
         );
 
         buyerId = UUID.randomUUID();
@@ -106,6 +109,17 @@ class SellerVerificationServiceTest {
             SellerVerification sv = inv.getArgument(0);
             return SellerVerificationResponse.from(sv);
         });
+    }
+
+    @Test
+    void missingShopInformationMustBlockEkycBeforeSavingApplication() {
+        doThrow(new ConflictException("Complete shop information first")).when(onboarding).requireCompleted(buyerId);
+        when(userRepository.findByIdWithAuthorities(buyerId)).thenReturn(Optional.of(buyer));
+        var request = new SellerVerificationRequest(VerificationType.CITIZEN_ID,
+                "012345678901", "http://f", "http://b");
+        assertThrows(ConflictException.class, () -> service.submitVerification(buyerId, request));
+        verifyNoInteractions(ekycService);
+        verify(sellerVerificationRepository, never()).save(any());
     }
 
     @Test

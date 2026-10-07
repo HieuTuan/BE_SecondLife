@@ -41,7 +41,8 @@ class SellerRiskServiceTest {
     @BeforeEach
     void setUp() throws Exception {
         sellerRiskService = new SellerRiskServiceImpl(
-                sellerVerificationRepository, identityRestrictionRepository, true, 70.0);
+                sellerVerificationRepository, identityRestrictionRepository,
+                true, 70.0, 85.0, 65.0, 60.0, 3, 0.85);
 
         userId = UUID.randomUUID();
         user = new User("user@example.com", "pass", AccountStatus.ACTIVE);

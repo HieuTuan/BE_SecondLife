@@ -19,6 +19,9 @@ public class CloudinaryServiceImpl implements CloudinaryService {
     @Override
     public String uploadImage(MultipartFile file) throws IOException {
         Map uploadResult = cloudinary.uploader().upload(file.getBytes(), ObjectUtils.emptyMap());
-        return uploadResult.get("url").toString();
+        Object secureUrl = uploadResult.get("secure_url");
+        if (!(secureUrl instanceof String url) || !url.startsWith("https://"))
+            throw new IOException("Cloudinary did not return a secure image URL");
+        return url;
     }
 }

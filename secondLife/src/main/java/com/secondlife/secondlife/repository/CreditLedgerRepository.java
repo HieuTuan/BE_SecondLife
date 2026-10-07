@@ -8,5 +8,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.UUID;
 
 public interface CreditLedgerRepository extends JpaRepository<CreditLedgerEntry, UUID> {
+    boolean existsByIdempotencyKey(String idempotencyKey);
     Page<CreditLedgerEntry> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
 }

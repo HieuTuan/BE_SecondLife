@@ -30,11 +30,16 @@ public record EkycResult(
                 docScore,
                 providerName,
                 providerRef,
-                "Xác thực danh tính eKYC thành công"
+                "Xác thực định danh eKYC thành công"
         );
     }
 
     public static EkycResult fail(ReasonCode reasonCode, String providerName, String providerRef) {
+        return fail(reasonCode, providerName, providerRef, null, null, null);
+    }
+
+    public static EkycResult fail(ReasonCode reasonCode, String providerName, String providerRef,
+                                  Double faceMatchScore, Double livenessScore, Double docScore) {
         return new EkycResult(
                 EkycStatus.FAILED,
                 reasonCode,
@@ -42,12 +47,12 @@ public record EkycResult(
                 reasonCode == ReasonCode.DOCUMENT_EXPIRED,
                 false,
                 false,
-                null,
-                null,
-                null,
+                faceMatchScore,
+                livenessScore,
+                docScore,
                 providerName,
                 providerRef,
-                reasonCode.getDescription()
+                reasonCode != null ? reasonCode.getDescription() : "eKYC thất bại"
         );
     }
 
@@ -64,7 +69,7 @@ public record EkycResult(
                 docScore,
                 providerName,
                 providerRef,
-                reasonCode.getDescription()
+                reasonCode != null ? reasonCode.getDescription() : "eKYC chưa xác định"
         );
     }
 

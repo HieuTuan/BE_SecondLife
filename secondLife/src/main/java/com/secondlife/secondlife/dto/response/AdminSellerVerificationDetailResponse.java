@@ -17,7 +17,12 @@ public record AdminSellerVerificationDetailResponse(
         UUID userId,
         String userEmail,
         String userFullName,
+        String shopName,
+        String shopEmail,
+        String phone,
+        String pickupAddress,
         VerificationType verificationType,
+        String documentNumber,
         String documentNumberMasked,
         String documentFrontUrl,
         String documentBackUrl,
@@ -27,6 +32,7 @@ public record AdminSellerVerificationDetailResponse(
         RiskStatus riskStatus,
         ReviewSource reviewSource,
         ReasonCode reasonCode,
+        String reasonCodeDescription,
         String providerName,
         String providerReferenceId,
         Double faceMatchScore,
@@ -42,20 +48,104 @@ public record AdminSellerVerificationDetailResponse(
         String rejectionReason,
         List<VerificationEventResponse> eventHistory
 ) {
+    /** 27-arg backwards-compatible constructor for existing tests and callers. */
+    public AdminSellerVerificationDetailResponse(
+            UUID id,
+            UUID userId,
+            String userEmail,
+            String userFullName,
+            VerificationType verificationType,
+            String documentNumberMasked,
+            String documentFrontUrl,
+            String documentBackUrl,
+            String selfieUrl,
+            SellerVerificationStatus status,
+            EkycStatus ekycStatus,
+            RiskStatus riskStatus,
+            ReviewSource reviewSource,
+            ReasonCode reasonCode,
+            String providerName,
+            String providerReferenceId,
+            Double faceMatchScore,
+            Double livenessScore,
+            Double documentScore,
+            Double riskScore,
+            int resubmissionCount,
+            Instant submittedAt,
+            Instant ekycCompletedAt,
+            Instant riskEvaluatedAt,
+            Instant reviewedAt,
+            UUID reviewedBy,
+            String rejectionReason,
+            List<VerificationEventResponse> eventHistory
+    ) {
+        this(
+                id,
+                userId,
+                userEmail,
+                userFullName,
+                null,
+                userEmail,
+                null,
+                null,
+                verificationType,
+                documentNumberMasked,
+                documentNumberMasked,
+                documentFrontUrl,
+                documentBackUrl,
+                selfieUrl,
+                status,
+                ekycStatus,
+                riskStatus,
+                reviewSource,
+                reasonCode,
+                reasonCode != null ? reasonCode.getDescription() : null,
+                providerName,
+                providerReferenceId,
+                faceMatchScore,
+                livenessScore,
+                documentScore,
+                riskScore,
+                resubmissionCount,
+                submittedAt,
+                ekycCompletedAt,
+                riskEvaluatedAt,
+                reviewedAt,
+                reviewedBy,
+                rejectionReason,
+                eventHistory
+        );
+    }
+
     public static AdminSellerVerificationDetailResponse from(
             SellerVerification sv,
+            String shopName,
+            String shopEmail,
+            String phone,
+            String pickupAddress,
             List<VerificationEventResponse> eventHistory) {
         String email = sv.getUser() != null ? sv.getUser().getEmail() : null;
         String fullName = (sv.getUser() != null && sv.getUser().getProfile() != null)
                 ? sv.getUser().getProfile().getFullName() : null;
+        String resolvedPhone = (phone != null && !phone.isBlank())
+                ? phone
+                : ((sv.getUser() != null && sv.getUser().getProfile() != null) ? sv.getUser().getProfile().getPhone() : null);
+        String resolvedShopEmail = (shopEmail != null && !shopEmail.isBlank()) ? shopEmail : email;
         UUID reviewerId = sv.getReviewedBy() != null ? sv.getReviewedBy().getId() : null;
+        String docNum = sv.getDocumentNumber() != null ? sv.getDocumentNumber() : sv.getDocumentNumberMasked();
+        String reasonDesc = sv.getReasonCode() != null ? sv.getReasonCode().getDescription() : null;
 
         return new AdminSellerVerificationDetailResponse(
                 sv.getId(),
                 sv.getUser() != null ? sv.getUser().getId() : null,
                 email,
                 fullName,
+                shopName,
+                resolvedShopEmail,
+                resolvedPhone,
+                pickupAddress,
                 sv.getVerificationType(),
+                docNum,
                 sv.getDocumentNumberMasked(),
                 sv.getDocumentFrontUrl(),
                 sv.getDocumentBackUrl(),
@@ -65,6 +155,7 @@ public record AdminSellerVerificationDetailResponse(
                 sv.getRiskStatus(),
                 sv.getReviewSource(),
                 sv.getReasonCode(),
+                reasonDesc,
                 sv.getProviderName(),
                 sv.getProviderReferenceId(),
                 sv.getFaceMatchScore(),
@@ -80,5 +171,11 @@ public record AdminSellerVerificationDetailResponse(
                 sv.getRejectionReason(),
                 eventHistory
         );
+    }
+
+    public static AdminSellerVerificationDetailResponse from(
+            SellerVerification sv,
+            List<VerificationEventResponse> eventHistory) {
+        return from(sv, null, null, null, null, eventHistory);
     }
 }

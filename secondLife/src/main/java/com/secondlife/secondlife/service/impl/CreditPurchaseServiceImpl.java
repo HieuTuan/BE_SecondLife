@@ -45,7 +45,6 @@ public class CreditPurchaseServiceImpl implements CreditPurchaseService {
         CreditQuoteResponse quote = pricingService.quote(request.listingQuantity(), request.valuationQuantity());
         if (quote.finalFee().compareTo(BigDecimal.ZERO) <= 0
                 || !fitsMoneyColumn(quote.subtotal())
-                || !fitsMoneyColumn(quote.discountAmount())
                 || !fitsMoneyColumn(quote.finalFee())) {
             throw new BadRequestException("Credit purchase amount is invalid");
         }
@@ -56,12 +55,7 @@ public class CreditPurchaseServiceImpl implements CreditPurchaseService {
         purchase.setValuationQuantity(quote.valuationQuantity());
         purchase.setListingUnitPrice(quote.listingUnitPrice());
         purchase.setValuationUnitPrice(quote.valuationUnitPrice());
-        purchase.setDiscountTierId(quote.discountTierId());
-        purchase.setDiscountMinQuantity(quote.discountMinQuantity());
-        purchase.setDiscountMaxQuantity(quote.discountMaxQuantity());
-        purchase.setDiscountRate(quote.discountRate());
         purchase.setSubtotal(quote.subtotal());
-        purchase.setDiscountAmount(quote.discountAmount());
         purchase.setFinalFee(quote.finalFee());
         purchase.setCurrency(quote.currency());
         purchase.setStatus(CreditPurchaseStatus.PAYMENT_PENDING);
@@ -108,9 +102,7 @@ public class CreditPurchaseServiceImpl implements CreditPurchaseService {
     private CreditPurchaseResponse toResponse(CreditPurchase purchase, PaymentIntent intent) {
         CreditQuoteResponse snapshot = new CreditQuoteResponse(purchase.getListingQuantity(),
                 purchase.getValuationQuantity(), purchase.getListingUnitPrice(),
-                purchase.getValuationUnitPrice(), purchase.getDiscountTierId(),
-                purchase.getDiscountMinQuantity(), purchase.getDiscountMaxQuantity(),
-                purchase.getDiscountRate(), purchase.getSubtotal(), purchase.getDiscountAmount(),
+                purchase.getValuationUnitPrice(), purchase.getSubtotal(),
                 purchase.getFinalFee(), purchase.getCurrency());
         return new CreditPurchaseResponse(purchase.getId(), purchase.getStatus(), snapshot,
                 intent == null ? null : intent.getId(), intent == null ? null : intent.getProvider(),

@@ -19,7 +19,9 @@ class CorsPropertiesTest {
 
     @Test
     void configuredCorsOriginsBindSuccessfully() {
-        contextRunner.withPropertyValues("app.cors.allowed-origins=https://example.test")
+        contextRunner.withPropertyValues("app.cors.allowed-origins=https://example.test",
+                        "app.cors.allowed-methods=GET,POST", "app.cors.allowed-headers=Authorization,Content-Type",
+                        "app.cors.allow-credentials=true", "app.cors.max-age-seconds=60")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context.getBean(CorsProperties.class).allowedOrigins())

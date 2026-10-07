@@ -62,8 +62,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/health").permitAll()
                         .requestMatchers("/api/v1/webhooks/sepay").permitAll()
-                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/posts").permitAll()
-                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/posts/{postId}").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.POST,"/api/v1/shipping/callback").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/posts", "/api/v1/listings", "/api/v1/listings/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         // Administrative role assignment is also guarded at the filter boundary.
                         .requestMatchers("/api/admin/permissions", "/api/admin/permissions/**",
@@ -88,10 +88,12 @@ public class SecurityConfig {
                 .toList();
 
         configuration.setAllowedOrigins(origins);
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With", "Accept", "Origin"));
-        configuration.setAllowCredentials(true);
-        configuration.setMaxAge(3600L);
+        configuration.setAllowedMethods(Arrays.stream(corsProperties.allowedMethods().split(","))
+                .map(String::trim).filter(s -> !s.isEmpty()).toList());
+        configuration.setAllowedHeaders(Arrays.stream(corsProperties.allowedHeaders().split(","))
+                .map(String::trim).filter(s -> !s.isEmpty()).toList());
+        configuration.setAllowCredentials(corsProperties.allowCredentials());
+        configuration.setMaxAge(corsProperties.maxAgeSeconds());
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

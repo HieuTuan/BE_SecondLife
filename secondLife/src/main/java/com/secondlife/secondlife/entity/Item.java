@@ -26,4 +26,8 @@ public class Item {
 
     @Column(name = "name", nullable = false)
     private String name;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @Column(name = "seed_key", length = 100, unique = true)
+    private String seedKey;
 }

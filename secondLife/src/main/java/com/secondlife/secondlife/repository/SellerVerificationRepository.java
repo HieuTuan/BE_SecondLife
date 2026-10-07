@@ -26,6 +26,12 @@ public interface SellerVerificationRepository extends JpaRepository<SellerVerifi
 
     Optional<SellerVerification> findTopByUserIdOrderBySubmittedAtDesc(UUID userId);
 
+    List<SellerVerification> findAllByUserIdOrderBySubmittedAtDesc(UUID userId);
+
+    Optional<SellerVerification> findTopByUserIdAndStatusOrderBySubmittedAtDesc(UUID userId, SellerVerificationStatus status);
+
+    List<SellerVerification> findByUserIdAndStatusOrderBySubmittedAtDesc(UUID userId, SellerVerificationStatus status);
+
     boolean existsByUserIdAndStatus(UUID userId, SellerVerificationStatus status);
 
     boolean existsByUserIdAndStatusIn(UUID userId, Collection<SellerVerificationStatus> statuses);

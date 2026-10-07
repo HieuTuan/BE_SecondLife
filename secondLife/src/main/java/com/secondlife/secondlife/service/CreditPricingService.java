@@ -11,7 +11,4 @@ public interface CreditPricingService {
     CreditQuoteResponse quote(int listingQuantity, int valuationQuantity);
     List<CreditPricingRuleResponse> getAdminPrices();
     CreditPricingRuleResponse updatePrice(UUID adminId, CreditType creditType, UpdateCreditPricingRequest request);
-    List<CreditDiscountTierResponse> getAdminTiers();
-    CreditDiscountTierResponse createTier(UUID adminId, SaveCreditDiscountTierRequest request);
-    CreditDiscountTierResponse updateTier(UUID adminId, UUID tierId, SaveCreditDiscountTierRequest request);
 }

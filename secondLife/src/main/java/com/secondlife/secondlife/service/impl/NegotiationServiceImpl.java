@@ -12,9 +12,11 @@ import com.secondlife.secondlife.repository.NegotiationRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.NegotiationService;
-import lombok.RequiredArgsConstructor;
+import com.secondlife.secondlife.common.PageableUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,17 +24,36 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class NegotiationServiceImpl implements NegotiationService {
+
+    private static final Set<String> ALLOWED_NEGOTIATION_SORT_PROPERTIES = Set.of(
+            "id", "offeredPrice", "status", "createdAt", "updatedAt", "expiredAt"
+    );
+    private static final Sort DEFAULT_NEGOTIATION_SORT = Sort.by(Sort.Direction.DESC, "createdAt");
 
     private final NegotiationRepository negotiationRepository;
     private final PostRepository postRepository;
     private final UserRepository userRepository;
 
-    private static final int MAX_REJECTION_LIMIT = 3;
+    private final int maxRejections;
+    private final long acceptedTtlHours;
+
+    public NegotiationServiceImpl(NegotiationRepository negotiationRepository, PostRepository postRepository,
+                                  UserRepository userRepository,
+                                  @Value("${app.negotiation.max-rejections}") int maxRejections,
+                                  @Value("${app.negotiation.accepted-ttl-hours}") long acceptedTtlHours) {
+        if (maxRejections <= 0 || acceptedTtlHours <= 0)
+            throw new IllegalArgumentException("Negotiation rejection limit and accepted TTL must be positive");
+        this.negotiationRepository = negotiationRepository;
+        this.postRepository = postRepository;
+        this.userRepository = userRepository;
+        this.maxRejections = maxRejections;
+        this.acceptedTtlHours = acceptedTtlHours;
+    }
 
     @Override
     @Transactional
@@ -61,7 +82,7 @@ public class NegotiationServiceImpl implements NegotiationService {
 
         // Check reject limits
         long rejectedCount = negotiationRepository.countRejectedNegotiations(post.getId(), buyerId);
-        if (rejectedCount >= MAX_REJECTION_LIMIT) {
+        if (rejectedCount >= maxRejections) {
             throw new BadRequestException("You have reached the maximum number of rejected negotiations for this post");
         }
 
@@ -103,7 +124,7 @@ public class NegotiationServiceImpl implements NegotiationService {
         }
 
         negotiation.setStatus(NegotiationStatus.ACCEPTED);
-        negotiation.setExpiredAt(Instant.now().plus(24, ChronoUnit.HOURS));
+        negotiation.setExpiredAt(Instant.now().plus(acceptedTtlHours, ChronoUnit.HOURS));
 
         negotiation = negotiationRepository.save(negotiation);
         return mapToDTO(negotiation);
@@ -151,12 +172,14 @@ public class NegotiationServiceImpl implements NegotiationService {
 
     @Override
     public Page<NegotiationResponseDTO> getBuyerNegotiations(UUID buyerId, Pageable pageable) {
-        return negotiationRepository.findByBuyerId(buyerId, pageable).map(this::mapToDTO);
+        Pageable safePageable = PageableUtils.sanitize(pageable, ALLOWED_NEGOTIATION_SORT_PROPERTIES, DEFAULT_NEGOTIATION_SORT);
+        return negotiationRepository.findByBuyerId(buyerId, safePageable).map(this::mapToDTO);
     }
 
     @Override
     public Page<NegotiationResponseDTO> getSellerNegotiations(UUID sellerId, Pageable pageable) {
-        return negotiationRepository.findByPostUserId(sellerId, pageable).map(this::mapToDTO);
+        Pageable safePageable = PageableUtils.sanitize(pageable, ALLOWED_NEGOTIATION_SORT_PROPERTIES, DEFAULT_NEGOTIATION_SORT);
+        return negotiationRepository.findByPostUserId(sellerId, safePageable).map(this::mapToDTO);
     }
 
     private NegotiationResponseDTO mapToDTO(Negotiation negotiation) {

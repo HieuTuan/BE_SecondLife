@@ -17,6 +17,11 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor
 public class Order {
+    private UUID shippingQuoteId;
+    @Column(nullable=false, precision=18, scale=2) private BigDecimal shippingFee=BigDecimal.ZERO;
+    @Column(columnDefinition="TEXT") private String deliveryAddress;
+    private Instant shippingDeliveredAt;
+    private UUID requestId;
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)

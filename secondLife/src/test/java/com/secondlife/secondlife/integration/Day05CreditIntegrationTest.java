@@ -96,7 +96,7 @@ class Day05CreditIntegrationTest {
         mockMvc.perform(get("/api/seller/credit-pricing").header("Authorization", bearer(seller)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.prices.length()").value(2))
-                .andExpect(jsonPath("$.data.discountTiers.length()").value(5));
+                .andExpect(jsonPath("$.data.discountTiers").doesNotExist());
         mockMvc.perform(put("/api/admin/credit-pricing/LISTING")
                         .header("Authorization", bearer(staff)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"unitPrice\":\"100.00\"}"))
@@ -117,15 +117,15 @@ class Day05CreditIntegrationTest {
                         .header("Authorization", bearer(seller)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.quote.subtotal").value(275.00))
-                .andExpect(jsonPath("$.data.quote.discountRate").value(0.05))
-                .andExpect(jsonPath("$.data.quote.discountAmount").value(13.75))
-                .andExpect(jsonPath("$.data.quote.finalFee").value(261.25));
+                .andExpect(jsonPath("$.data.quote.discountRate").doesNotExist())
+                .andExpect(jsonPath("$.data.quote.discountAmount").doesNotExist())
+                .andExpect(jsonPath("$.data.quote.finalFee").value(275.00));
         mockMvc.perform(get("/api/admin/credit-discount-tiers").header("Authorization", bearer(admin)))
-                .andExpect(status().isOk());
+                .andExpect(status().isNotFound());
         mockMvc.perform(post("/api/admin/credit-discount-tiers")
                         .header("Authorization", bearer(admin)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"minQuantity\":4,\"maxQuantity\":6,\"discountRate\":0.2,\"active\":true}"))
-                .andExpect(status().isConflict());
+                .andExpect(status().isNotFound());
         mockMvc.perform(put("/api/admin/credit-discount-tiers/" + UUID.randomUUID())
                         .header("Authorization", bearer(admin)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"minQuantity\":60,\"maxQuantity\":80,\"discountRate\":0.2,\"active\":true}"))
@@ -136,21 +136,17 @@ class Day05CreditIntegrationTest {
     }
 
     @Test
-    void seededDiscountTiersHaveAllRequiredBoundaries() {
+    void bulkQuantitiesUseFullUnitPriceAtEveryFormerDiscountBoundary() {
         UUID adminId = null;
         pricingService.updatePrice(adminId, CreditType.LISTING,
                 new UpdateCreditPricingRequest(new BigDecimal("100.00")));
         pricingService.updatePrice(adminId, CreditType.VALUATION,
                 new UpdateCreditPricingRequest(new BigDecimal("25.00")));
         int[] quantities = {1, 4, 5, 9, 10, 29, 30, 49, 50};
-        String[] rates = {"0.0000", "0.0000", "0.0500", "0.0500", "0.1000",
-                "0.1000", "0.1500", "0.1500", "0.2000"};
         for (int i = 0; i < quantities.length; i++) {
             CreditQuoteResponse quote = pricingService.quote(quantities[i], 0);
-            assertEquals(0, quote.discountRate().compareTo(new BigDecimal(rates[i])));
             assertEquals(0, quote.subtotal().compareTo(new BigDecimal(quantities[i] * 100 + ".00")));
-            assertEquals(0, quote.finalFee().compareTo(quote.subtotal().subtract(quote.discountAmount())));
-            assertNotNull(quote.discountTierId());
+            assertEquals(0, quote.finalFee().compareTo(quote.subtotal()));
             assertEquals("VND", quote.currency());
         }
     }
@@ -175,12 +171,7 @@ class Day05CreditIntegrationTest {
         purchase.setValuationQuantity(quote.valuationQuantity());
         purchase.setListingUnitPrice(quote.listingUnitPrice());
         purchase.setValuationUnitPrice(quote.valuationUnitPrice());
-        purchase.setDiscountTierId(quote.discountTierId());
-        purchase.setDiscountMinQuantity(quote.discountMinQuantity());
-        purchase.setDiscountMaxQuantity(quote.discountMaxQuantity());
-        purchase.setDiscountRate(quote.discountRate());
         purchase.setSubtotal(quote.subtotal());
-        purchase.setDiscountAmount(quote.discountAmount());
         purchase.setFinalFee(quote.finalFee());
         purchase.setCurrency(quote.currency());
         purchase.setStatus(CreditPurchaseStatus.PAYMENT_PENDING);

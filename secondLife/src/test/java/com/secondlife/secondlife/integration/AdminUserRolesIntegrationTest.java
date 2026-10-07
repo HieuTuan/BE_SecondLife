@@ -168,6 +168,7 @@ class AdminUserRolesIntegrationTest {
         Post post = new Post(); post.setId(UUID.randomUUID()); post.setUser(victim);
         AiChatSession forged = new AiChatSession(); forged.setId(UUID.randomUUID()); forged.setUser(seller); forged.setPostId(post.getId());
         when(posts.findById(post.getId())).thenReturn(Optional.of(post));
+        when(posts.findByIdForUpdate(post.getId())).thenReturn(Optional.of(post));
         when(sessions.findById(forged.getId())).thenReturn(Optional.of(forged));
         mvc.perform(post("/api/v1/posts/finalize-chat/{id}", forged.getId()).header("Authorization", bearer(seller)))
                 .andExpect(status().isForbidden());
@@ -185,7 +186,8 @@ class AdminUserRolesIntegrationTest {
         mvc.perform(get("/api/v1/inspector/orders/all").header("Authorization", bearer(inspector))).andExpect(status().isForbidden());
         mvc.perform(get("/api/v1/inspector/orders").header("Authorization", bearer(center))).andExpect(status().isForbidden());
         InspectionOrder order = new InspectionOrder(); order.setId(UUID.randomUUID()); order.setInspector(other);
-        when(orders.findById(order.getId())).thenReturn(Optional.of(order));
+        when(orders.findOwnerId(order.getId())).thenReturn(Optional.of(other.getId()));
+        when(orders.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
         mvc.perform(post("/api/v1/inspector/orders/{id}/result", order.getId()).header("Authorization", bearer(inspector))
                 .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"FAILED\",\"note\":\"invalid\"}"))
                 .andExpect(status().isForbidden());

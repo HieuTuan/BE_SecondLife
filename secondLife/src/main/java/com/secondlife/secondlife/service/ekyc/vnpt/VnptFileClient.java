@@ -1,7 +1,7 @@
 package com.secondlife.secondlife.service.ekyc.vnpt;
 
 import com.secondlife.secondlife.exception.BadRequestException;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
@@ -13,12 +13,17 @@ import org.springframework.util.MultiValueMap;
 import tools.jackson.databind.JsonNode;
 
 @Component
-@RequiredArgsConstructor
 @ConditionalOnProperty(name = "app.ekyc.provider", havingValue = "VNPT")
 public class VnptFileClient {
     private static final String PATH = "/file-service/v1/addFile";
-    private static final int MAX_BYTES = 10 * 1024 * 1024;
     private final VnptHttpClient httpClient;
+    private final long maxImageBytes;
+
+    public VnptFileClient(VnptHttpClient httpClient,
+            @Value("${app.ekyc.vnpt.max-image-bytes}") long maxImageBytes) {
+        this.httpClient = httpClient;
+        this.maxImageBytes = maxImageBytes;
+    }
 
     public void validateImage(byte[] image) {
         imageType(image);
@@ -56,8 +61,8 @@ public class VnptFileClient {
     }
 
     private MediaType imageType(byte[] bytes) {
-        if (bytes == null || bytes.length < 4 || bytes.length > MAX_BYTES) {
-            throw new BadRequestException("eKYC image must be a nonempty JPEG or PNG up to 10 MB");
+        if (bytes == null || bytes.length < 4 || bytes.length > maxImageBytes) {
+            throw new BadRequestException("eKYC image must be a nonempty JPEG or PNG up to " + maxImageBytes + " bytes");
         }
         if ((bytes[0] & 0xff) == 0xff && (bytes[1] & 0xff) == 0xd8 && (bytes[2] & 0xff) == 0xff) {
             return MediaType.IMAGE_JPEG;

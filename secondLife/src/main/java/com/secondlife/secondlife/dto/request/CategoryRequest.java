@@ -1,9 +1,5 @@
 package com.secondlife.secondlife.dto.request;
 
-import lombok.Data;
+import jakarta.validation.constraints.*;
 
-@Data
-public class CategoryRequest {
-    private String name;
-    private String description;
-}
+public record CategoryRequest(@NotBlank @Size(max = 255) String name, @Size(max = 2000) String description) {}

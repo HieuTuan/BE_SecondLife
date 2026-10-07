@@ -32,19 +32,19 @@ public class MockEkycProviderClient implements EkycProviderClient {
 
         // 1. Hard eKYC Failures
         if (docNumber.contains("FAIL_EXPIRED") || docNumber.endsWith("9901")) {
-            return EkycResult.fail(ReasonCode.DOCUMENT_EXPIRED, PROVIDER_NAME, refId);
+            return EkycResult.fail(ReasonCode.DOCUMENT_EXPIRED, PROVIDER_NAME, refId, 0.95, 0.98, 0.30);
         }
         if (docNumber.contains("FAIL_FAKE") || docNumber.endsWith("9902")) {
-            return EkycResult.fail(ReasonCode.DOCUMENT_SUSPECTED_FAKE, PROVIDER_NAME, refId);
+            return EkycResult.fail(ReasonCode.DOCUMENT_SUSPECTED_FAKE, PROVIDER_NAME, refId, 0.70, 0.95, 0.20);
         }
         if (docNumber.contains("FAIL_FACE") || docNumber.endsWith("9903")) {
-            return EkycResult.fail(ReasonCode.FACE_MISMATCH, PROVIDER_NAME, refId);
+            return EkycResult.fail(ReasonCode.FACE_MISMATCH, PROVIDER_NAME, refId, 0.35, 0.95, 0.90);
         }
         if (docNumber.contains("FAIL_LIVENESS") || docNumber.endsWith("9904")) {
-            return EkycResult.fail(ReasonCode.LIVENESS_FAILED, PROVIDER_NAME, refId);
+            return EkycResult.fail(ReasonCode.LIVENESS_FAILED, PROVIDER_NAME, refId, 0.85, 0.25, 0.92);
         }
         if (docNumber.contains("FAIL_UNSUPPORTED") || docNumber.endsWith("9905")) {
-            return EkycResult.fail(ReasonCode.UNSUPPORTED_DOCUMENT, PROVIDER_NAME, refId);
+            return EkycResult.fail(ReasonCode.UNSUPPORTED_DOCUMENT, PROVIDER_NAME, refId, 0.90, 0.95, 0.40);
         }
 
         // 2. User-Fixable Uncertain Cases

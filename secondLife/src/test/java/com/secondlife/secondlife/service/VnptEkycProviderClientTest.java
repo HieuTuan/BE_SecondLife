@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -55,6 +56,65 @@ class VnptEkycProviderClientTest {
         ReflectionTestUtils.setField(module.tokens(), "expiresAtMillis", System.currentTimeMillis() + 10_000);
         assertEquals("second-token", module.tokens().getToken());
         module.server().verify();
+    }
+
+    @Test
+    void configuredRefreshMarginRefreshesBeforeTheOldMargin() {
+        RestTemplate rest = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.createServer(rest);
+        expectToken(server, "first-token");
+        expectToken(server, "second-token");
+        new ApplicationContextRunner()
+                .withBean(VnptEkycProperties.class, () -> properties())
+                .withBean("vnptRestTemplate", RestTemplate.class, () -> rest)
+                .withBean(ObjectMapper.class, () -> JsonMapper.builder().build())
+                .withBean(VnptTokenService.class)
+                .withPropertyValues("app.ekyc.provider=VNPT", "app.ekyc.vnpt.token-refresh-margin-millis=120000")
+                .run(context -> {
+                    VnptTokenService tokens = context.getBean(VnptTokenService.class);
+                    assertEquals("first-token", tokens.getToken());
+                    ReflectionTestUtils.setField(tokens, "expiresAtMillis", System.currentTimeMillis() + 90_000);
+                    assertEquals("second-token", tokens.getToken());
+                });
+        server.verify();
+    }
+
+    @Test
+    void configuredFileLimitRejectsAnOtherwiseValidJpeg() {
+        new ApplicationContextRunner()
+                .withBean(VnptHttpClient.class, () -> mock(VnptHttpClient.class))
+                .withBean(VnptFileClient.class)
+                .withPropertyValues("app.ekyc.provider=VNPT", "app.ekyc.vnpt.max-image-bytes=4")
+                .run(context -> {
+                    byte[] oversized = {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 0x00, 0x00};
+                    assertThrows(com.secondlife.secondlife.exception.BadRequestException.class,
+                            () -> context.getBean(VnptFileClient.class).validateImage(oversized));
+                    assertDoesNotThrow(() -> context.getBean(VnptFileClient.class).validateImage(JPEG));
+                });
+    }
+
+    @Test
+    void configuredDownloadLimitRequestsImageResubmission() {
+        RestTemplate rest = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.createServer(rest);
+        server.expect(requestTo("https://res.cloudinary.com/test-cloud/image/upload/front.jpg"))
+                .andRespond(withSuccess(new byte[5], MediaType.IMAGE_JPEG));
+        new ApplicationContextRunner()
+                .withBean(VnptEkycOrchestrator.class, () -> mock(VnptEkycOrchestrator.class))
+                .withBean("vnptRestTemplate", RestTemplate.class, () -> rest)
+                .withBean(VnptEkycProviderClient.class)
+                .withPropertyValues("app.ekyc.provider=VNPT", "app.cloudinary.cloud-name=test-cloud",
+                        "app.ekyc.vnpt.max-image-bytes=4")
+                .run(context -> {
+                    var result = context.getBean(VnptEkycProviderClient.class).verify(new EkycRequest(
+                            VerificationType.CITIZEN_ID, "001",
+                            "https://res.cloudinary.com/test-cloud/image/upload/front.jpg",
+                            "https://res.cloudinary.com/test-cloud/image/upload/back.jpg",
+                            "https://res.cloudinary.com/test-cloud/image/upload/selfie.jpg", "session", "request-token"));
+                    assertEquals(EkycStatus.UNCERTAIN, result.status());
+                    assertEquals(ReasonCode.IMAGE_NOT_ACCESSIBLE, result.reasonCode());
+                });
+        server.verify();
     }
 
     @Test
@@ -237,7 +297,7 @@ class VnptEkycProviderClientTest {
                 anyString(), anyString(), eq(-1)))
                 .thenReturn(new VnptResults.Verification(UUID.randomUUID(), true, "PASSED",
                         ocr, null, null, null, compare));
-        VnptEkycProviderClient adapter = new VnptEkycProviderClient(orchestrator, rest, "test-cloud");
+        VnptEkycProviderClient adapter = new VnptEkycProviderClient(orchestrator, rest, "test-cloud", 10_485_760L);
         EkycRequest request = new EkycRequest(VerificationType.CITIZEN_ID, "001",
                 "https://res.cloudinary.com/test-cloud/image/upload/front.jpg",
                 "https://res.cloudinary.com/test-cloud/image/upload/back.jpg",
@@ -256,7 +316,7 @@ class VnptEkycProviderClientTest {
     @Test
     void sellerAdapterRequestsResubmissionWhenVnptContextIsMissing() {
         VnptEkycProviderClient adapter = new VnptEkycProviderClient(
-                mock(VnptEkycOrchestrator.class), new RestTemplate(), "test-cloud");
+                mock(VnptEkycOrchestrator.class), new RestTemplate(), "test-cloud", 10_485_760L);
         var result = adapter.verify(new EkycRequest(VerificationType.CITIZEN_ID, "001",
                 "https://res.cloudinary.com/test-cloud/image/upload/front.jpg",
                 "https://res.cloudinary.com/test-cloud/image/upload/back.jpg",
@@ -290,7 +350,7 @@ class VnptEkycProviderClientTest {
         VnptEkycOrchestrator orchestrator = mock(VnptEkycOrchestrator.class);
         when(orchestrator.verify(any(), any(), any(), anyString(), anyString(), anyInt()))
                 .thenThrow(new VnptApiException("rejected", 400, "/ai/v1/web/ocr/id", "ZUUL_GATEWAY_REJECTED"));
-        VnptEkycProviderClient adapter = new VnptEkycProviderClient(orchestrator, rest, "test-cloud");
+        VnptEkycProviderClient adapter = new VnptEkycProviderClient(orchestrator, rest, "test-cloud", 10_485_760L);
         EkycRequest request = new EkycRequest(VerificationType.CITIZEN_ID, "001",
                 "https://res.cloudinary.com/test-cloud/image/upload/front.jpg",
                 "https://res.cloudinary.com/test-cloud/image/upload/back.jpg",
@@ -315,7 +375,7 @@ class VnptEkycProviderClientTest {
         VnptEkycOrchestrator orchestrator = mock(VnptEkycOrchestrator.class);
         when(orchestrator.verify(any(), any(), any(), argThat(s -> s != null && s.startsWith("ANDROID_Web_1.0_Device_1.0.0_WEBSDK123_")), anyString(), anyInt()))
                 .thenThrow(new VnptApiException("rejected", 400, "/ai/v1/web/ocr/id", "ZUUL_GATEWAY_REJECTED"));
-        VnptEkycProviderClient adapter = new VnptEkycProviderClient(orchestrator, rest, "test-cloud");
+        VnptEkycProviderClient adapter = new VnptEkycProviderClient(orchestrator, rest, "test-cloud", 10_485_760L);
         EkycRequest request = new EkycRequest(VerificationType.CITIZEN_ID, "001",
                 "https://res.cloudinary.com/test-cloud/image/upload/front.jpg",
                 "https://res.cloudinary.com/test-cloud/image/upload/back.jpg",
@@ -376,16 +436,20 @@ class VnptEkycProviderClientTest {
         RestTemplate rest = new RestTemplate();
         MockRestServiceServer server = MockRestServiceServer.createServer(rest);
         ObjectMapper mapper = JsonMapper.builder().build();
-        VnptEkycProperties props = new VnptEkycProperties(BASE, "dummy-client-id",
-                "dummy-client-secret", "dummy-token-id", "dummy-token-key", "TEST1", 1000);
-        VnptTokenService tokens = new VnptTokenService(props, rest, mapper);
+        VnptEkycProperties props = properties();
+        VnptTokenService tokens = new VnptTokenService(props, rest, mapper, 45_000L);
         VnptHttpClient http = new VnptHttpClient(props, tokens, rest, mapper);
-        VnptFileClient files = new VnptFileClient(http);
+        VnptFileClient files = new VnptFileClient(http, 10_485_760L);
         VnptEkycOrchestrator orchestrator = new VnptEkycOrchestrator(tokens, files,
                 new VnptOcrClient(http), new VnptCardLivenessClient(http),
                 new VnptFaceLivenessClient(http), new VnptMaskFaceClient(http),
                 new VnptFaceCompareClient(http), new EkycVerificationPolicy());
         return new Module(server, tokens, http, files, orchestrator);
+    }
+
+    private VnptEkycProperties properties() {
+        return new VnptEkycProperties(BASE, "dummy-client-id", "dummy-client-secret",
+                "dummy-token-id", "dummy-token-key", "TEST1", 1000);
     }
 
     private record Module(MockRestServiceServer server, VnptTokenService tokens,

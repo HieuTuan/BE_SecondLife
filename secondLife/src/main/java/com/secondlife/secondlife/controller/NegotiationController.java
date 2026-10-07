@@ -7,8 +7,11 @@ import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.NegotiationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.SortDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -37,7 +40,7 @@ public class NegotiationController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Page<NegotiationResponseDTO>> getBuyerNegotiations(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            Pageable pageable) {
+            @ParameterObject @SortDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
         UUID buyerId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(negotiationService.getBuyerNegotiations(buyerId, pageable));
     }
@@ -46,7 +49,7 @@ public class NegotiationController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Page<NegotiationResponseDTO>> getSellerNegotiations(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            Pageable pageable) {
+            @ParameterObject @SortDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
         UUID sellerId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(negotiationService.getSellerNegotiations(sellerId, pageable));
     }

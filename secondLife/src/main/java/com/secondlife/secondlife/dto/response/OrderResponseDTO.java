@@ -12,6 +12,10 @@ import java.util.UUID;
 @Getter
 @Setter
 public class OrderResponseDTO {
+    private UUID shippingQuoteId;
+    private BigDecimal shippingFee;
+    private BigDecimal totalPaid;
+    private Instant shippingDeliveredAt;
     private UUID id;
     private UUID postId;
     private String postTitle;

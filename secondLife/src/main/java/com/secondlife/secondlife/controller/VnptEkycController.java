@@ -4,6 +4,10 @@ import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.dto.ekyc.vnpt.VnptResults;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.service.ekyc.vnpt.VnptEkycOrchestrator;
+import com.secondlife.secondlife.service.SellerOnboardingService;
+import com.secondlife.secondlife.security.CurrentUserProvider;
+import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -26,16 +30,20 @@ import java.io.IOException;
 @Tag(name = "VNPT eKYC", description = "Direct VNPT eKYC verification for authenticated buyers")
 public class VnptEkycController {
     private final VnptEkycOrchestrator orchestrator;
+    private final SellerOnboardingService onboarding;
+    private final CurrentUserProvider currentUser;
 
     @PostMapping(value = "/verify", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAuthority('SELLER_VERIFICATION_SUBMIT')")
     @Operation(summary = "Verify front/back identity images and selfie with VNPT")
     public ResponseEntity<ApiResponse<VnptResults.Verification>> verify(
+            @AuthenticationPrincipal CustomUserDetails user,
             @RequestParam("frontImage") MultipartFile frontImage,
             @RequestParam("backImage") MultipartFile backImage,
             @RequestParam("selfieImage") MultipartFile selfieImage,
             @RequestParam("clientSession") String clientSession,
             @RequestParam("token") String token) {
+        onboarding.requireCompleted(currentUser.resolveUserId(user));
         try {
             return ResponseEntity.ok(ApiResponse.success(orchestrator.verify(
                     frontImage.getBytes(), backImage.getBytes(), selfieImage.getBytes(),

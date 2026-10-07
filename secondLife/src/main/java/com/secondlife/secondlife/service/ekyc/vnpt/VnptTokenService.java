@@ -2,6 +2,7 @@ package com.secondlife.secondlife.service.ekyc.vnpt;
 
 import com.secondlife.secondlife.config.VnptEkycProperties;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -22,25 +23,27 @@ import java.net.SocketTimeoutException;
 @ConditionalOnProperty(name = "app.ekyc.provider", havingValue = "VNPT")
 public class VnptTokenService {
     private static final String TOKEN_PATH = "/auth/oauth/token";
-    private static final long REFRESH_MARGIN_MILLIS = 45_000L;
 
     private final VnptEkycProperties properties;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final long refreshMarginMillis;
     private String token;
     private long expiresAtMillis;
 
     public VnptTokenService(VnptEkycProperties properties,
                             @Qualifier("vnptRestTemplate") RestTemplate restTemplate,
-                            ObjectMapper objectMapper) {
+                            ObjectMapper objectMapper,
+                            @Value("${app.ekyc.vnpt.token-refresh-margin-millis}") long refreshMarginMillis) {
         this.properties = properties;
         this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
+        this.refreshMarginMillis = refreshMarginMillis;
     }
 
     public synchronized String getToken() {
         long now = System.currentTimeMillis();
-        if (token != null && now < expiresAtMillis - REFRESH_MARGIN_MILLIS) {
+        if (token != null && now < expiresAtMillis - refreshMarginMillis) {
             return token;
         }
         HttpHeaders headers = new HttpHeaders();

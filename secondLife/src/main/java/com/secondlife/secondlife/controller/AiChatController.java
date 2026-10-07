@@ -26,7 +26,17 @@ public class AiChatController {
     private final AiChatService aiChatService;
     private final CurrentUserProvider currentUserProvider;
 
-    @PostMapping
+    @InitBinder
+    public void bindOptionalImages(org.springframework.web.bind.WebDataBinder binder) {
+        binder.registerCustomEditor(org.springframework.web.multipart.MultipartFile.class, new java.beans.PropertyEditorSupport() {
+            @Override public void setAsText(String text) {
+                if (text == null || text.isBlank()) setValue(null);
+                else throw new IllegalArgumentException("images must be uploaded files, not text");
+            }
+        });
+    }
+
+    @PostMapping(consumes = {"multipart/form-data", "application/x-www-form-urlencoded"})
     @PreAuthorize("hasAuthority('AI_CHAT_SELF')")
     @Operation(summary = "Send a message to the AI Chatbot")
     public ResponseEntity<ApiResponse<AiChatResponse>> chat(

@@ -4,6 +4,11 @@ Tất cả API bên dưới yêu cầu `Authorization: Bearer <accessToken>`, ro
 
 Các API quản lý catalog permission, permission của role và role của user trong tài liệu này chỉ dành cho ADMIN có `ADMIN_RBAC_MANAGE`. Điều này không có nghĩa mọi permission chỉ dành cho ADMIN: permission nghiệp vụ như `CREDIT_READ_SELF` dành cho SELLER, `SELLER_VERIFICATION_SUBMIT` dành cho BUYER và `USER_READ_ANY` có thể cấp cho STAFF.
 
+Main Flow 1 bổ sung `LISTING_VALUATION_SELF`, gắn mặc định cho SELLER/ADMIN và có `assignableRoles: ["SELLER"]`.
+Quyền này cho định giá/xem lịch sử bài của chính người gọi; chi tiết API và JSON test ở [MAIN_FLOW_1_API_GUIDE.md](MAIN_FLOW_1_API_GUIDE.md).
+
+Quản lý danh mục/loại sản phẩm bổ sung `ADMIN_CATALOG_MANAGE`, chỉ cấp cho ADMIN và không cho gán sang các role khác. GET catalog dành cho tài khoản đã đăng nhập; POST/PUT/DELETE yêu cầu cả ADMIN và quyền này. Xem API và JSON test ở [CATEGORY_ITEM_API_GUIDE.md](CATEGORY_ITEM_API_GUIDE.md).
+
 ## Tích hợp FE và luồng màn hình
 
 ### Kết nối API

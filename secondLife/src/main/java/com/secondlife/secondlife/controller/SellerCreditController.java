@@ -56,7 +56,7 @@ public class SellerCreditController {
     }
 
     @PostMapping("/credit-purchases")
-    @Operation(summary = "Create a credit purchase using the current server price and discount")
+    @Operation(summary = "Create a credit purchase using the current server unit prices")
     @PreAuthorize("hasRole('SELLER') and hasAuthority('CREDIT_PURCHASE_SELF')")
     public ResponseEntity<ApiResponse<CreditPurchaseResponse>> createPurchase(
             @AuthenticationPrincipal CustomUserDetails currentUser,

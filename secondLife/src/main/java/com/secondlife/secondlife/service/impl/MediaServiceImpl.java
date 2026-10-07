@@ -5,8 +5,8 @@ import com.cloudinary.utils.ObjectUtils;
 import com.secondlife.secondlife.dto.response.MediaUploadResponse;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.service.MediaService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -18,25 +18,31 @@ import java.util.Set;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class MediaServiceImpl implements MediaService {
 
-    private static final long MAX_FILE_SIZE = 10 * 1024 * 1024L; // 10MB
     private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of(
             "image/jpeg",
             "image/jpg",
             "image/png",
             "image/webp"
     );
-    private static final String DEFAULT_FOLDER = "secondlife/verifications";
-
     private final Cloudinary cloudinary;
+    private final long maxFileSizeBytes;
+    private final String defaultFolder;
+
+    public MediaServiceImpl(Cloudinary cloudinary,
+            @Value("${app.media.max-file-size-bytes}") long maxFileSizeBytes,
+            @Value("${app.media.default-folder}") String defaultFolder) {
+        this.cloudinary = cloudinary;
+        this.maxFileSizeBytes = maxFileSizeBytes;
+        this.defaultFolder = defaultFolder;
+    }
 
     @Override
     public MediaUploadResponse uploadImage(MultipartFile file, String folder) {
         validateImageFile(file);
 
-        String targetFolder = (folder != null && !folder.isBlank()) ? folder.trim() : DEFAULT_FOLDER;
+        String targetFolder = (folder != null && !folder.isBlank()) ? folder.trim() : defaultFolder;
 
         try {
             log.info("Uploading image [{}] of size {} bytes to Cloudinary folder [{}]",
@@ -85,8 +91,8 @@ public class MediaServiceImpl implements MediaService {
             throw new BadRequestException("File tải lên không được để trống");
         }
 
-        if (file.getSize() > MAX_FILE_SIZE) {
-            throw new BadRequestException("Dung lượng file vượt quá giới hạn tối đa cho phép (10MB)");
+        if (file.getSize() > maxFileSizeBytes) {
+            throw new BadRequestException("Dung lượng file vượt quá giới hạn tối đa cho phép (" + maxFileSizeBytes + " bytes)");
         }
 
         String contentType = file.getContentType();

@@ -81,15 +81,19 @@ class Day04SellerVerificationIntegrationTest {
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JwtTokenProvider jwtTokenProvider;
     @MockitoBean private NotificationService notificationService;
+    @MockitoBean private com.secondlife.secondlife.service.SellerOnboardingService onboarding;
     @MockitoBean private PostService postService;
 
     @Test
     void approvedBuyerRetainsBuyerGetsSellerAndCanUseSellerEndpoint() throws Exception {
         String email = randomEmail("seller");
         String buyerToken = field(register(email), "accessToken");
-        mockMvc.perform(post("/api/v1/posts/init")
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart("/api/v1/posts/init")
+                        .file(new org.springframework.mock.web.MockMultipartFile("images", "front.jpg", "image/jpeg", new byte[]{1}))
+                        .file(new org.springframework.mock.web.MockMultipartFile("images", "side.jpg", "image/jpeg", new byte[]{2}))
+                        .file(new org.springframework.mock.web.MockMultipartFile("images", "back.jpg", "image/jpeg", new byte[]{3}))
                         .header("Authorization", bearer(buyerToken))
-                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                        .param("categoryId", UUID.randomUUID().toString()))
                 .andExpect(status().isForbidden());
 
         mockMvc.perform(post("/api/seller-verifications")
@@ -112,9 +116,12 @@ class Day04SellerVerificationIntegrationTest {
                 .andExpect(jsonPath("$.data.roles", hasItem("SELLER")));
         when(postService.initPost(any(UUID.class), any(PostInitRequest.class)))
                 .thenReturn(new PostInitResponse(UUID.randomUUID(), UUID.randomUUID(), "Ready"));
-        mockMvc.perform(post("/api/v1/posts/init")
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart("/api/v1/posts/init")
                         .header("Authorization", bearer(sellerToken))
-                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                        .file(new org.springframework.mock.web.MockMultipartFile("images", "front.jpg", "image/jpeg", new byte[]{1}))
+                        .file(new org.springframework.mock.web.MockMultipartFile("images", "side.jpg", "image/jpeg", new byte[]{2}))
+                        .file(new org.springframework.mock.web.MockMultipartFile("images", "back.jpg", "image/jpeg", new byte[]{3}))
+                        .param("categoryId", UUID.randomUUID().toString()))
                 .andExpect(status().isOk());
     }
 

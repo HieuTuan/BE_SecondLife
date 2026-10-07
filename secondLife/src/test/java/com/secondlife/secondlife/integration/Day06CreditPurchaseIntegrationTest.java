@@ -118,7 +118,9 @@ class Day06CreditPurchaseIntegrationTest {
         CreditPurchase saved = purchaseRepository.findById(id).orElseThrow();
         assertEquals(2, saved.getListingQuantity());
         assertEquals(3, saved.getValuationQuantity());
-        assertEquals(0, saved.getFinalFee().compareTo(new BigDecimal("261.25")));
+        assertEquals(0, saved.getFinalFee().compareTo(new BigDecimal("275.00")));
+        assertNull(saved.getDiscountTierId());
+        assertEquals(0, saved.getDiscountAmount().signum());
         assertEquals(CreditPurchaseStatus.PAYMENT_PENDING, saved.getStatus());
         assertTrue(balanceRepository.findByUserId(seller.id()).isEmpty());
 
@@ -129,7 +131,10 @@ class Day06CreditPurchaseIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElements").value(1))
                 .andExpect(jsonPath("$.data.items[0].snapshot.listingUnitPrice").value(100.00))
-                .andExpect(jsonPath("$.data.items[0].snapshot.finalFee").value(261.25));
+                .andExpect(jsonPath("$.data.items[0].snapshot.finalFee").value(275.00))
+                .andExpect(jsonPath("$.data.items[0].snapshot.discountTierId").doesNotExist())
+                .andExpect(jsonPath("$.data.items[0].snapshot.discountRate").doesNotExist())
+                .andExpect(jsonPath("$.data.items[0].snapshot.discountAmount").doesNotExist());
         mockMvc.perform(get("/api/seller/credit-purchases")
                         .header("Authorization", bearer(otherSeller.token())))
                 .andExpect(status().isOk())

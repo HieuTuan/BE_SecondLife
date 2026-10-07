@@ -53,52 +53,52 @@ public class RbacDataSeeder implements ApplicationRunner {
     @Value("${app.seeder.seller.full-name}")
     private String sellerFullName;
 
-    @Value("${app.seeder.buyer.enabled:false}")
+    @Value("${app.seeder.buyer.enabled}")
     private boolean buyerSeederEnabled;
 
-    @Value("${app.seeder.buyer.email:}")
+    @Value("${app.seeder.buyer.email}")
     private String buyerEmail;
 
-    @Value("${app.seeder.buyer.password:}")
+    @Value("${app.seeder.buyer.password}")
     private String buyerPassword;
 
-    @Value("${app.seeder.buyer.full-name:}")
+    @Value("${app.seeder.buyer.full-name}")
     private String buyerFullName;
 
-    @Value("${app.seeder.inspection-center.enabled:true}")
+    @Value("${app.seeder.inspection-center.enabled}")
     private boolean inspectionCenterSeederEnabled;
 
-    @Value("${app.seeder.inspection-center.email:center@secondlife.com}")
+    @Value("${app.seeder.inspection-center.email}")
     private String inspectionCenterEmail;
 
-    @Value("${app.seeder.inspection-center.password:123456}")
+    @Value("${app.seeder.inspection-center.password}")
     private String inspectionCenterPassword;
 
-    @Value("${app.seeder.inspection-center.full-name:Trung Tam Kiem Dinh Chinh}")
+    @Value("${app.seeder.inspection-center.full-name}")
     private String inspectionCenterFullName;
 
-    @Value("${app.seeder.inspector.enabled:true}")
+    @Value("${app.seeder.inspector.enabled}")
     private boolean inspectorSeederEnabled;
 
-    @Value("${app.seeder.inspector.email:inspector@secondlife.com}")
+    @Value("${app.seeder.inspector.email}")
     private String inspectorEmail;
 
-    @Value("${app.seeder.inspector.password:123456}")
+    @Value("${app.seeder.inspector.password}")
     private String inspectorPassword;
 
-    @Value("${app.seeder.inspector.full-name:Kiem Dinh Vien 1}")
+    @Value("${app.seeder.inspector.full-name}")
     private String inspectorFullName;
 
-    @Value("${app.seeder.staff.enabled:true}")
+    @Value("${app.seeder.staff.enabled}")
     private boolean staffSeederEnabled;
 
-    @Value("${app.seeder.staff.email:staff@secondlife.com}")
+    @Value("${app.seeder.staff.email}")
     private String staffEmail;
 
-    @Value("${app.seeder.staff.password:123456}")
+    @Value("${app.seeder.staff.password}")
     private String staffPassword;
 
-    @Value("${app.seeder.staff.full-name:Dieu Phoi Vien}")
+    @Value("${app.seeder.staff.full-name}")
     private String staffFullName;
 
     @Override
@@ -140,6 +140,7 @@ public class RbacDataSeeder implements ApplicationRunner {
                 Map.entry(PermissionCode.SELLER_VERIFICATION_READ_SELF, new String[]{"Read Own Seller Verification", "Allows checking personal seller verification status"}),
                 Map.entry(PermissionCode.LISTING_CREATE_SELF, new String[]{"Create Own Listing", "Allows creating own listings"}),
                 Map.entry(PermissionCode.LISTING_PUBLISH_SELF, new String[]{"Publish Own Listing", "Allows publishing own listings"}),
+                Map.entry(PermissionCode.LISTING_VALUATION_SELF, new String[]{"Value Own Listing", "Allows paid AI valuation and reading own valuation history"}),
                 Map.entry(PermissionCode.CREDIT_READ_SELF, new String[]{"Read Own Credits", "Allows reading own credit balances and pricing"}),
                 Map.entry(PermissionCode.CREDIT_PURCHASE_SELF, new String[]{"Purchase Own Credits", "Allows purchasing listing and valuation credits"}),
                 Map.entry(PermissionCode.INSPECTION_REPORT_SUBMIT, new String[]{"Submit Inspection Report", "Allows submitting inspection reports"}),
@@ -155,6 +156,7 @@ public class RbacDataSeeder implements ApplicationRunner {
                 Map.entry(PermissionCode.ADMIN_PRICING_MANAGE, new String[]{"Manage Pricing", "Allows admin pricing management"}),
                 Map.entry(PermissionCode.ADMIN_COMMISSION_MANAGE, new String[]{"Manage Commission", "Allows admin commission management"}),
                 Map.entry(PermissionCode.ADMIN_CONFIG_MANAGE, new String[]{"Manage Configuration", "Allows admin configuration management"}),
+                Map.entry(PermissionCode.ADMIN_CATALOG_MANAGE, new String[]{"Manage Product Catalog", "Create, update and delete categories and product item types"}),
                 Map.entry(PermissionCode.ADMIN_PERMANENT_BAN, new String[]{"Permanently Ban Users", "Allows admin permanent bans"}),
                 Map.entry(PermissionCode.ADMIN_HIGH_VALUE_PAYOUT, new String[]{"Approve High Value Payouts", "Allows admin high value payout approval"}),
                 Map.entry(PermissionCode.USER_READ_ANY, new String[]{"Read Any User", "Allows viewing details of any user in the system"}),
@@ -231,6 +233,7 @@ public class RbacDataSeeder implements ApplicationRunner {
                 permissions.get(PermissionCode.SELLER_VERIFICATION_READ_SELF),
                 permissions.get(PermissionCode.LISTING_CREATE_SELF),
                 permissions.get(PermissionCode.LISTING_PUBLISH_SELF),
+                permissions.get(PermissionCode.LISTING_VALUATION_SELF),
                 permissions.get(PermissionCode.CREDIT_READ_SELF),
                 permissions.get(PermissionCode.CREDIT_PURCHASE_SELF)
         ));

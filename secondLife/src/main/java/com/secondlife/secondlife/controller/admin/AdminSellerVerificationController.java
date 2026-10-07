@@ -21,7 +21,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.web.PageableDefault;
+import org.springframework.data.web.SortDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -48,7 +48,7 @@ public class AdminSellerVerificationController {
             @RequestParam(required = false) EkycStatus ekycStatus,
             @RequestParam(required = false) RiskStatus riskStatus,
             @RequestParam(required = false) ReasonCode reasonCode,
-            @org.springdoc.core.annotations.ParameterObject @PageableDefault(sort = "submittedAt", direction = Sort.Direction.DESC) Pageable pageable
+            @org.springdoc.core.annotations.ParameterObject @SortDefault(sort = "submittedAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         PageResponse<SellerVerificationResponse> response = sellerVerificationService.getAdminVerifications(
                 status, ekycStatus, riskStatus, reasonCode, pageable
@@ -89,6 +89,19 @@ public class AdminSellerVerificationController {
         UUID adminId = currentUserProvider.resolveAdminId(currentAdmin);
         SellerVerificationResponse response = sellerVerificationService.rejectVerification(adminId, id, request);
         return ResponseEntity.ok(ApiResponse.success("Seller verification rejected", response));
+    }
+
+    @PostMapping("/seller-verifications/{id}/request-resubmit")
+    @Operation(summary = "Request seller to resubmit documents with reason")
+    @PreAuthorize("hasRole('ADMIN') and hasAuthority('SELLER_VERIFICATION_REVIEW')")
+    public ResponseEntity<ApiResponse<SellerVerificationResponse>> requestResubmitSellerVerification(
+            @AuthenticationPrincipal CustomUserDetails currentAdmin,
+            @PathVariable UUID id,
+            @Valid @RequestBody SellerVerificationReviewRequest request
+    ) {
+        UUID adminId = currentUserProvider.resolveAdminId(currentAdmin);
+        SellerVerificationResponse response = sellerVerificationService.requestResubmitVerification(adminId, id, request);
+        return ResponseEntity.ok(ApiResponse.success("Seller verification requested to resubmit", response));
     }
 
     @PostMapping("/seller-verifications/{id}/retry-ekyc")

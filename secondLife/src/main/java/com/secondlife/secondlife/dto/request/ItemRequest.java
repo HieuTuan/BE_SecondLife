@@ -1,10 +1,6 @@
 package com.secondlife.secondlife.dto.request;
 
-import lombok.Data;
+import jakarta.validation.constraints.*;
 import java.util.UUID;
 
-@Data
-public class ItemRequest {
-    private String name;
-    private UUID categoryId;
-}
+public record ItemRequest(@NotNull UUID categoryId, @NotBlank @Size(max = 255) String name) {}

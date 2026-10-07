@@ -51,6 +51,7 @@ public class VnptHttpClient {
     }
 
     private JsonNode post(String path, Object body, MediaType contentType) {
+        // Authentication permits one retry with a renewed token after HTTP 401.
         for (int attempt = 0; attempt < 2; attempt++) {
             String accessToken = tokenService.getToken();
             HttpHeaders headers = new HttpHeaders();

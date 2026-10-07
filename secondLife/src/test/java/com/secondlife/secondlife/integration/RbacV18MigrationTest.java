@@ -35,7 +35,7 @@ class RbacV18MigrationTest {
             }
         }
 
-        Flyway flyway = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()).load();
+        Flyway flyway = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()).target("18").load();
         assertDoesNotThrow(() -> flyway.migrate(), "V18 must explicitly supply UUIDs when permissions.id has no default");
         assertTrue(flyway.validateWithResult().validationSuccessful);
         assertEquals("18", flyway.info().current().getVersion().toString());

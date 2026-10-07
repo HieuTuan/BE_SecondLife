@@ -22,6 +22,60 @@ import java.util.List;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler(EmailDeliveryException.class)
+    public ResponseEntity<ErrorResponse> handleEmailDelivery(EmailDeliveryException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(ex.getMessage(), request.getRequestURI()));
+    }
+    @ExceptionHandler(ShippingProviderException.class)
+    public ResponseEntity<ErrorResponse> handleShippingProvider(ShippingProviderException ex,HttpServletRequest request) {
+        HttpStatus status = ex.getUpstreamStatus()==503 ? HttpStatus.SERVICE_UNAVAILABLE :
+                ex.getUpstreamStatus()==504 ? HttpStatus.GATEWAY_TIMEOUT : HttpStatus.BAD_GATEWAY;
+        return ResponseEntity.status(status).body(ErrorResponse.of(ex.getMessage(),request.getRequestURI()));
+    }
+
+    @ExceptionHandler({org.springframework.web.servlet.resource.NoResourceFoundException.class,
+            org.springframework.web.servlet.NoHandlerFoundException.class})
+    public ResponseEntity<ErrorResponse> handleMissingEndpoint(Exception ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ErrorResponse.of("Endpoint not found", request.getRequestURI()));
+    }
+
+    @ExceptionHandler(org.springframework.web.HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleUnsupportedMedia(org.springframework.web.HttpMediaTypeNotSupportedException ex,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                .body(ErrorResponse.of("Unsupported Content-Type for this endpoint", request.getRequestURI()));
+    }
+
+    @ExceptionHandler({org.springframework.http.converter.HttpMessageNotReadableException.class,
+            org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class})
+    public ResponseEntity<ErrorResponse> handleMalformedRequest(Exception ex, HttpServletRequest request) {
+        return ResponseEntity.badRequest()
+                .body(ErrorResponse.of("Malformed request body or parameter", request.getRequestURI()));
+    }
+
+    @ExceptionHandler(org.springframework.data.core.PropertyReferenceException.class)
+    public ResponseEntity<ErrorResponse> handlePropertyReferenceException(
+            org.springframework.data.core.PropertyReferenceException ex, HttpServletRequest request) {
+        log.warn("Invalid sort property at {}: {}", request.getRequestURI(), ex.getMessage());
+        return ResponseEntity.badRequest()
+                .body(ErrorResponse.of("Invalid sort parameter: " + ex.getPropertyName(), request.getRequestURI()));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalArgumentException(
+            IllegalArgumentException ex, HttpServletRequest request) {
+        log.warn("Illegal argument at {}: {}", request.getRequestURI(), ex.getMessage());
+        return ResponseEntity.badRequest()
+                .body(ErrorResponse.of(ex.getMessage(), request.getRequestURI()));
+    }
+
+    @ExceptionHandler(AiProviderException.class)
+    public ResponseEntity<ErrorResponse> handleAiProvider(AiProviderException ex, HttpServletRequest request) {
+        log.warn("AI provider failed at {}", request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ErrorResponse.of(ex.getMessage(), request.getRequestURI()));
+    }
 
     @ExceptionHandler(VnptApiException.class)
     public ResponseEntity<ErrorResponse> handleVnptApi(VnptApiException ex, HttpServletRequest request) {
