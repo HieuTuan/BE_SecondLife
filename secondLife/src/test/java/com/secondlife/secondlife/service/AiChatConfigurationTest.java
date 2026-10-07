@@ -16,6 +16,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.Arguments;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -41,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -102,6 +104,28 @@ class AiChatConfigurationTest {
         var service = configuredService();
 
         assertThrows(BadRequestException.class, () -> service.processChat(request, owner.getId()));
+    }
+
+    @Test
+    void imageChatSendsAllImagesInOneMessageToGoogle() {
+        var request = request();
+        request.setImages(List.of(
+                new MockMultipartFile("images", "first.jpg", "image/jpeg", new byte[]{1}),
+                new MockMultipartFile("images", "second.png", "image/png", new byte[]{2})));
+        var service = configuredService();
+
+        assertEquals("Product description", service.processChat(request, owner.getId()).getReply());
+
+        var prompt = ArgumentCaptor.forClass(Prompt.class);
+        verify(google).call(prompt.capture());
+        verify(ollama, never()).call(any(Prompt.class));
+        var userMessages = prompt.getValue().getInstructions().stream()
+                .filter(UserMessage.class::isInstance).map(UserMessage.class::cast).toList();
+        assertEquals(1, userMessages.size());
+        assertEquals(request.getMessage(), userMessages.getFirst().getText());
+        assertEquals(2, userMessages.getFirst().getMedia().size());
+        assertEquals("image/jpeg", userMessages.getFirst().getMedia().getFirst().getMimeType().toString());
+        assertEquals("image/png", userMessages.getFirst().getMedia().getLast().getMimeType().toString());
     }
 
     @ParameterizedTest

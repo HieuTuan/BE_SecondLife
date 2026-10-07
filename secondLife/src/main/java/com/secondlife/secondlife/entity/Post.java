@@ -42,8 +42,6 @@ public class Post {
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "post_image_urls", joinColumns = @JoinColumn(name = "post_id"))
     @Column(name = "image_url")
     private String imageUrl; // the original image uploaded by the user
 

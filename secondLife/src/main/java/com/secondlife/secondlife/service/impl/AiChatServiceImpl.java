@@ -100,14 +100,8 @@ public class AiChatServiceImpl implements AiChatService {
             requirePostOwner(session.getPostId(), currentUserId);
             if (session.isCompleted())
                 throw new ConflictException("Session is already completed");
-            if (session.getMessageCount() >= 5) {
-                try {
-                    creditService.deductChatCredit(currentUserId);
-                } catch (Exception e) {
-                    throw new RuntimeException(
-                            "Chat limit exceeded (max 5 messages). Please purchase more chat credits to continue.");
-                }
-            }
+            if (session.getMessageCount() >= sessionMaxMessages)
+                throw new ConflictException("AI chat session limit reached; finalize the current description");
         } else {
             requirePostOwner(request.getPostId(), currentUserId);
             session = new AiChatSession();
@@ -157,14 +151,8 @@ public class AiChatServiceImpl implements AiChatService {
             } catch (java.io.IOException e) {
                 throw new RuntimeException("Failed to read image file", e);
             }
-            org.springframework.core.io.ByteArrayResource resource = new org.springframework.core.io.ByteArrayResource(
-                    imageBytes);
-            org.springframework.ai.content.Media media = new org.springframework.ai.content.Media(
-                    org.springframework.util.MimeTypeUtils.IMAGE_JPEG, resource);
-            aiMessages.add(UserMessage.builder().text(request.getMessage()).media(java.util.List.of(media)).build());
-        } else {
-            aiMessages.add(new UserMessage(request.getMessage()));
         }
+        aiMessages.add(UserMessage.builder().text(request.getMessage()).media(media).build());
 
         // Save user message to DB
         if (session.getPostId() != null) {
@@ -189,7 +177,7 @@ public class AiChatServiceImpl implements AiChatService {
         } else {
             // Use Ollama for text
             Prompt prompt = new Prompt(aiMessages,
-                    org.springframework.ai.ollama.api.OllamaChatOptions.builder().model("gemma4:31b-cloud").build());
+                    OllamaChatOptions.builder().model(ollamaModel).build());
             aiReply = ollamaChatClient.prompt(prompt).call().content();
         }
 
@@ -245,8 +233,8 @@ public class AiChatServiceImpl implements AiChatService {
                 """;
         aiMessages.add(new UserMessage(finalizePrompt));
 
-        Prompt prompt = new Prompt(aiMessages);
-        String finalDescription = googleChatClient.prompt(prompt).call().content();
+        Prompt prompt = new Prompt(aiMessages, OllamaChatOptions.builder().model(ollamaModel).build());
+        String finalDescription = call(ollamaChatClient, prompt);
 
         if (finalDescription != null) {
             // Bước 1: Rút trích nội dung trong thẻ <desc> nếu có
@@ -263,20 +251,6 @@ public class AiChatServiceImpl implements AiChatService {
 
         if (finalDescription == null || finalDescription.isBlank() || finalDescription.length() > 10000)
             throw new AiProviderException("AI description is empty or too long");
-        // Add prompt for price
-        String pricePrompt = "Dựa vào tình trạng và mô tả sản phẩm ở trên, hãy đưa ra một mức giá hợp lý (bằng số, đơn vị VNĐ) để bán đồ cũ thanh lý. LƯU Ý QUAN TRỌNG: Giá đồ cũ thanh lý LUÔN PHẢI THẤP HƠN giá mua mới (nếu trong đoạn chat có đề cập đến giá lúc mua mới). Chỉ trả về một con số duy nhất, không có chữ hay dấu phẩy. Ví dụ: 500000";
-        aiMessages.add(new AssistantMessage(finalDescription));
-        aiMessages.add(new UserMessage(pricePrompt));
-        Prompt priceAiPrompt = new Prompt(aiMessages);
-        String suggestedPriceStr = googleChatClient.prompt(priceAiPrompt).call().content();
-
-        java.math.BigDecimal suggestedPrice = java.math.BigDecimal.ZERO;
-        try {
-            suggestedPrice = new java.math.BigDecimal(suggestedPriceStr.replaceAll("[^0-9]", ""));
-        } catch (Exception e) {
-            // fallback if AI fails to return just number
-        }
-
         session.setCompleted(true);
         sessionRepository.save(session);
         
@@ -288,7 +262,6 @@ public class AiChatServiceImpl implements AiChatService {
             throw new IllegalArgumentException(property + " must be positive");
         }
 
-        return new PostFinalizeResponse(finalDescription, suggestedPrice);
     }
 
     private void requireSessionOwner(AiChatSession session, UUID userId) {
