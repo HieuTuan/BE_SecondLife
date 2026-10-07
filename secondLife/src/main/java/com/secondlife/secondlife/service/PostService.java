@@ -2,6 +2,7 @@ package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.dto.request.PostInitRequest;
 import com.secondlife.secondlife.dto.request.PostSubmitRequest;
+import com.secondlife.secondlife.dto.response.AiPriceEstimationResponse;
 import com.secondlife.secondlife.dto.response.PostInitResponse;
 import com.secondlife.secondlife.dto.response.PostFinalizeResponse;
 import com.secondlife.secondlife.dto.response.PostSubmitResponse;
@@ -16,6 +17,12 @@ public interface PostService {
     PostFinalizeResponse finalizeChatAndDescription(UUID userId, UUID sessionId);
 
     PostSubmitResponse submitPost(UUID userId, UUID postId, PostSubmitRequest request);
+
+    AiPriceEstimationResponse estimatePrice(UUID userId, UUID postId, String requestId);
+
+    com.secondlife.secondlife.dto.response.PostDto updateDraft(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.UpdateDraftRequest request);
+
+    com.secondlife.secondlife.dto.response.PostDto acceptDescription(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.AcceptDescriptionRequest request);
 
     void approvePost(UUID postId);
 

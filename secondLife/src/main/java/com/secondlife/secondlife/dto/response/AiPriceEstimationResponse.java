@@ -1,15 +1,23 @@
 package com.secondlife.secondlife.dto.response;
 
-import com.secondlife.secondlife.entity.AiPriceEstimate;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.UUID;
 
-public record AiPriceEstimationResponse(UUID estimateId, UUID postId, UUID requestId,
-        BigDecimal fairPriceMin, BigDecimal fairPriceMax, BigDecimal suggestedPrice,
-        String currency, String modelVersion, String expectedSellTime, Instant createdAt) {
-    public static AiPriceEstimationResponse from(AiPriceEstimate e) {
-        return new AiPriceEstimationResponse(e.getId(), e.getListingId(), e.getRequestId(), e.getFairPriceMin(),
-                e.getFairPriceMax(), e.getSuggestedPrice(), "VND", e.getModelVersion(), e.getExpectedSellTime(), e.getCreatedAt());
-    }
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class AiPriceEstimationResponse {
+    private String requestId;
+    private BigDecimal fairPriceMin;
+    private BigDecimal fairPriceMax;
+    private BigDecimal suggestedPrice;
+    private String modelVersion;
+    private String expectedSellTime;
+    private Instant createdAt;
 }

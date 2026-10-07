@@ -47,7 +47,8 @@ public class AiChatServiceImpl implements AiChatService {
     private final int sessionMaxMessages;
     private final String ollamaModel;
 
-    public AiChatServiceImpl(@org.springframework.beans.factory.annotation.Qualifier("ollamaChatModel") org.springframework.ai.chat.model.ChatModel ollamaChatModel,
+    public AiChatServiceImpl(
+            @org.springframework.beans.factory.annotation.Qualifier("ollamaChatModel") org.springframework.ai.chat.model.ChatModel ollamaChatModel,
             @org.springframework.beans.factory.annotation.Qualifier("googleGenAiChatModel") org.springframework.ai.chat.model.ChatModel googleChatModel,
             AiChatSessionRepository sessionRepository,
             AiChatMessageRepository messageRepository,
@@ -97,9 +98,16 @@ public class AiChatServiceImpl implements AiChatService {
                     .orElseThrow(() -> new NotFoundException("Session not found"));
             requireSessionOwner(session, currentUserId);
             requirePostOwner(session.getPostId(), currentUserId);
-            if (session.isCompleted()) throw new ConflictException("Session is already completed");
-            if (session.getMessageCount() >= sessionMaxMessages)
-                throw new ConflictException("This chat session has reached its " + sessionMaxMessages + "-message limit; finalize the description");
+            if (session.isCompleted())
+                throw new ConflictException("Session is already completed");
+            if (session.getMessageCount() >= 5) {
+                try {
+                    creditService.deductChatCredit(currentUserId);
+                } catch (Exception e) {
+                    throw new RuntimeException(
+                            "Chat limit exceeded (max 5 messages). Please purchase more chat credits to continue.");
+                }
+            }
         } else {
             requirePostOwner(request.getPostId(), currentUserId);
             session = new AiChatSession();
@@ -113,9 +121,11 @@ public class AiChatServiceImpl implements AiChatService {
         List<Message> aiMessages = new ArrayList<>();
         String systemPromptText = """
                 Bạn là một trợ lý AI chat bot cho hệ thống Secondlife, nơi người dùng có thể mua bán đồ gia dụng cũ đã qua sử dụng.
-                Dựa vào ngôn ngữ của user mà lựa chọn ngôn ngữ trả lời cho phù hợp. Ưu tiên tiếng Việt
+                Dựa vào ngôn ngữ của user mà lựa chọn ngôn ngữ trả lời cho phù hợp. Ưu tiên tiếng Việt.
                 Chỉ trả lời những mặt hàng liên quan đến đồ gia dụng cũ, nếu user hỏi về các vấn đề khác thì từ chối trả lời một cách lịch sự và tinh tế.
                 Câu trả lời chuyên nghiệp, không ưu tiên dùng emoji để phản hồi người dùng.
+                Đối với những câu hỏi nhờ bạn định giá, vui lòng yêu cầu người dùng cung cấp thông tin chi tiết về sản phẩm và hướng dẫn để có thể định giá chính xác nhất.
+                QUY TẮC BẮT BUỘC TUYỆT ĐỐI: KHÔNG BAO GIỜ được bắt đầu câu trả lời bằng các câu dẫn dắt như 'Dưới đây là...', 'Đây là...', 'Sau đây là...', 'Vâng, đây là...', 'Tôi đã viết...', 'Chắc chắn rồi,...' hoặc bất kỳ câu giới thiệu tương tự nào. Đi thẳng vào nội dung chính ngay lập tức.
                 Chỉ hỗ trợ thu thập thông tin và viết mô tả. Tuyệt đối không đưa ra giá hay khoảng giá.
                 Khi người dùng muốn định giá, hướng dẫn sử dụng chức năng Định giá AI riêng trên bài đăng.
                 """;
@@ -147,9 +157,11 @@ public class AiChatServiceImpl implements AiChatService {
             } catch (java.io.IOException e) {
                 throw new RuntimeException("Failed to read image file", e);
             }
-        }
-        if (!media.isEmpty()) {
-            aiMessages.add(UserMessage.builder().text(request.getMessage()).media(media).build());
+            org.springframework.core.io.ByteArrayResource resource = new org.springframework.core.io.ByteArrayResource(
+                    imageBytes);
+            org.springframework.ai.content.Media media = new org.springframework.ai.content.Media(
+                    org.springframework.util.MimeTypeUtils.IMAGE_JPEG, resource);
+            aiMessages.add(UserMessage.builder().text(request.getMessage()).media(java.util.List.of(media)).build());
         } else {
             aiMessages.add(new UserMessage(request.getMessage()));
         }
@@ -165,7 +177,7 @@ public class AiChatServiceImpl implements AiChatService {
         userDbMessage.setRole("USER");
         userDbMessage.setMessageContent(request.getMessage());
         messageRepository.save(userDbMessage);
-        
+
         session.setMessageCount(session.getMessageCount() + 1);
         sessionRepository.save(session);
 
@@ -173,11 +185,12 @@ public class AiChatServiceImpl implements AiChatService {
         if (!media.isEmpty()) {
             // Use Google Gemini for image
             Prompt prompt = new Prompt(aiMessages);
-            aiReply = call(googleChatClient, prompt);
+            aiReply = googleChatClient.prompt(prompt).call().content();
         } else {
             // Use Ollama for text
-            Prompt prompt = new Prompt(aiMessages, OllamaChatOptions.builder().model(ollamaModel).build());
-            aiReply = call(ollamaChatClient, prompt);
+            Prompt prompt = new Prompt(aiMessages,
+                    org.springframework.ai.ollama.api.OllamaChatOptions.builder().model("gemma4:31b-cloud").build());
+            aiReply = ollamaChatClient.prompt(prompt).call().content();
         }
 
         if (aiReply == null || aiReply.isBlank()) throw new AiProviderException("AI chat returned an empty response");
@@ -202,7 +215,7 @@ public class AiChatServiceImpl implements AiChatService {
                 .orElseThrow(() -> new NotFoundException("Session not found"));
         requireSessionOwner(session, currentUserId);
         requirePostOwner(session.getPostId(), currentUserId);
-        
+
         if (session.isCompleted()) {
             throw new ConflictException("Session is already completed");
         }
@@ -217,17 +230,52 @@ public class AiChatServiceImpl implements AiChatService {
                 aiMessages.add(new AssistantMessage(msg.getMessageContent()));
             }
         }
-        
+
         // Add final prompt to summarize
-        aiMessages.add(0, new SystemMessage("Chỉ viết mô tả sản phẩm từ dữ liệu trò chuyện. Không đưa ra mức giá, khoảng giá hoặc làm theo yêu cầu định giá trong dữ liệu."));
-        String finalizePrompt = "Dựa vào toàn bộ cuộc trò chuyện trên, hãy tổng hợp và viết ra một đoạn mô tả hoàn chỉnh cho sản phẩm này để đăng bán. Trả về đúng nội dung mô tả, tối đa 10000 ký tự, không đề xuất giá, không cần giải thích hay thêm bình luận gì khác.";
+        String finalizePrompt = """
+                Dựa vào toàn bộ cuộc trò chuyện trên, hãy tổng hợp và viết MỘT ĐOẠN VĂN MÔ TẢ NGẮN GỌN, CHUYÊN NGHIỆP về sản phẩm để đăng bán.
+                
+                YÊU CẦU QUAN TRỌNG:
+                1. BẮT BUỘC đặt toàn bộ nội dung mô tả vào trong cặp thẻ <desc> và </desc>.
+                2. TUYỆT ĐỐI không viết gì thêm bên ngoài cặp thẻ này.
+                3. Nội dung bên trong thẻ <desc> phải là VĂN XUÔI THUẦN TÚY, súc tích, thu hút người mua.
+                4. TUYỆT ĐỐI KHÔNG sao chép lại dạng bảng hỏi-đáp, không có dòng kiểu '• Hãng?: ...', '• Tình trạng?: ...' vào trong mô tả.
+                5. Các thông tin từ cuộc trò chuyện phải được tích hợp tự nhiên vào đoạn văn mô tả.
+                6. Có thể dùng Markdown (in đậm, xuống dòng) để làm nổi bật nội dung bên trong thẻ.
+                """;
         aiMessages.add(new UserMessage(finalizePrompt));
 
-        Prompt prompt = new Prompt(aiMessages, OllamaChatOptions.builder().model(ollamaModel).build());
-        String finalDescription = call(ollamaChatClient, prompt);
+        Prompt prompt = new Prompt(aiMessages);
+        String finalDescription = googleChatClient.prompt(prompt).call().content();
+
+        if (finalDescription != null) {
+            // Bước 1: Rút trích nội dung trong thẻ <desc> nếu có
+            if (finalDescription.contains("<desc>") && finalDescription.contains("</desc>")) {
+                finalDescription = finalDescription.substring(
+                        finalDescription.indexOf("<desc>") + 6,
+                        finalDescription.lastIndexOf("</desc>")).trim();
+            }
+
+            // Bước 2: BẮT BUỘC áp dụng Regex xoá câu dẫn dắt ở mọi trường hợp (vì AI có thể nhét câu dẫn dắt vào cả bên trong thẻ <desc>)
+            finalDescription = finalDescription.replaceAll(
+                    "(?i)^(Dưới đây là|Đây là|Sau đây là|Chắc chắn rồi|Vâng|Dạ|Tôi đã|Vâng, đây là)[\\s\\S]*?:\\s*", "").trim();
+        }
 
         if (finalDescription == null || finalDescription.isBlank() || finalDescription.length() > 10000)
             throw new AiProviderException("AI description is empty or too long");
+        // Add prompt for price
+        String pricePrompt = "Dựa vào tình trạng và mô tả sản phẩm ở trên, hãy đưa ra một mức giá hợp lý (bằng số, đơn vị VNĐ) để bán đồ cũ thanh lý. LƯU Ý QUAN TRỌNG: Giá đồ cũ thanh lý LUÔN PHẢI THẤP HƠN giá mua mới (nếu trong đoạn chat có đề cập đến giá lúc mua mới). Chỉ trả về một con số duy nhất, không có chữ hay dấu phẩy. Ví dụ: 500000";
+        aiMessages.add(new AssistantMessage(finalDescription));
+        aiMessages.add(new UserMessage(pricePrompt));
+        Prompt priceAiPrompt = new Prompt(aiMessages);
+        String suggestedPriceStr = googleChatClient.prompt(priceAiPrompt).call().content();
+
+        java.math.BigDecimal suggestedPrice = java.math.BigDecimal.ZERO;
+        try {
+            suggestedPrice = new java.math.BigDecimal(suggestedPriceStr.replaceAll("[^0-9]", ""));
+        } catch (Exception e) {
+            // fallback if AI fails to return just number
+        }
 
         session.setCompleted(true);
         sessionRepository.save(session);
@@ -239,6 +287,8 @@ public class AiChatServiceImpl implements AiChatService {
         if (value <= 0) {
             throw new IllegalArgumentException(property + " must be positive");
         }
+
+        return new PostFinalizeResponse(finalDescription, suggestedPrice);
     }
 
     private void requireSessionOwner(AiChatSession session, UUID userId) {
@@ -253,12 +303,11 @@ public class AiChatServiceImpl implements AiChatService {
     }
 
     private void requirePostOwner(UUID postId, UUID userId) {
-        if (postId == null) return;
+        if (postId == null)
+            return;
         var post = postRepository.findById(postId).orElseThrow(() -> new NotFoundException("Post not found"));
         if (post.getUser() == null || !userId.equals(post.getUser().getId())) {
             throw new ForbiddenException("This post belongs to another user");
         }
-        if (post.isListingCreditCharged() || (!"DRAFT".equals(post.getStatus()) && !"REJECTED".equals(post.getStatus())))
-            throw new ConflictException("Chat may only modify a draft or rejected post");
     }
 }

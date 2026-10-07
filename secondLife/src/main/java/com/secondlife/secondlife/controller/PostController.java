@@ -77,12 +77,63 @@ public class PostController {
         return ResponseEntity.ok(postService.submitPost(userId, postId, request));
     }
 
+    @GetMapping
+    public ResponseEntity<com.secondlife.secondlife.common.PageResponse<com.secondlife.secondlife.dto.response.PostDto>> getPublicPosts(
+            @RequestParam(required = false) UUID categoryId,
+            @RequestParam(required = false) UUID itemId,
+            org.springframework.data.domain.Pageable pageable) {
+        return ResponseEntity.ok(com.secondlife.secondlife.common.PageResponse.from(postService.getPublicPosts(categoryId, itemId, pageable)));
+    }
+
+    @GetMapping("/{postId}")
+    public ResponseEntity<com.secondlife.secondlife.dto.response.PostDto> getPostDetail(@PathVariable UUID postId) {
+        return ResponseEntity.ok(postService.getPostDetail(postId));
+    }
+
     @GetMapping("/my-posts")
     @PreAuthorize("hasAuthority('PROFILE_READ_SELF')")
-    public ResponseEntity<org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto>> getMyPosts(
+    public ResponseEntity<com.secondlife.secondlife.common.PageResponse<com.secondlife.secondlife.dto.response.PostDto>> getMyPosts(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             org.springframework.data.domain.Pageable pageable) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        return ResponseEntity.ok(postService.getMyPosts(userId, pageable));
+        return ResponseEntity.ok(com.secondlife.secondlife.common.PageResponse.from(postService.getMyPosts(userId, pageable)));
+    }
+
+    @PostMapping("/{postId}/ai-price-estimation")
+    @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
+    public ResponseEntity<com.secondlife.secondlife.dto.response.AiPriceEstimationResponse> estimatePrice(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID postId,
+            @RequestBody(required = false) java.util.Map<String, String> body) {
+        UUID userId = currentUserProvider.resolveUserId(userDetails);
+        String requestId = body != null ? body.get("requestId") : null;
+        return ResponseEntity.ok(postService.estimatePrice(userId, postId, requestId));
+    }
+
+    @GetMapping("/{postId}/ai-price-estimation")
+    @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
+    public ResponseEntity<com.secondlife.secondlife.dto.response.AiPriceEstimationResponse> getLatestPriceEstimate(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID postId) {
+        UUID userId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(postService.estimatePrice(userId, postId, null));
+    }
+
+    @PutMapping("/{postId}/draft")
+    @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
+    public ResponseEntity<com.secondlife.secondlife.dto.response.PostDto> updateDraft(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID postId,
+            @RequestBody com.secondlife.secondlife.dto.request.UpdateDraftRequest request) {
+        return ResponseEntity.ok(postService.updateDraft(userDetails.getId(), postId, request));
+    }
+
+    @PostMapping("/{postId}/accept-description")
+    @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
+    public ResponseEntity<com.secondlife.secondlife.dto.response.PostDto> acceptDescription(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID postId,
+            @RequestBody com.secondlife.secondlife.dto.request.AcceptDescriptionRequest request) {
+        return ResponseEntity.ok(postService.acceptDescription(userDetails.getId(), postId, request));
     }
 }
