@@ -37,6 +37,13 @@ public class UserMapper {
         String phone = user.getProfile() != null ? user.getProfile().getPhone() : null;
         String avatarUrl = user.getProfile() != null ? user.getProfile().getAvatarUrl() : null;
 
+        String province = user.getProfile() != null ? user.getProfile().getProvince() : null;
+        String district = user.getProfile() != null ? user.getProfile().getDistrict() : null;
+        String ward = user.getProfile() != null ? user.getProfile().getWard() : null;
+        String streetAddress = user.getProfile() != null ? user.getProfile().getStreetAddress() : null;
+        Double latitude = user.getProfile() != null ? user.getProfile().getLatitude() : null;
+        Double longitude = user.getProfile() != null ? user.getProfile().getLongitude() : null;
+
         Set<String> roleCodes = extractRoleCodes(user);
         Set<String> permissionCodes = extractPermissionCodes(user);
 
@@ -52,7 +59,13 @@ public class UserMapper {
                 permissionCodes,
                 user.getCreatedAt(),
                 user.getUpdatedAt(),
-                user.getLastLoginAt()
+                user.getLastLoginAt(),
+                province,
+                district,
+                ward,
+                streetAddress,
+                latitude,
+                longitude
         );
     }
 

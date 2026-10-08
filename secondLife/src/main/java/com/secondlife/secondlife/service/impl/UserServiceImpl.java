@@ -73,6 +73,24 @@ public class UserServiceImpl implements UserService {
         if (request.avatarUrl() != null) {
             profile.setAvatarUrl(request.avatarUrl().trim());
         }
+        if (request.province() != null) {
+            profile.setProvince(request.province().trim());
+        }
+        if (request.district() != null) {
+            profile.setDistrict(request.district().trim());
+        }
+        if (request.ward() != null) {
+            profile.setWard(request.ward().trim());
+        }
+        if (request.streetAddress() != null) {
+            profile.setStreetAddress(request.streetAddress().trim());
+        }
+        if (request.latitude() != null) {
+            profile.setLatitude(request.latitude());
+        }
+        if (request.longitude() != null) {
+            profile.setLongitude(request.longitude());
+        }
 
         User savedUser = userRepository.save(user);
         log.info("Profile updated for user: {}", savedUser.getEmail());

@@ -33,6 +33,24 @@ public class UserProfile {
     @Column(name = "avatar_url", length = 1024)
     private String avatarUrl;
 
+    @Column(name = "province")
+    private String province;
+
+    @Column(name = "district")
+    private String district;
+
+    @Column(name = "ward")
+    private String ward;
+
+    @Column(name = "street_address")
+    private String streetAddress;
+
+    @Column(name = "latitude")
+    private Double latitude;
+
+    @Column(name = "longitude")
+    private Double longitude;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
