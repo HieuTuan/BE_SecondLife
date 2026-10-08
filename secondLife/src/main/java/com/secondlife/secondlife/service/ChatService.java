@@ -93,7 +93,7 @@ public class ChatService {
         message.setSender(sender);
         message.setMessageContent(request.getMessageContent());
         message.setSentAt(Instant.now());
-        chatMessageRepository.save(message);
+        message = chatMessageRepository.save(message);
 
         room.setUpdatedAt(Instant.now());
         chatRoomRepository.save(room);
@@ -123,7 +123,7 @@ public class ChatService {
         // Let's modify the messageContent to indicate it's a system message.
         message.setMessageContent("SYSTEM: " + content);
         message.setSentAt(Instant.now());
-        chatMessageRepository.save(message);
+        message = chatMessageRepository.save(message);
 
         room.setUpdatedAt(Instant.now());
         chatRoomRepository.save(room);

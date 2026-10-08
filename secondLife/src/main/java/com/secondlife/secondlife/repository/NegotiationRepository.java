@@ -15,10 +15,10 @@ import java.util.List;
 @Repository
 public interface NegotiationRepository extends JpaRepository<Negotiation, UUID> {
 
-    @Query("SELECT MAX(n.offeredPrice) FROM Negotiation n WHERE n.post.id = :postId AND n.buyer.id = :buyerId AND n.status = 'REJECTED'")
+    @Query("SELECT MAX(n.offeredPrice) FROM Negotiation n WHERE n.post.id = :postId AND n.buyer.id = :buyerId AND n.status = com.secondlife.secondlife.enums.NegotiationStatus.REJECTED")
     Optional<BigDecimal> findMaxRejectedPrice(@Param("postId") UUID postId, @Param("buyerId") UUID buyerId);
 
-    @Query("SELECT COUNT(n) FROM Negotiation n WHERE n.post.id = :postId AND n.buyer.id = :buyerId AND n.status = 'REJECTED'")
+    @Query("SELECT COUNT(n) FROM Negotiation n WHERE n.post.id = :postId AND n.buyer.id = :buyerId AND n.status = com.secondlife.secondlife.enums.NegotiationStatus.REJECTED")
     long countRejectedNegotiations(@Param("postId") UUID postId, @Param("buyerId") UUID buyerId);
 
     boolean existsByPostIdAndBuyerIdAndStatusIn(UUID postId, UUID buyerId, List<NegotiationStatus> statuses);
