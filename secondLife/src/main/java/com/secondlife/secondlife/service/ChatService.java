@@ -110,10 +110,16 @@ public class ChatService {
 
         ChatMessageDto dto = toMessageDto(message);
 
-        // Broadcast to receiver
-        UUID receiverId = room.getBuyer().getId().equals(senderId) ? room.getSeller().getId() : room.getBuyer().getId();
+        // Broadcast to both buyer and seller (so sender's other devices sync too)
+        System.out.println("[ChatWS] Broadcasting message to Room: " + room.getId() + ", Buyer: " + room.getBuyer().getId() + ", Seller: " + room.getSeller().getId());
+        
         messagingTemplate.convertAndSendToUser(
-                receiverId.toString(),
+                room.getBuyer().getId().toString(),
+                "/queue/messages",
+                dto
+        );
+        messagingTemplate.convertAndSendToUser(
+                room.getSeller().getId().toString(),
                 "/queue/messages",
                 dto
         );
