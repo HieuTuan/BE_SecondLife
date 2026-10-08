@@ -40,11 +40,11 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
                         try {
                             UserDetails userDetails = userDetailsService.loadUserById(userId);
                             UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                                    userDetails, null, userDetails.getAuthorities()
+                                    userId.toString(), null, userDetails.getAuthorities()
                             );
                             // Cài đặt Principal cho WebSocket session.
                             // Quan trọng: userId.toString() sẽ làm "tên" của principal để convertAndSendToUser route tới đúng user ID.
-                            accessor.setUser(() -> userId.toString());
+                            accessor.setUser(authentication);
                         } catch (Exception e) {
                             log.error("WebSocket Authentication Failed: {}", e.getMessage());
                         }
