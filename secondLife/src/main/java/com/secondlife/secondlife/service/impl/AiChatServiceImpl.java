@@ -83,11 +83,64 @@ public class AiChatServiceImpl implements AiChatService {
     }
 
     @Override
-    @Transactional
     public AiChatResponse processChat(AiChatRequest request, UUID currentUserId) {
         if (request.getMessage() == null || request.getMessage().isBlank() || request.getMessage().length() > 4000)
             throw new com.secondlife.secondlife.exception.BadRequestException("Message is required and must not exceed 4000 characters");
-        User user = userRepository.findByIdForRoleUpdate(currentUserId)
+
+        // Build media list early (before any TX) so validation errors are thrown before DB writes
+        var files = new ArrayList<org.springframework.web.multipart.MultipartFile>();
+        if (request.getImages() != null) files.addAll(request.getImages());
+        files.removeIf(file -> file == null || file.isEmpty());
+        if (files.size() > maxImages) throw new com.secondlife.secondlife.exception.BadRequestException("At most " + maxImages + " images are allowed");
+        var media = new ArrayList<org.springframework.ai.content.Media>();
+        for (var image : files) {
+            if (image == null || image.isEmpty() || image.getContentType() == null || image.getSize() > maxImageBytes
+                    || !java.util.Set.of("image/jpeg", "image/png", "image/webp").contains(image.getContentType()))
+                throw new com.secondlife.secondlife.exception.BadRequestException("Image must be a non-empty JPEG, PNG or WebP no larger than " + maxImageBytes + " bytes");
+            try {
+                media.add(new org.springframework.ai.content.Media(
+                        org.springframework.util.MimeTypeUtils.parseMimeType(image.getContentType()),
+                        new org.springframework.core.io.ByteArrayResource(image.getBytes())));
+            } catch (java.io.IOException e) {
+                throw new RuntimeException("Failed to read image file", e);
+            }
+        }
+
+        // Phase 1: Validate + save user message in a COMMITTED transaction
+        // (so user message is persisted even if the AI call subsequently fails)
+        UUID sessionId = saveUserMessageAndGetSessionId(request, currentUserId);
+
+        // Phase 2: Load history and call AI — OUTSIDE any transaction, no DB locks held
+        List<Message> aiMessages = buildAiMessageHistory(sessionId, request.getMessage(), media);
+
+        String aiReply;
+        try {
+            if (!media.isEmpty()) {
+                aiReply = googleChatClient.prompt(new Prompt(aiMessages)).call().content();
+            } else {
+                aiReply = ollamaChatClient.prompt(
+                        new Prompt(aiMessages, OllamaChatOptions.builder().model(ollamaModel).build())
+                ).call().content();
+            }
+        } catch (Exception ex) {
+            throw new AiProviderException("AI chat unavailable; please retry", ex);
+        }
+
+        if (aiReply == null || aiReply.isBlank()) throw new AiProviderException("AI chat returned an empty response");
+
+        // Phase 3: Persist AI reply in a new short transaction
+        saveAiReply(sessionId, aiReply);
+
+        return AiChatResponse.builder()
+                .sessionId(sessionId)
+                .reply(aiReply)
+                .build();
+    }
+
+    /** Phase 1: validate, rate-limit check, create/load session, save user message. Commits immediately. */
+    @Transactional
+    protected UUID saveUserMessageAndGetSessionId(AiChatRequest request, UUID currentUserId) {
+        User user = userRepository.findById(currentUserId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
         if (messageRepository.countRecentUserMessages(currentUserId, Instant.now().minusSeconds(rateLimitWindowSeconds)) >= rateLimitMaxMessages)
             throw new ConflictException("AI chat rate limit reached; retry after " + rateLimitWindowSeconds + " seconds");
@@ -112,58 +165,12 @@ public class AiChatServiceImpl implements AiChatService {
             session = sessionRepository.save(session);
         }
 
-        List<Message> aiMessages = new ArrayList<>();
-        String systemPromptText = """
-                Bạn là một trợ lý AI chat bot cho hệ thống Secondlife, chuyên hỗ trợ người dùng mua bán đồ gia dụng cũ.
-                Nhiệm vụ của bạn là hỗ trợ thu thập thông tin chuyên sâu dựa trên loại sản phẩm (item) và danh mục (category) mà người dùng đang muốn bán để viết mô tả hoặc định giá.
-                Hãy chủ động đặt các câu hỏi chi tiết, bám sát vào đặc thù kỹ thuật của từng loại sản phẩm. 
-                Ví dụ: 
-                - Nếu là máy hút mùi: hỏi về mã sản phẩm, công suất hút, điều khiển bằng gì, chất lượng, độ ồn nhiều hay ít, kích thước máy hút mùi, màu sắc, phụ kiện đi kèm, thời gian bảo hành còn lại, động cơ gì, xuất xứ...
-                - Nếu là tủ lạnh: hỏi về dung tích, công nghệ Inverter, đóng tuyết hay không, kích thước, thời gian đã sử dụng...
-                - Áp dụng tư duy tương tự cho các sản phẩm khác. Không hỏi dồn dập một danh sách dài cùng lúc, hãy hỏi một cách tinh tế và giao tiếp tự nhiên.
-                Dựa vào ngôn ngữ của user mà lựa chọn ngôn ngữ trả lời phù hợp (ưu tiên tiếng Việt).
-                Chỉ trả lời những mặt hàng liên quan đến đồ gia dụng cũ, từ chối lịch sự các chủ đề khác.
-                QUY TẮC BẮT BUỘC: KHÔNG BAO GIỜ bắt đầu câu trả lời bằng các câu dẫn dắt như 'Dưới đây là...', 'Đây là...', 'Sau đây là...', 'Vâng, đây là...'. Đi thẳng vào nội dung chính.
-                Chỉ hỗ trợ thu thập thông tin và viết mô tả. Tuyệt đối không đưa ra giá hay khoảng giá trực tiếp trong chat.
-                Khi người dùng muốn định giá, hướng dẫn sử dụng chức năng Định giá AI riêng trên bài đăng.
-                """;
-        aiMessages.add(new SystemMessage(systemPromptText));
-
-        // Load history
-        List<AiChatMessage> history = messageRepository.findBySessionIdOrderBySentAtAsc(session.getId());
-        for (AiChatMessage msg : history) {
-            if ("USER".equals(msg.getRole())) {
-                aiMessages.add(new UserMessage(msg.getMessageContent()));
-            } else {
-                aiMessages.add(new AssistantMessage(msg.getMessageContent()));
-            }
-        }
-
-        var files = new ArrayList<org.springframework.web.multipart.MultipartFile>();
-        if (request.getImages() != null) files.addAll(request.getImages());
-        files.removeIf(file -> file == null || file.isEmpty());
-        if (files.size() > maxImages) throw new com.secondlife.secondlife.exception.BadRequestException("At most " + maxImages + " images are allowed");
-        var media = new ArrayList<org.springframework.ai.content.Media>();
-        for (var image : files) {
-            if (image == null || image.isEmpty() || image.getContentType() == null || image.getSize() > maxImageBytes
-                    || !java.util.Set.of("image/jpeg", "image/png", "image/webp").contains(image.getContentType()))
-                throw new com.secondlife.secondlife.exception.BadRequestException("Image must be a non-empty JPEG, PNG or WebP no larger than " + maxImageBytes + " bytes");
-            try {
-                media.add(new org.springframework.ai.content.Media(
-                        org.springframework.util.MimeTypeUtils.parseMimeType(image.getContentType()),
-                        new org.springframework.core.io.ByteArrayResource(image.getBytes())));
-            } catch (java.io.IOException e) {
-                throw new RuntimeException("Failed to read image file", e);
-            }
-        }
-        aiMessages.add(UserMessage.builder().text(request.getMessage()).media(media).build());
-
-        // Save user message to DB
         if (session.getPostId() != null) {
             var post = postRepository.findById(session.getPostId()).orElseThrow(() -> new NotFoundException("Post not found"));
             post.setDescriptionAccepted(false);
             postRepository.save(post);
         }
+
         AiChatMessage userDbMessage = new AiChatMessage();
         userDbMessage.setSession(session);
         userDbMessage.setRole("USER");
@@ -173,30 +180,47 @@ public class AiChatServiceImpl implements AiChatService {
         session.setMessageCount(session.getMessageCount() + 1);
         sessionRepository.save(session);
 
-        String aiReply;
-        if (!media.isEmpty()) {
-            // Use Google Gemini for image
-            Prompt prompt = new Prompt(aiMessages);
-            aiReply = googleChatClient.prompt(prompt).call().content();
-        } else {
-            // Use Ollama for text
-            Prompt prompt = new Prompt(aiMessages,
-                    OllamaChatOptions.builder().model(ollamaModel).build());
-            aiReply = ollamaChatClient.prompt(prompt).call().content();
-        }
+        return session.getId();
+    }
 
-        if (aiReply == null || aiReply.isBlank()) throw new AiProviderException("AI chat returned an empty response");
-        // Save AI response to DB
+    /** Build prompt message list from persisted history + current user message. Read-only. */
+    @Transactional(readOnly = true)
+    protected List<Message> buildAiMessageHistory(UUID sessionId, String userMessage,
+                                                  java.util.List<org.springframework.ai.content.Media> media) {
+        List<Message> aiMessages = new ArrayList<>();
+        String systemPromptText = """
+                Bạn là một trợ lý AI chat bot cho hệ thống Secondlife, chuyên hỗ trợ người dùng mua bán đồ gia dụng cũ.
+                Nhiệm vụ của bạn là hỗ trợ thu thập thông tin chuyên sâu dựa trên loại sản phẩm (item) và danh mục (category) mà người dùng đang muốn bán để viết mô tả hoặc định giá.
+                Hãy chủ động đặt các câu hỏi chi tiết, bám sát vào đặc thù kỹ thuật của từng loại sản phẩm.
+                Dựa vào ngôn ngữ của user mà lựa chọn ngôn ngữ trả lời phù hợp (ưu tiên tiếng Việt).
+                Chỉ trả lời những mặt hàng liên quan đến đồ gia dụng cũ, từ chối lịch sự các chủ đề khác.
+                QUY TẮC BẮT BUỘC: KHÔNG BAO GIỜ bắt đầu câu trả lời bằng các câu dẫn dắt như 'Dưới đây là...', 'Đây là...', 'Sau đây là...', 'Vâng, đây là...'. Đi thẳng vào nội dung chính.
+                Chỉ hỗ trợ thu thập thông tin và viết mô tả. Tuyệt đối không đưa ra giá hay khoảng giá trực tiếp trong chat.
+                Khi người dùng muốn định giá, hướng dẫn sử dụng chức năng Định giá AI riêng trên bài đăng.
+                """;
+        aiMessages.add(new SystemMessage(systemPromptText));
+
+        List<AiChatMessage> history = messageRepository.findBySessionIdOrderBySentAtAsc(sessionId);
+        for (AiChatMessage msg : history) {
+            if ("USER".equals(msg.getRole())) {
+                aiMessages.add(new UserMessage(msg.getMessageContent()));
+            } else {
+                aiMessages.add(new AssistantMessage(msg.getMessageContent()));
+            }
+        }
+        return aiMessages;
+    }
+
+    /** Phase 3: persist AI reply in a new committed transaction. */
+    @Transactional
+    protected void saveAiReply(UUID sessionId, String aiReply) {
+        AiChatSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new NotFoundException("Session not found"));
         AiChatMessage aiDbMessage = new AiChatMessage();
         aiDbMessage.setSession(session);
         aiDbMessage.setRole("ASSISTANT");
         aiDbMessage.setMessageContent(aiReply);
         messageRepository.save(aiDbMessage);
-
-        return AiChatResponse.builder()
-                .sessionId(session.getId())
-                .reply(aiReply)
-                .build();
     }
 
     @Transactional(readOnly = true)
