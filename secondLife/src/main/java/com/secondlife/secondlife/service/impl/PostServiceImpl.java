@@ -277,6 +277,27 @@ public class PostServiceImpl implements PostService {
 
     @Override
     @Transactional
+    public com.secondlife.secondlife.dto.response.PostFinalizeResponse regenerateChatAndDescription(UUID userId, UUID sessionId) {
+        com.secondlife.secondlife.entity.AiChatSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new NotFoundException("Session not found"));
+        if (session.getUser() == null || !userId.equals(session.getUser().getId())) {
+            throw new ForbiddenException("This chat session belongs to another user");
+        }
+        Post post = session.getPostId() == null ? null : listingAccess.owned(userId, session.getPostId(), true);
+        if (post != null) listingAccess.requireDraft(post);
+        var finalizeResponse = aiChatService.regenerateDescription(sessionId, userId);
+        if (post != null) {
+            post.setAiDescription(finalizeResponse.getDescription());
+            post.setDescription(finalizeResponse.getDescription());
+            post.setDescriptionAccepted(false);
+            postRepository.save(post);
+        }
+        
+        return finalizeResponse;
+    }
+
+    @Override
+    @Transactional
     public PostSubmitResponse submitPost(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.PostSubmitRequest request) {
         Post post = listingAccess.owned(userId, postId, true);
         if (request.getTitle() == null || request.getTitle().isBlank() || request.getTitle().length() > 255

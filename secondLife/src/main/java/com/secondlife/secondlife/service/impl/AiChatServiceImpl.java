@@ -199,18 +199,41 @@ public class AiChatServiceImpl implements AiChatService {
                 .build();
     }
 
-    @Override
-    @Transactional
-    public PostFinalizeResponse finalizeChat(UUID sessionId, UUID currentUserId) {
-        userRepository.findByIdForRoleUpdate(currentUserId).orElseThrow(() -> new NotFoundException("User not found"));
+    @Transactional(readOnly = true)
+    protected void validateFinalizeRequest(UUID sessionId, UUID currentUserId) {
+        userRepository.findById(currentUserId).orElseThrow(() -> new NotFoundException("User not found"));
         AiChatSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new NotFoundException("Session not found"));
         requireSessionOwner(session, currentUserId);
-        requirePostOwner(session.getPostId(), currentUserId);
-
+        // Removed requirePostOwner since it's already checked in PostServiceImpl
         if (session.isCompleted()) {
             throw new ConflictException("Session is already completed");
         }
+    }
+
+    @Override
+    public PostFinalizeResponse regenerateDescription(UUID sessionId, UUID currentUserId) {
+        validateAndResetSessionForRegen(sessionId, currentUserId);
+        return finalizeChat(sessionId, currentUserId);
+    }
+
+    @Transactional
+    protected void validateAndResetSessionForRegen(UUID sessionId, UUID currentUserId) {
+        userRepository.findById(currentUserId).orElseThrow(() -> new NotFoundException("User not found"));
+        AiChatSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new NotFoundException("Session not found"));
+        requireSessionOwner(session, currentUserId);
+        
+        session.setCompleted(false);
+        sessionRepository.save(session);
+    }
+
+    @Override
+    public PostFinalizeResponse finalizeChat(UUID sessionId, UUID currentUserId) {
+        validateFinalizeRequest(sessionId, currentUserId);
+        
+        AiChatSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new NotFoundException("Session not found"));
 
         List<Message> aiMessages = new ArrayList<>();
         // Load history
@@ -241,23 +264,30 @@ public class AiChatServiceImpl implements AiChatService {
         String finalDescription = call(ollamaChatClient, prompt);
 
         if (finalDescription != null) {
-            // Bước 1: Rút trích nội dung trong thẻ <desc> nếu có
-            if (finalDescription.contains("<desc>") && finalDescription.contains("</desc>")) {
-                finalDescription = finalDescription.substring(
-                        finalDescription.indexOf("<desc>") + 6,
-                        finalDescription.lastIndexOf("</desc>")).trim();
+            int start = finalDescription.indexOf("<desc>");
+            int end = finalDescription.lastIndexOf("</desc>");
+            if (start != -1 && end != -1 && end > start + 6) {
+                finalDescription = finalDescription.substring(start + 6, end).trim();
+            } else if (start != -1 && end == -1) {
+                finalDescription = finalDescription.substring(start + 6).trim();
             }
 
-            // Bước 2: BẮT BUỘC áp dụng Regex xoá câu dẫn dắt ở mọi trường hợp (vì AI có thể nhét câu dẫn dắt vào cả bên trong thẻ <desc>)
             finalDescription = finalDescription.replaceAll(
                     "(?i)^(Dưới đây là|Đây là|Sau đây là|Chắc chắn rồi|Vâng|Dạ|Tôi đã|Vâng, đây là)[\\s\\S]*?:\\s*", "").trim();
         }
 
         if (finalDescription == null || finalDescription.isBlank() || finalDescription.length() > 10000)
             throw new AiProviderException("AI description is empty or too long");
+            
+        return saveFinalizeResult(sessionId, finalDescription);
+    }
+    
+    @Transactional
+    protected PostFinalizeResponse saveFinalizeResult(UUID sessionId, String finalDescription) {
+        AiChatSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new NotFoundException("Session not found"));
         session.setCompleted(true);
         sessionRepository.save(session);
-        
         return new PostFinalizeResponse(finalDescription, null);
     }
 
