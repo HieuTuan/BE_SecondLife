@@ -32,6 +32,16 @@ public class ChatService {
     private final UserRepository userRepository;
     private final SimpMessagingTemplate messagingTemplate;
 
+    @Transactional(readOnly = true)
+    public ChatRoomDto getRoom(UUID postId, UUID buyerId) {
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new NotFoundException("Post not found"));
+                
+        return chatRoomRepository.findByPostIdAndBuyerIdAndSellerId(postId, buyerId, post.getUser().getId())
+                .map(this::toDto)
+                .orElse(null);
+    }
+
     @Transactional
     public ChatRoomDto getOrCreateRoom(UUID postId, UUID buyerId) {
         Post post = postRepository.findById(postId)

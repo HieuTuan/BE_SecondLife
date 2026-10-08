@@ -34,6 +34,19 @@ public class ChatController {
         return ResponseEntity.ok(ApiResponse.success(chatService.getOrCreateRoom(postId, userId)));
     }
 
+    @GetMapping("/rooms")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<ChatRoomDto>> getRoom(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @RequestParam UUID postId) {
+        UUID userId = currentUserProvider.resolveUserId(userDetails);
+        ChatRoomDto room = chatService.getRoom(postId, userId);
+        if (room == null) {
+            return ResponseEntity.ok(ApiResponse.success(null));
+        }
+        return ResponseEntity.ok(ApiResponse.success(room));
+    }
+
     @GetMapping
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<List<ChatRoomDto>>> getUserRooms(
