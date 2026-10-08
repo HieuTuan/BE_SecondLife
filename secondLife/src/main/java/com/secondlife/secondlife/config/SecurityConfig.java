@@ -61,6 +61,7 @@ public class SecurityConfig {
                         // Public auth endpoints
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/health").permitAll()
+                        .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/v1/webhooks/sepay").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.POST,"/api/v1/shipping/callback").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/posts", "/api/v1/listings", "/api/v1/listings/**").permitAll()
