@@ -23,7 +23,8 @@ class OrderShippingSafetyTest {
         when(orders.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
         when(orders.save(any())).thenAnswer(i -> i.getArgument(0));
         var service = new OrderServiceImpl(orders, mock(PostRepository.class), mock(UserRepository.class), mock(NegotiationRepository.class), wallets,
-                mock(com.secondlife.secondlife.service.shipping.ShippingQuoteService.class),mock(ShipmentRepository.class));
+                mock(com.secondlife.secondlife.service.shipping.ShippingQuoteService.class),mock(ShipmentRepository.class),
+                mock(CommissionService.class), mock(SettlementService.class));
         assertThrows(ConflictException.class, () -> service.confirmDelivery(buyer.getId(), order.getId()));
         verifyNoInteractions(wallets);
     }
@@ -34,7 +35,8 @@ class OrderShippingSafetyTest {
         when(orders.findBySellerId(eq(sellerId), any(org.springframework.data.domain.Pageable.class)))
                 .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of()));
         var service = new OrderServiceImpl(orders, mock(PostRepository.class), mock(UserRepository.class), mock(NegotiationRepository.class),
-                mock(WalletService.class), mock(com.secondlife.secondlife.service.shipping.ShippingQuoteService.class), mock(ShipmentRepository.class));
+                mock(WalletService.class), mock(com.secondlife.secondlife.service.shipping.ShippingQuoteService.class), mock(ShipmentRepository.class),
+                mock(CommissionService.class), mock(SettlementService.class));
 
         // When client sends sort=[""]
         org.springframework.data.domain.Pageable malformed = org.springframework.data.domain.PageRequest.of(0, 1, org.springframework.data.domain.Sort.by("[\"\"]"));

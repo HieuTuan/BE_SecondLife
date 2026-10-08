@@ -34,7 +34,7 @@ class ListingDescriptionMigrationTest {
                 """, describedPost, seller, blankPost, seller);
         jdbc.execute("ALTER TABLE posts DROP COLUMN description_accepted");
 
-        var upgrade = Flyway.configure().dataSource(database.getJdbcUrl(), database.getUsername(), database.getPassword()).load();
+        var upgrade = Flyway.configure().dataSource(database.getJdbcUrl(), database.getUsername(), database.getPassword()).target("27").load();
         assertEquals(1, upgrade.migrate().migrationsExecuted);
         assertTrue(jdbc.queryForObject("SELECT description_accepted FROM posts WHERE id = ?", Boolean.class, describedPost));
         assertFalse(jdbc.queryForObject("SELECT description_accepted FROM posts WHERE id = ?", Boolean.class, blankPost));
