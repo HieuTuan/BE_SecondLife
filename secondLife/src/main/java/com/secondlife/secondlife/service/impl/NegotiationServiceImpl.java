@@ -12,6 +12,7 @@ import com.secondlife.secondlife.repository.NegotiationRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.NegotiationService;
+import com.secondlife.secondlife.service.ChatService;
 import com.secondlife.secondlife.common.PageableUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -38,12 +39,13 @@ public class NegotiationServiceImpl implements NegotiationService {
     private final NegotiationRepository negotiationRepository;
     private final PostRepository postRepository;
     private final UserRepository userRepository;
+    private final ChatService chatService;
 
     private final int maxRejections;
     private final long acceptedTtlHours;
 
     public NegotiationServiceImpl(NegotiationRepository negotiationRepository, PostRepository postRepository,
-                                  UserRepository userRepository,
+                                  UserRepository userRepository, ChatService chatService,
                                   @Value("${app.negotiation.max-rejections}") int maxRejections,
                                   @Value("${app.negotiation.accepted-ttl-hours}") long acceptedTtlHours) {
         if (maxRejections <= 0 || acceptedTtlHours <= 0)
@@ -51,6 +53,7 @@ public class NegotiationServiceImpl implements NegotiationService {
         this.negotiationRepository = negotiationRepository;
         this.postRepository = postRepository;
         this.userRepository = userRepository;
+        this.chatService = chatService;
         this.maxRejections = maxRejections;
         this.acceptedTtlHours = acceptedTtlHours;
     }
@@ -105,6 +108,10 @@ public class NegotiationServiceImpl implements NegotiationService {
         negotiation.setStatus(NegotiationStatus.PENDING);
 
         negotiation = negotiationRepository.save(negotiation);
+        
+        chatService.sendSystemMessage(post.getId(), buyerId, 
+            String.format("{\"type\":\"OFFER\", \"status\":\"%s\", \"price\":%s, \"negotiationId\":\"%s\"}", 
+            negotiation.getStatus(), negotiation.getOfferedPrice(), negotiation.getId()));
 
         return mapToDTO(negotiation);
     }
@@ -127,6 +134,11 @@ public class NegotiationServiceImpl implements NegotiationService {
         negotiation.setExpiredAt(Instant.now().plus(acceptedTtlHours, ChronoUnit.HOURS));
 
         negotiation = negotiationRepository.save(negotiation);
+        
+        chatService.sendSystemMessage(negotiation.getPost().getId(), negotiation.getBuyer().getId(), 
+            String.format("{\"type\":\"OFFER\", \"status\":\"%s\", \"price\":%s, \"negotiationId\":\"%s\"}", 
+            negotiation.getStatus(), negotiation.getOfferedPrice(), negotiation.getId()));
+
         return mapToDTO(negotiation);
     }
 
@@ -147,6 +159,11 @@ public class NegotiationServiceImpl implements NegotiationService {
         negotiation.setStatus(NegotiationStatus.REJECTED);
 
         negotiation = negotiationRepository.save(negotiation);
+        
+        chatService.sendSystemMessage(negotiation.getPost().getId(), negotiation.getBuyer().getId(), 
+            String.format("{\"type\":\"OFFER\", \"status\":\"%s\", \"price\":%s, \"negotiationId\":\"%s\"}", 
+            negotiation.getStatus(), negotiation.getOfferedPrice(), negotiation.getId()));
+
         return mapToDTO(negotiation);
     }
 
@@ -167,6 +184,11 @@ public class NegotiationServiceImpl implements NegotiationService {
         negotiation.setStatus(NegotiationStatus.CANCELLED);
 
         negotiation = negotiationRepository.save(negotiation);
+        
+        chatService.sendSystemMessage(negotiation.getPost().getId(), negotiation.getBuyer().getId(), 
+            String.format("{\"type\":\"OFFER\", \"status\":\"%s\", \"price\":%s, \"negotiationId\":\"%s\"}", 
+            negotiation.getStatus(), negotiation.getOfferedPrice(), negotiation.getId()));
+
         return mapToDTO(negotiation);
     }
 

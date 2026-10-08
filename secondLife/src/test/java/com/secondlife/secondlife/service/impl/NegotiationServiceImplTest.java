@@ -38,9 +38,9 @@ class NegotiationServiceImplTest {
         request.setPostId(post.getId());
         request.setOfferedPrice(new BigDecimal("40"));
 
-        var limitOne = new NegotiationServiceImpl(negotiations, posts, users, 1, 2);
+        var limitOne = new NegotiationServiceImpl(negotiations, posts, users, mock(com.secondlife.secondlife.service.ChatService.class), 1, 2L);
         assertThrows(BadRequestException.class, () -> limitOne.createNegotiation(buyer.getId(), request));
-        var limitTwo = new NegotiationServiceImpl(negotiations, posts, users, 2, 2);
+        var limitTwo = new NegotiationServiceImpl(negotiations, posts, users, mock(com.secondlife.secondlife.service.ChatService.class), 2, 2L);
         assertEquals(NegotiationStatus.PENDING, limitTwo.createNegotiation(buyer.getId(), request).getStatus());
     }
 
@@ -55,7 +55,7 @@ class NegotiationServiceImplTest {
         negotiation.setStatus(NegotiationStatus.PENDING);
         when(negotiations.findById(negotiation.getId())).thenReturn(Optional.of(negotiation));
         when(negotiations.save(any(Negotiation.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        var service = new NegotiationServiceImpl(negotiations, mock(PostRepository.class), mock(UserRepository.class), 3, 2);
+        var service = new NegotiationServiceImpl(negotiations, mock(PostRepository.class), mock(UserRepository.class), mock(com.secondlife.secondlife.service.ChatService.class), 3, 2L);
 
         Instant before = Instant.now().plus(2, ChronoUnit.HOURS);
         var accepted = service.acceptNegotiation(seller.getId(), negotiation.getId());

@@ -20,8 +20,9 @@ public class ChatMessage {
     @Column(name = "message_id")
     private UUID id;
 
-    @Column(name = "conversation_id", nullable = false)
-    private UUID conversationId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "room_id", nullable = false)
+    private ChatRoom chatRoom;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "sender_id", nullable = false)

@@ -37,7 +37,7 @@ public class MarketplaceListingService {
     }
 
     private MarketplaceListingResponse response(Post post) {
-        return new MarketplaceListingResponse(post.getId(), post.getUser().getId(), post.getCategoryId(),
+        return new MarketplaceListingResponse(post.getId(), post.getId(), post.getUser().getId(), post.getCategoryId(),
                 post.getItemId(), post.getTitle(), post.getDescription(), post.getItemCondition(),
                 post.getImageUrl(), post.getImageUrls(), post.getPrice(), post.getStatus(), post.getPublishedAt());
     }
