@@ -21,7 +21,8 @@ public interface NegotiationRepository extends JpaRepository<Negotiation, UUID> 
     @Query("SELECT COUNT(n) FROM Negotiation n WHERE n.post.id = :postId AND n.buyer.id = :buyerId AND n.status = com.secondlife.secondlife.enums.NegotiationStatus.REJECTED")
     long countRejectedNegotiations(@Param("postId") UUID postId, @Param("buyerId") UUID buyerId);
 
-    boolean existsByPostIdAndBuyerIdAndStatusIn(UUID postId, UUID buyerId, List<NegotiationStatus> statuses);
+    @Query("SELECT COUNT(n) > 0 FROM Negotiation n WHERE n.post.id = :postId AND n.buyer.id = :buyerId AND n.status IN :statuses")
+    boolean existsByPostIdAndBuyerIdAndStatusIn(@Param("postId") UUID postId, @Param("buyerId") UUID buyerId, @Param("statuses") List<NegotiationStatus> statuses);
 
     org.springframework.data.domain.Page<Negotiation> findByBuyerId(UUID buyerId, org.springframework.data.domain.Pageable pageable);
 
