@@ -127,4 +127,11 @@ public class WalletServiceImpl implements WalletService {
         transaction.setReferenceId(referenceId);
         walletTransactionRepository.save(transaction);
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<WalletTransaction> getTransactions(UUID userId, org.springframework.data.domain.Pageable pageable) {
+        UserWallet wallet = getWalletByUserId(userId);
+        return walletTransactionRepository.findByWalletId(wallet.getId(), pageable);
+    }
 }

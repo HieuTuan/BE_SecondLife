@@ -12,4 +12,5 @@ public interface WalletService {
     void processPayment(UUID userId, BigDecimal amount, UUID orderId);
     void processEarning(UUID userId, BigDecimal amount, UUID orderId);
     void processRefund(UUID userId, BigDecimal amount, UUID orderId);
+    org.springframework.data.domain.Page<com.secondlife.secondlife.entity.WalletTransaction> getTransactions(UUID userId, org.springframework.data.domain.Pageable pageable);
 }
