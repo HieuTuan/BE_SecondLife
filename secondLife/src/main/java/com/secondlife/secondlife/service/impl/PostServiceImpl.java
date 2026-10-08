@@ -418,7 +418,13 @@ public class PostServiceImpl implements PostService {
     @Transactional(readOnly = true)
     public org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto> getAdminPosts(
             String status, UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable) {
-        org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> cb.conjunction();
+        org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> {
+            if (Long.class != query.getResultType()) {
+                jakarta.persistence.criteria.Fetch<Object, Object> userFetch = root.fetch("user", jakarta.persistence.criteria.JoinType.LEFT);
+                userFetch.fetch("profile", jakarta.persistence.criteria.JoinType.LEFT);
+            }
+            return cb.conjunction();
+        };
         if (status != null && !status.isEmpty()) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), status));
         }
@@ -435,7 +441,13 @@ public class PostServiceImpl implements PostService {
     @Transactional(readOnly = true)
     public org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto> getPublicPosts(UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable) {
         // Public posts should only return ACTIVE ones
-        org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> cb.equal(root.get("status"), "ACTIVE");
+        org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> {
+            if (Long.class != query.getResultType()) {
+                jakarta.persistence.criteria.Fetch<Object, Object> userFetch = root.fetch("user", jakarta.persistence.criteria.JoinType.LEFT);
+                userFetch.fetch("profile", jakarta.persistence.criteria.JoinType.LEFT);
+            }
+            return cb.equal(root.get("status"), "ACTIVE");
+        };
         
         if (categoryId != null) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("categoryId"), categoryId));
@@ -549,8 +561,13 @@ public class PostServiceImpl implements PostService {
     @Transactional(readOnly = true)
     public org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto> getMyPosts(UUID userId,
                                                                                                            org.springframework.data.domain.Pageable pageable) {
-        org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> cb
-                .equal(root.get("user").get("id"), userId);
+        org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> {
+            if (Long.class != query.getResultType()) {
+                jakarta.persistence.criteria.Fetch<Object, Object> userFetch = root.fetch("user", jakarta.persistence.criteria.JoinType.LEFT);
+                userFetch.fetch("profile", jakarta.persistence.criteria.JoinType.LEFT);
+            }
+            return cb.equal(root.get("user").get("id"), userId);
+        };
         return postRepository.findAll(spec, pageable).map(com.secondlife.secondlife.dto.response.PostDto::fromEntity);
     }
 

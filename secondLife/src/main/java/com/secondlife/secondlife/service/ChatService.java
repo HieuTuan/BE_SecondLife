@@ -147,9 +147,9 @@ public class ChatService {
 
     private ChatRoomDto toDto(ChatRoom room) {
         String lastMessage = "New Conversation";
-        List<ChatMessage> msgs = chatMessageRepository.findByChatRoomIdOrderBySentAtAsc(room.getId());
-        if (!msgs.isEmpty()) {
-            lastMessage = msgs.get(msgs.size() - 1).getMessageContent();
+        java.util.Optional<ChatMessage> lastMsg = chatMessageRepository.findFirstByChatRoomIdOrderBySentAtDesc(room.getId());
+        if (lastMsg.isPresent()) {
+            lastMessage = lastMsg.get().getMessageContent();
         }
 
         return ChatRoomDto.builder()
