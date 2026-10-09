@@ -21,6 +21,8 @@ import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.OrderService;
 import com.secondlife.secondlife.service.WalletService;
+import com.secondlife.secondlife.service.CommissionService;
+import com.secondlife.secondlife.service.SettlementService;
 import com.secondlife.secondlife.common.PageableUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -50,6 +52,8 @@ public class OrderServiceImpl implements OrderService {
     private final WalletService walletService;
     private final ShippingQuoteService shippingQuotes;
     private final ShipmentRepository shipments;
+    private final CommissionService commissions;
+    private final SettlementService settlements;
 
     @Override
     @Transactional
@@ -122,6 +126,7 @@ public class OrderServiceImpl implements OrderService {
         order.setEscrowStatus(EscrowStatus.HELD);
         
         order = orderRepository.saveAndFlush(order);
+        commissions.capture(order, buyerId, "Order created");
         var shippingQuote=shippingQuotes.consume(buyerId,post.getId(),requestDTO.getShippingQuoteId(),order.getId(),finalPrice);
         order.setShippingQuoteId(shippingQuote.getId()); order.setShippingFee(shippingQuote.getFee()); order.setDeliveryAddress(shippingQuote.getDeliveryAddress());
         orderRepository.save(order);
@@ -177,8 +182,8 @@ public class OrderServiceImpl implements OrderService {
             throw new ConflictException("Escrow funds are not currently HELD; resolve the shipping issue or return decision first");
         }
 
-        // Release funds to seller
-        walletService.processEarning(order.getSeller().getId(), order.getFinalPrice(), order.getId());
+        // Persist settlement and release the net seller amount using the order's policy snapshot.
+        settlements.settle(order);
 
         order.setStatus(OrderStatus.COMPLETED);
         order.setEscrowStatus(EscrowStatus.RELEASED);

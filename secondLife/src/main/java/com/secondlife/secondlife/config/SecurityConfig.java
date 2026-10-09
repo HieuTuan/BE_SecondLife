@@ -38,7 +38,7 @@ public class SecurityConfig {
     private final CorsProperties corsProperties;
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain  filterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
@@ -64,7 +64,7 @@ public class SecurityConfig {
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/v1/webhooks/sepay").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.POST,"/api/v1/shipping/callback").permitAll()
-                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/posts", "/api/v1/listings", "/api/v1/listings/**").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/posts").permitAll()
                         .requestMatchers("/error").permitAll()
                         // Administrative role assignment is also guarded at the filter boundary.
                         .requestMatchers("/api/admin/permissions", "/api/admin/permissions/**",
