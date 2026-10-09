@@ -193,9 +193,11 @@ public class AiChatServiceImpl implements AiChatService {
         session.setMessageCount(session.getMessageCount() + 1);
         sessionRepository.save(session);
         
-        // Consume credit for this message
-        String idempotencyKey = "AI_CHAT_MSG:" + session.getId() + ":" + session.getMessageCount();
-        listingCreditService.consume(currentUserId, CreditType.AI_CHAT, idempotencyKey);
+        // Consume credit for this message (except the first automated image analysis message)
+        if (session.getMessageCount() > 1) {
+            String idempotencyKey = "AI_CHAT_MSG:" + session.getId() + ":" + session.getMessageCount();
+            listingCreditService.consume(currentUserId, CreditType.AI_CHAT, idempotencyKey);
+        }
 
         return session.getId();
     }
