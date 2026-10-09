@@ -37,7 +37,28 @@ public class MarketplaceListingService {
     }
 
     private MarketplaceListingResponse response(Post post) {
-        return new MarketplaceListingResponse(post.getId(), post.getId(), post.getUser().getId(), post.getCategoryId(),
+        String sellerName = null;
+        String sellerAvatar = null;
+        String sellerAddress = null;
+        if (post.getUser() != null && post.getUser().getProfile() != null) {
+            com.secondlife.secondlife.entity.UserProfile profile = post.getUser().getProfile();
+            sellerName = profile.getFullName();
+            sellerAvatar = profile.getAvatarUrl();
+            
+            java.util.List<String> addressParts = new java.util.ArrayList<>();
+            if (profile.getStreetAddress() != null && !profile.getStreetAddress().isBlank()) addressParts.add(profile.getStreetAddress());
+            if (profile.getWard() != null && !profile.getWard().isBlank()) addressParts.add(profile.getWard());
+            if (profile.getDistrict() != null && !profile.getDistrict().isBlank()) addressParts.add(profile.getDistrict());
+            if (profile.getProvince() != null && !profile.getProvince().isBlank()) addressParts.add(profile.getProvince());
+            
+            if (!addressParts.isEmpty()) {
+                sellerAddress = String.join(", ", addressParts);
+            }
+        }
+        
+        return new MarketplaceListingResponse(post.getId(), post.getId(), post.getUser().getId(),
+                sellerName, sellerAvatar, sellerAddress,
+                post.getCategoryId(),
                 post.getItemId(), post.getTitle(), post.getDescription(), post.getItemCondition(),
                 post.getImageUrl(), post.getImageUrls(), post.getPrice(), post.getStatus(), post.getPublishedAt());
     }
