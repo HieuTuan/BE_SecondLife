@@ -55,7 +55,7 @@ class DefaultCommissionMigrationTest {
                 """, UUID.randomUUID(), categoryRule, actor);
 
         var upgrade = Flyway.configure().dataSource(database.getJdbcUrl(), database.getUsername(), database.getPassword()).load();
-        assertEquals(2, upgrade.migrate().migrationsExecuted);
+        assertEquals(3, upgrade.migrate().migrationsExecuted);
         assertTrue(jdbc.queryForObject("SELECT active FROM commission_rules WHERE id = ?", Boolean.class, defaultRule));
         assertEquals(new BigDecimal("0.050000"), jdbc.queryForObject("SELECT rate FROM commission_rules WHERE id = ?", BigDecimal.class, defaultRule));
         assertEquals(new BigDecimal("10000.00"), jdbc.queryForObject("SELECT min_commission FROM commission_rules WHERE id = ?", BigDecimal.class, defaultRule));
