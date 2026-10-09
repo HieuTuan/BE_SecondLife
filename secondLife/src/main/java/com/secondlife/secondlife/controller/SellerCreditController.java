@@ -50,9 +50,10 @@ public class SellerCreditController {
     @PreAuthorize("hasRole('SELLER') and hasAuthority('CREDIT_READ_SELF')")
     public ResponseEntity<ApiResponse<CreditPricingResponse>> getPricing(
             @RequestParam(required = false) Integer listingQuantity,
-            @RequestParam(required = false) Integer valuationQuantity) {
+            @RequestParam(required = false) Integer valuationQuantity,
+            @RequestParam(required = false) Integer aiChatQuantity) {
         return ResponseEntity.ok(ApiResponse.success(
-                pricingService.getPricing(listingQuantity, valuationQuantity)));
+                pricingService.getPricing(listingQuantity, valuationQuantity, aiChatQuantity)));
     }
 
     @PostMapping("/credit-purchases")

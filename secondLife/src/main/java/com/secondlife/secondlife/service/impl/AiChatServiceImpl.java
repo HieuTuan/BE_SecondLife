@@ -23,8 +23,11 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.beans.factory.annotation.Value;
+import com.secondlife.secondlife.service.ListingCreditService;
+import com.secondlife.secondlife.enums.CreditType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -46,6 +49,7 @@ public class AiChatServiceImpl implements AiChatService {
     private final long rateLimitWindowSeconds;
     private final int sessionMaxMessages;
     private final String ollamaModel;
+    private final ListingCreditService listingCreditService;
 
     public AiChatServiceImpl(
             @org.springframework.beans.factory.annotation.Qualifier("ollamaChatModel") org.springframework.ai.chat.model.ChatModel ollamaChatModel,
@@ -59,7 +63,8 @@ public class AiChatServiceImpl implements AiChatService {
             @Value("${app.ai.chat.rate-limit-max-messages}") int rateLimitMaxMessages,
             @Value("${app.ai.chat.rate-limit-window-seconds}") long rateLimitWindowSeconds,
             @Value("${app.ai.chat.session-max-messages}") int sessionMaxMessages,
-            @Value("${spring.ai.ollama.chat.options.model}") String ollamaModel) {
+            @Value("${spring.ai.ollama.chat.options.model}") String ollamaModel,
+            ListingCreditService listingCreditService) {
         requirePositive("app.listing.max-image-bytes", maxImageBytes);
         requirePositive("app.listing.max-images", maxImages);
         requirePositive("app.ai.chat.rate-limit-max-messages", rateLimitMaxMessages);
@@ -80,6 +85,7 @@ public class AiChatServiceImpl implements AiChatService {
         this.rateLimitWindowSeconds = rateLimitWindowSeconds;
         this.sessionMaxMessages = sessionMaxMessages;
         this.ollamaModel = ollamaModel;
+        this.listingCreditService = listingCreditService;
     }
 
     @Override
@@ -109,6 +115,9 @@ public class AiChatServiceImpl implements AiChatService {
         // Phase 1: Validate + save user message in a COMMITTED transaction
         // (so user message is persisted even if the AI call subsequently fails)
         UUID sessionId = saveUserMessageAndGetSessionId(request, currentUserId);
+        
+        // Count message to use as idempotency key for credit deduction
+        int currentMessageCount = sessionRepository.findById(sessionId).map(AiChatSession::getMessageCount).orElse(1);
 
         // Phase 2: Load history and call AI — OUTSIDE any transaction, no DB locks held
         List<Message> aiMessages = buildAiMessageHistory(sessionId, request.getMessage(), media);
@@ -123,10 +132,14 @@ public class AiChatServiceImpl implements AiChatService {
                 ).call().content();
             }
         } catch (Exception ex) {
+            refundAiChatCredit(currentUserId, sessionId, currentMessageCount);
             throw new AiProviderException("AI chat unavailable; please retry", ex);
         }
 
-        if (aiReply == null || aiReply.isBlank()) throw new AiProviderException("AI chat returned an empty response");
+        if (aiReply == null || aiReply.isBlank()) {
+            refundAiChatCredit(currentUserId, sessionId, currentMessageCount);
+            throw new AiProviderException("AI chat returned an empty response");
+        }
 
         // Phase 3: Persist AI reply in a new short transaction
         saveAiReply(sessionId, aiReply);
@@ -179,8 +192,18 @@ public class AiChatServiceImpl implements AiChatService {
 
         session.setMessageCount(session.getMessageCount() + 1);
         sessionRepository.save(session);
+        
+        // Consume credit for this message
+        String idempotencyKey = "AI_CHAT_MSG:" + session.getId() + ":" + session.getMessageCount();
+        listingCreditService.consume(currentUserId, CreditType.AI_CHAT, idempotencyKey);
 
         return session.getId();
+    }
+    
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void refundAiChatCredit(UUID userId, UUID sessionId, int messageCount) {
+        String idempotencyKey = "AI_CHAT_MSG:" + sessionId + ":" + messageCount + "_REFUND";
+        listingCreditService.refund(userId, CreditType.AI_CHAT, idempotencyKey);
     }
 
     /** Build prompt message list from persisted history + current user message. Read-only. */

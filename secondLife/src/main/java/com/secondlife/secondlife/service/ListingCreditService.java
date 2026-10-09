@@ -27,4 +27,13 @@ public class ListingCreditService {
         entry.setQuantityDelta(-1); entry.setBalanceAfter(after); entry.setIdempotencyKey(key);
         entry.setCreatedAt(Instant.now()); ledger.save(entry);
     }
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void refund(UUID userId, CreditType type, String key) {
+        if (ledger.existsByIdempotencyKey(key)) return;
+        long after = balances.grant(userId, type, 1);
+        CreditLedgerEntry entry = new CreditLedgerEntry();
+        entry.setUserId(userId); entry.setCreditType(type); entry.setEntryType("REFUND");
+        entry.setQuantityDelta(1); entry.setBalanceAfter(after); entry.setIdempotencyKey(key);
+        entry.setCreatedAt(Instant.now()); ledger.save(entry);
+    }
 }

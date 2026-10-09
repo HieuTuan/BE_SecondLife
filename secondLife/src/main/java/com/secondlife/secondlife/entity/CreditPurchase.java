@@ -33,6 +33,12 @@ public class CreditPurchase {
     @Column(name = "valuation_unit_price", nullable = false, precision = 19, scale = 2)
     private BigDecimal valuationUnitPrice;
 
+    @Column(name = "ai_chat_quantity", nullable = false)
+    private int aiChatQuantity = 0;
+
+    @Column(name = "ai_chat_unit_price", nullable = false, precision = 19, scale = 2)
+    private BigDecimal aiChatUnitPrice = BigDecimal.ZERO;
+
     // Legacy snapshot columns are retained for old purchases; new purchases have no discount.
     @Column(name = "discount_tier_id")
     private UUID discountTierId;

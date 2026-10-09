@@ -62,6 +62,7 @@ public class CreditPaymentCallbackServiceImpl implements CreditPaymentCallbackSe
 
         grant(purchase, CreditType.LISTING, purchase.getListingQuantity());
         grant(purchase, CreditType.VALUATION, purchase.getValuationQuantity());
+        grant(purchase, CreditType.AI_CHAT, purchase.getAiChatQuantity());
         purchase.setStatus(CreditPurchaseStatus.PAID);
         purchase.setPaidAt(Instant.now());
         intent.setStatus(PaymentStatus.SUCCEEDED);
