@@ -48,4 +48,25 @@ public class WalletController {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(depositService.createDepositRequest(userId, requestDTO));
     }
+
+    @GetMapping("/me/transactions")
+    @PreAuthorize("isAuthenticated()")
+    @io.swagger.v3.oas.annotations.Operation(summary = "Get wallet transaction history")
+    public ResponseEntity<com.secondlife.secondlife.common.PageResponse<com.secondlife.secondlife.dto.response.WalletTransactionResponseDTO>> getMyTransactions(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @org.springdoc.core.annotations.ParameterObject org.springframework.data.domain.Pageable pageable) {
+        UUID userId = currentUserProvider.resolveUserId(userDetails);
+        org.springframework.data.domain.Page<com.secondlife.secondlife.entity.WalletTransaction> page = walletService.getTransactions(userId, pageable);
+        
+        org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.WalletTransactionResponseDTO> dtoPage = page.map(t -> com.secondlife.secondlife.dto.response.WalletTransactionResponseDTO.builder()
+                .id(t.getId())
+                .walletId(t.getWallet().getId())
+                .amount(t.getAmount())
+                .type(t.getType())
+                .referenceId(t.getReferenceId())
+                .createdAt(t.getCreatedAt())
+                .build());
+                
+        return ResponseEntity.ok(com.secondlife.secondlife.common.PageResponse.from(dtoPage));
+    }
 }

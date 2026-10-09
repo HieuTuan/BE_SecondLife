@@ -11,5 +11,12 @@ public record UpdateProfileRequest(
     String phone,
 
     @Size(max = 1024, message = "Avatar URL is too long")
-    String avatarUrl
+    String avatarUrl,
+
+    String province,
+    String district,
+    String ward,
+    String streetAddress,
+    Double latitude,
+    Double longitude
 ) {}

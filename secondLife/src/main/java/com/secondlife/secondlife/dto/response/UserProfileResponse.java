@@ -18,5 +18,11 @@ public record UserProfileResponse(
     Set<String> permissions,
     Instant createdAt,
     Instant updatedAt,
-    Instant lastLoginAt
+    Instant lastLoginAt,
+    String province,
+    String district,
+    String ward,
+    String streetAddress,
+    Double latitude,
+    Double longitude
 ) {}

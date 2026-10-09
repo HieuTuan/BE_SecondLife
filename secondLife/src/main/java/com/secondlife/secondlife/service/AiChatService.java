@@ -9,4 +9,5 @@ import java.util.UUID;
 public interface AiChatService {
     AiChatResponse processChat(AiChatRequest request, UUID currentUserId);
     PostFinalizeResponse finalizeChat(UUID sessionId, UUID currentUserId);
+    PostFinalizeResponse regenerateDescription(UUID sessionId, UUID currentUserId);
 }

@@ -67,6 +67,15 @@ public class PostController {
         return ResponseEntity.ok(postService.finalizeChatAndDescription(userId, sessionId));
     }
 
+    @PostMapping("/regenerate-chat/{sessionId}")
+    @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
+    public ResponseEntity<PostFinalizeResponse> regenerateChat(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID sessionId) {
+        UUID userId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(postService.regenerateChatAndDescription(userId, sessionId));
+    }
+
     @PostMapping("/submit/{postId}")
     @PreAuthorize("hasAuthority('LISTING_PUBLISH_SELF')")
     public ResponseEntity<PostSubmitResponse> submitPost(

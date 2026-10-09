@@ -48,6 +48,7 @@ public class Post {
     @ElementCollection
     @CollectionTable(name = "post_images", joinColumns = @JoinColumn(name = "post_id"))
     @OrderColumn(name = "image_position")
+    @org.hibernate.annotations.BatchSize(size = 20)
     private java.util.List<PostImage> images = new java.util.ArrayList<>();
 
     public java.util.List<String> getImageUrls() {

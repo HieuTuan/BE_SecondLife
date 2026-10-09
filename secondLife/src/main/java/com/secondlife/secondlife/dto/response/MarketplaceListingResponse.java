@@ -5,6 +5,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-public record MarketplaceListingResponse(UUID postId, UUID sellerId, UUID categoryId, UUID itemId,
+public record MarketplaceListingResponse(UUID id, UUID postId, UUID sellerId, UUID categoryId, UUID itemId,
         String title, String description, String itemCondition, String imageUrl, List<String> imageUrls,
         BigDecimal price, String status, Instant publishedAt) {}
