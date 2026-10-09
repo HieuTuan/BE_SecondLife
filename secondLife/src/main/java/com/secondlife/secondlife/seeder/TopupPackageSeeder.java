@@ -29,11 +29,11 @@ public class TopupPackageSeeder implements ApplicationRunner {
         log.info("Starting Topup Packages Seeding...");
 
         List<TopupPackage> packages = List.of(
-                // Combo Packages
-                createPackage("Basic Combo", "2 posts, 10 AI chats, 2 valuations", 2, 10, 2, new BigDecimal("69000"), 0.0),
-                createPackage("Standard Combo", "5 posts, 25 AI chats, 5 valuations", 5, 25, 5, new BigDecimal("149000"), 12.5),
-                createPackage("Pro Combo", "10 posts, 50 AI chats, 10 valuations", 10, 50, 10, new BigDecimal("279000"), 15.6),
-                createPackage("Premium Combo", "20 posts, 100 AI chats, 20 valuations", 20, 100, 20, new BigDecimal("499000"), 24.0),
+                // Combo Packages (Đã bổ sung lượt định giá AI)
+                createPackage("Basic Combo", "2 posts, 10 AI chats, 2 AI valuations", 2, 10, 2, new BigDecimal("59000"), 0.0),
+                createPackage("Standard Combo", "5 posts, 25 AI chats, 5 AI valuations", 5, 25, 5, new BigDecimal("129000"), 12.5),
+                createPackage("Pro Combo", "10 posts, 50 AI chats, 10 AI valuations", 10, 50, 10, new BigDecimal("249000"), 15.6),
+                createPackage("Premium Combo", "20 posts, 100 AI chats, 20 AI valuations", 20, 100, 20, new BigDecimal("449000"), 24.0),
 
                 // Post Only Packages
                 createPackage("Single Post", "Add 1 new post credit", 1, 0, 0, new BigDecimal("20000"), 0.0),
@@ -43,7 +43,12 @@ public class TopupPackageSeeder implements ApplicationRunner {
                 // Chat Only Packages
                 createPackage("10 AI Chats", "Add 10 AI chat credits", 0, 10, 0, new BigDecimal("20000"), 0.0),
                 createPackage("50 AI Chats", "Add 50 AI chat credits (Save 21%)", 0, 50, 0, new BigDecimal("79000"), 21.0),
-                createPackage("100 AI Chats", "Add 100 AI chat credits (Save 30.5%)", 0, 100, 0, new BigDecimal("139000"), 30.5)
+                createPackage("100 AI Chats", "Add 100 AI chat credits (Save 30.5%)", 0, 100, 0, new BigDecimal("139000"), 30.5),
+
+                // Valuation Only Packages
+                createPackage("10 AI Valuations", "Add 10 AI valuation credits", 0, 0, 10, new BigDecimal("20000"), 0.0),
+                createPackage("50 AI Valuations", "Add 50 AI valuation credits (Save 21%)", 0, 0, 50, new BigDecimal("79000"), 21.0),
+                createPackage("100 AI Valuations", "Add 100 AI valuation credits (Save 30.5%)", 0, 0, 100, new BigDecimal("139000"), 30.5)
         );
 
         topupPackageRepository.saveAll(packages);

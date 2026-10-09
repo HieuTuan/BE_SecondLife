@@ -19,15 +19,18 @@ public class CreditBalanceServiceImpl implements CreditBalanceService {
     @Override
     @Transactional(readOnly = true)
     public CreditBalanceResponse getBalance(UUID sellerId) {
-        long listing = 0;
+        long post = 0;
+        long chat = 0;
         long valuation = 0;
         for (CreditBalance balance : balanceRepository.findByUserId(sellerId)) {
             if (balance.getCreditType() == CreditType.LISTING) {
-                listing = balance.getQuantity();
+                post = balance.getQuantity();
             } else if (balance.getCreditType() == CreditType.VALUATION) {
                 valuation = balance.getQuantity();
+            } else if (balance.getCreditType() == CreditType.AI_CHAT) {
+                chat = balance.getQuantity();
             }
         }
-        return new CreditBalanceResponse(listing, valuation);
+        return new CreditBalanceResponse(post, chat, valuation);
     }
 }

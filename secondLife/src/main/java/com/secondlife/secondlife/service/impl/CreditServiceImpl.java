@@ -61,20 +61,23 @@ public class CreditServiceImpl implements CreditService {
     @Transactional
     public CreditBalanceResponse purchaseTopupPackage(UUID userId, UUID packageId) {
         TopupPackage topupPackage = topupPackageRepository.findById(packageId)
-                .orElseThrow(() -> new NotFoundException("Topup package not found"));
+                .orElseThrow(() -> new RuntimeException("Topup package not found"));
 
         // Deduct from wallet (throws exception if insufficient balance)
         walletService.processPayment(userId, topupPackage.getPrice(), packageId);
 
+        // Generate a unique purchase ID to group these grants and ensure idempotency keys are unique per purchase
+        UUID purchaseTraceId = java.util.UUID.randomUUID();
+
         // Add credits to user via grant repository
-        grant(userId, CreditType.LISTING, topupPackage.getPostCredits(), packageId);
-        grant(userId, CreditType.AI_CHAT, topupPackage.getChatCredits(), packageId);
-        grant(userId, CreditType.VALUATION, topupPackage.getValuationCredits(), packageId);
+        grant(userId, CreditType.LISTING, topupPackage.getPostCredits(), purchaseTraceId);
+        grant(userId, CreditType.AI_CHAT, topupPackage.getChatCredits(), purchaseTraceId);
+        grant(userId, CreditType.VALUATION, topupPackage.getValuationCredits(), purchaseTraceId);
         
         return creditBalanceService.getBalance(userId);
     }
     
-    private void grant(UUID userId, CreditType type, int quantity, UUID packageId) {
+    private void grant(UUID userId, CreditType type, int quantity, UUID purchaseTraceId) {
         if (quantity == 0) return;
         long balanceAfter = balanceGrantRepository.grant(userId, type, quantity);
         CreditLedgerEntry entry = new CreditLedgerEntry();
@@ -83,7 +86,7 @@ public class CreditServiceImpl implements CreditService {
         entry.setEntryType("GRANT");
         entry.setQuantityDelta(quantity);
         entry.setBalanceAfter(balanceAfter);
-        entry.setIdempotencyKey("TOPUP_GRANT:" + packageId + ":" + userId + ":" + type.name());
+        entry.setIdempotencyKey("TOPUP_GRANT:" + purchaseTraceId + ":" + type.name());
         entry.setCreatedAt(java.time.Instant.now());
         ledgerRepository.save(entry);
     }
