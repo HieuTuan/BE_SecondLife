@@ -50,6 +50,24 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({org.springframework.http.converter.HttpMessageNotReadableException.class,
             org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class})
     public ResponseEntity<ErrorResponse> handleMalformedRequest(Exception ex, HttpServletRequest request) {
+        if (ex instanceof org.springframework.web.method.annotation.MethodArgumentTypeMismatchException mismatch) {
+            return ResponseEntity.badRequest().body(ErrorResponse.of("Invalid parameter format", request.getRequestURI(),
+                    List.of(new ErrorResponse.FieldErrorItem(mismatch.getName(), "Invalid parameter format"))));
+        }
+        for (Throwable cause = ex.getCause(); cause != null; cause = cause.getCause()) {
+            if (cause instanceof InvalidRequestFieldException invalidField) {
+                return ResponseEntity.badRequest().body(ErrorResponse.of("Validation failed", request.getRequestURI(),
+                        List.of(new ErrorResponse.FieldErrorItem(invalidField.getField(), invalidField.getMessage()))));
+            }
+            if (cause instanceof tools.jackson.core.JacksonException jsonError && !jsonError.getPath().isEmpty()) {
+                String field = jsonError.getPath().stream().map(tools.jackson.core.JacksonException.Reference::getPropertyName)
+                        .filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.joining("."));
+                if (!field.isEmpty()) {
+                    return ResponseEntity.badRequest().body(ErrorResponse.of("Invalid JSON field", request.getRequestURI(),
+                            List.of(new ErrorResponse.FieldErrorItem(field, "Invalid value, JSON type, or unsupported field"))));
+                }
+            }
+        }
         return ResponseEntity.badRequest()
                 .body(ErrorResponse.of("Malformed request body or parameter", request.getRequestURI()));
     }
@@ -90,6 +108,10 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<ErrorResponse> handleBadRequest(BadRequestException ex, HttpServletRequest request) {
         log.warn("Bad request at {}", request.getRequestURI());
+        if (ex instanceof InvalidRequestFieldException invalidField) {
+            return ResponseEntity.badRequest().body(ErrorResponse.of("Validation failed", request.getRequestURI(),
+                    List.of(new ErrorResponse.FieldErrorItem(invalidField.getField(), invalidField.getMessage()))));
+        }
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ErrorResponse.of(ex.getMessage(), request.getRequestURI()));
     }

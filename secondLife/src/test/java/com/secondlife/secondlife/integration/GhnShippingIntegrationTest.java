@@ -211,8 +211,8 @@ class GhnShippingIntegrationTest {
     @Test void defaultCommissionNeedsNoScopeAndAppliesMinimumAndMaximumAcrossCategoriesAndPrices() throws Exception {
         var admin = user("ADMIN", BigDecimal.ZERO);
         var payload = new java.util.HashMap<String, Object>();
-        payload.put("name", "Default commission with limits"); payload.put("rate", "0.01");
-        payload.put("minCommission", "20000"); payload.put("maxCommission", "30000");
+        payload.put("name", "Default commission with limits"); payload.put("rate", new BigDecimal("0.01"));
+        payload.put("minCommission", new BigDecimal("20000")); payload.put("maxCommission", new BigDecimal("30000"));
         payload.put("active", true); payload.put("reason", "Configure one default policy");
         var rule = tree(mvc.perform(post("/api/admin/commission-rules").header("Authorization", bearer(admin))
                 .contentType(MediaType.APPLICATION_JSON).content(body(payload)))
@@ -381,7 +381,8 @@ class GhnShippingIntegrationTest {
     private Map<String, Object> ruleBody(String rate, String min, String max) {
         var payload = new java.util.HashMap<String, Object>();
         payload.put("name", "Commission test " + UUID.randomUUID());
-        payload.put("rate", rate); payload.put("minCommission", min); payload.put("maxCommission", max);
+        payload.put("rate", new BigDecimal(rate)); payload.put("minCommission", new BigDecimal(min));
+        payload.put("maxCommission", max == null ? null : new BigDecimal(max));
         payload.put("active", true); payload.put("reason", "Configure commission for regression test");
         return payload;
     }
