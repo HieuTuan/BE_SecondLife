@@ -134,8 +134,25 @@ public class NegotiationServiceImpl implements NegotiationService {
         negotiation.setExpiredAt(Instant.now().plus(acceptedTtlHours, ChronoUnit.HOURS));
 
         negotiation = negotiationRepository.save(negotiation);
+
+        // Reserve the post
+        Post post = negotiation.getPost();
+        post.setStatus("RESERVED");
+        postRepository.save(post);
+
+        // Bulk reject other pending negotiations for this post
+        List<Negotiation> otherPending = negotiationRepository.findByPostIdAndStatus(post.getId(), NegotiationStatus.PENDING);
+        for (Negotiation other : otherPending) {
+            if (!other.getId().equals(negotiation.getId())) {
+                other.setStatus(NegotiationStatus.REJECTED);
+                negotiationRepository.save(other);
+                chatService.sendSystemMessage(post.getId(), other.getBuyer().getId(),
+                    String.format("{\"type\":\"OFFER\", \"status\":\"%s\", \"price\":%s, \"negotiationId\":\"%s\"}",
+                    other.getStatus(), other.getOfferedPrice(), other.getId()));
+            }
+        }
         
-        chatService.sendSystemMessage(negotiation.getPost().getId(), negotiation.getBuyer().getId(), 
+        chatService.sendSystemMessage(post.getId(), negotiation.getBuyer().getId(), 
             String.format("{\"type\":\"OFFER\", \"status\":\"%s\", \"price\":%s, \"negotiationId\":\"%s\"}", 
             negotiation.getStatus(), negotiation.getOfferedPrice(), negotiation.getId()));
 

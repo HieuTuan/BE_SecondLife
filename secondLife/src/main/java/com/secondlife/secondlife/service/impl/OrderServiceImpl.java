@@ -68,8 +68,12 @@ public class OrderServiceImpl implements OrderService {
             return mapToDTO(previous);
         }
 
-        if (!"ACTIVE".equals(post.getStatus())) {
+        if (!"ACTIVE".equals(post.getStatus()) && !"RESERVED".equals(post.getStatus())) {
             throw new ConflictException("Post is not available for purchase");
+        }
+
+        if ("RESERVED".equals(post.getStatus()) && requestDTO.getNegotiationId() == null) {
+            throw new ConflictException("Post is reserved. You must provide a valid negotiation to purchase it.");
         }
 
         if (post.getUser().getId().equals(buyerId)) {
@@ -95,7 +99,12 @@ public class OrderServiceImpl implements OrderService {
             }
 
             if (negotiation.getExpiredAt() != null && negotiation.getExpiredAt().isBefore(Instant.now())) {
-                throw new BadRequestException("Negotiation has expired");
+                // Lazy rollback
+                negotiation.setStatus(NegotiationStatus.EXPIRED);
+                negotiationRepository.save(negotiation);
+                post.setStatus("ACTIVE");
+                postRepository.save(post);
+                throw new BadRequestException("Negotiation has expired. The product is available again. Please re-negotiate if you still want to buy it.");
             }
 
             finalPrice = negotiation.getOfferedPrice();
