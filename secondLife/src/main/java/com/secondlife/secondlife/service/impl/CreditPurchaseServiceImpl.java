@@ -64,6 +64,9 @@ public class CreditPurchaseServiceImpl implements CreditPurchaseService {
         purchase.setFinalFee(quote.finalFee());
         purchase.setCurrency(quote.currency());
         purchase.setStatus(CreditPurchaseStatus.PAID);
+        purchase.setDiscountMinQuantity(0);
+        purchase.setDiscountRate(BigDecimal.ZERO);
+        purchase.setDiscountAmount(BigDecimal.ZERO);
         purchase.setCreatedAt(Instant.now());
         purchase.setPaidAt(Instant.now());
         purchaseRepository.saveAndFlush(purchase);
