@@ -2,11 +2,15 @@ package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.entity.TopupPackage;
 import com.secondlife.secondlife.entity.User;
-import com.secondlife.secondlife.entity.UserCredit;
 import com.secondlife.secondlife.repository.TopupPackageRepository;
-import com.secondlife.secondlife.repository.UserCreditRepository;
 import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.repository.CreditBalanceGrantRepository;
+import com.secondlife.secondlife.repository.CreditLedgerRepository;
+import com.secondlife.secondlife.entity.CreditLedgerEntry;
+import com.secondlife.secondlife.enums.CreditType;
+import com.secondlife.secondlife.dto.credit.CreditBalanceResponse;
 import com.secondlife.secondlife.service.CreditService;
+import com.secondlife.secondlife.service.CreditBalanceService;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.service.WalletService;
 import org.springframework.stereotype.Service;
@@ -17,33 +21,34 @@ import java.util.UUID;
 
 @Service
 public class CreditServiceImpl implements CreditService {
-
-    private final UserCreditRepository userCreditRepository;
     private final TopupPackageRepository topupPackageRepository;
     private final UserRepository userRepository;
     private final WalletService walletService;
+    private final CreditBalanceGrantRepository balanceGrantRepository;
+    private final CreditLedgerRepository ledgerRepository;
+    private final CreditBalanceService creditBalanceService;
 
-    public CreditServiceImpl(UserCreditRepository userCreditRepository,
-                             TopupPackageRepository topupPackageRepository,
+    public CreditServiceImpl(TopupPackageRepository topupPackageRepository,
                              UserRepository userRepository,
-                             WalletService walletService) {
-        this.userCreditRepository = userCreditRepository;
+                             WalletService walletService,
+                             CreditBalanceGrantRepository balanceGrantRepository,
+                             CreditLedgerRepository ledgerRepository,
+                             CreditBalanceService creditBalanceService) {
         this.topupPackageRepository = topupPackageRepository;
         this.userRepository = userRepository;
         this.walletService = walletService;
+        this.balanceGrantRepository = balanceGrantRepository;
+        this.ledgerRepository = ledgerRepository;
+        this.creditBalanceService = creditBalanceService;
     }
 
     @Override
     @Transactional(readOnly = true)
-    public UserCredit getUserCredit(UUID userId) {
-        return userCreditRepository.findByUserId(userId)
-                .orElseGet(() -> {
-                    // Create default credit if not exists
-                    User user = userRepository.findById(userId)
-                            .orElseThrow(() -> new RuntimeException("User not found"));
-                    UserCredit newCredit = new UserCredit(user);
-                    return userCreditRepository.save(newCredit);
-                });
+    public CreditBalanceResponse getUserCredit(UUID userId) {
+        // Create user check
+        userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        return creditBalanceService.getBalance(userId);
     }
 
     @Override
@@ -54,40 +59,32 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     @Transactional
-    public UserCredit purchaseTopupPackage(UUID userId, UUID packageId) {
+    public CreditBalanceResponse purchaseTopupPackage(UUID userId, UUID packageId) {
         TopupPackage topupPackage = topupPackageRepository.findById(packageId)
                 .orElseThrow(() -> new NotFoundException("Topup package not found"));
 
         // Deduct from wallet (throws exception if insufficient balance)
         walletService.processPayment(userId, topupPackage.getPrice(), packageId);
 
-        // Add credits to user
-        UserCredit userCredit = getUserCredit(userId);
-        userCredit.setPostCredits(userCredit.getPostCredits() + topupPackage.getPostCredits());
-        userCredit.setChatCredits(userCredit.getChatCredits() + topupPackage.getChatCredits());
+        // Add credits to user via grant repository
+        grant(userId, CreditType.LISTING, topupPackage.getPostCredits(), packageId);
+        grant(userId, CreditType.AI_CHAT, topupPackage.getChatCredits(), packageId);
+        grant(userId, CreditType.VALUATION, topupPackage.getValuationCredits(), packageId);
         
-        return userCreditRepository.save(userCredit);
+        return creditBalanceService.getBalance(userId);
     }
-
-    @Override
-    @Transactional
-    public void deductPostCredit(UUID userId) {
-        UserCredit userCredit = getUserCredit(userId);
-        if (userCredit.getPostCredits() <= 0) {
-            throw new RuntimeException("Insufficient post credits");
-        }
-        userCredit.setPostCredits(userCredit.getPostCredits() - 1);
-        userCreditRepository.save(userCredit);
-    }
-
-    @Override
-    @Transactional
-    public void deductChatCredit(UUID userId) {
-        UserCredit userCredit = getUserCredit(userId);
-        if (userCredit.getChatCredits() <= 0) {
-            throw new RuntimeException("Insufficient chat credits");
-        }
-        userCredit.setChatCredits(userCredit.getChatCredits() - 1);
-        userCreditRepository.save(userCredit);
+    
+    private void grant(UUID userId, CreditType type, int quantity, UUID packageId) {
+        if (quantity == 0) return;
+        long balanceAfter = balanceGrantRepository.grant(userId, type, quantity);
+        CreditLedgerEntry entry = new CreditLedgerEntry();
+        entry.setUserId(userId);
+        entry.setCreditType(type);
+        entry.setEntryType("GRANT");
+        entry.setQuantityDelta(quantity);
+        entry.setBalanceAfter(balanceAfter);
+        entry.setIdempotencyKey("TOPUP_GRANT:" + packageId + ":" + userId + ":" + type.name());
+        entry.setCreatedAt(java.time.Instant.now());
+        ledgerRepository.save(entry);
     }
 }

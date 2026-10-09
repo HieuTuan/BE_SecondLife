@@ -3,6 +3,7 @@ package com.secondlife.secondlife.service.impl;
 import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.dto.credit.*;
 import com.secondlife.secondlife.entity.CreditLedgerEntry;
+import com.secondlife.secondlife.enums.CreditType;
 import com.secondlife.secondlife.entity.CreditPurchase;
 import com.secondlife.secondlife.entity.PaymentIntent;
 import com.secondlife.secondlife.enums.CreditPurchaseStatus;
@@ -34,15 +35,17 @@ public class CreditPurchaseServiceImpl implements CreditPurchaseService {
     private final PaymentIntentRepository intentRepository;
     private final CreditLedgerRepository ledgerRepository;
     private final PaymentProvider paymentProvider;
+    private final com.secondlife.secondlife.service.WalletService walletService;
+    private final com.secondlife.secondlife.repository.CreditBalanceGrantRepository balanceGrantRepository;
 
     @Override
     @Transactional
     public CreditPurchaseResponse createPurchase(UUID sellerId, CreateCreditPurchaseRequest request) {
         if (sellerId == null || request == null || request.listingQuantity() == null
-                || request.valuationQuantity() == null) {
+                || request.valuationQuantity() == null || request.aiChatQuantity() == null) {
             throw new BadRequestException("Credit purchase quantities are required");
         }
-        CreditQuoteResponse quote = pricingService.quote(request.listingQuantity(), request.valuationQuantity());
+        CreditQuoteResponse quote = pricingService.quote(request.listingQuantity(), request.valuationQuantity(), request.aiChatQuantity());
         if (quote.finalFee().compareTo(BigDecimal.ZERO) <= 0
                 || !fitsMoneyColumn(quote.subtotal())
                 || !fitsMoneyColumn(quote.finalFee())) {
@@ -53,35 +56,43 @@ public class CreditPurchaseServiceImpl implements CreditPurchaseService {
         purchase.setUserId(sellerId);
         purchase.setListingQuantity(quote.listingQuantity());
         purchase.setValuationQuantity(quote.valuationQuantity());
+        purchase.setAiChatQuantity(quote.aiChatQuantity());
         purchase.setListingUnitPrice(quote.listingUnitPrice());
         purchase.setValuationUnitPrice(quote.valuationUnitPrice());
+        purchase.setAiChatUnitPrice(quote.aiChatUnitPrice());
         purchase.setSubtotal(quote.subtotal());
         purchase.setFinalFee(quote.finalFee());
         purchase.setCurrency(quote.currency());
-        purchase.setStatus(CreditPurchaseStatus.PAYMENT_PENDING);
+        purchase.setStatus(CreditPurchaseStatus.PAID);
         purchase.setCreatedAt(Instant.now());
+        purchase.setPaidAt(Instant.now());
         purchaseRepository.saveAndFlush(purchase);
 
-        PaymentIntentResult result = paymentProvider.createIntent(
-                new PaymentIntentRequest(purchase.getId(), quote.finalFee(), quote.currency()));
-        if (result == null || !paymentProvider.providerName().equals(result.provider())
-                || result.provider() == null || result.provider().length() > 30
-                || result.providerIntentId() == null || result.providerIntentId().isBlank()
-                || result.providerIntentId().length() > 150 || result.status() != PaymentStatus.PENDING
-                || result.amount() == null || result.amount().compareTo(quote.finalFee()) != 0
-                || !quote.currency().equals(result.currency())) {
-            throw new ConflictException("Payment provider returned an invalid intent");
-        }
-        PaymentIntent intent = new PaymentIntent();
-        intent.setPurchaseId(purchase.getId());
-        intent.setProvider(result.provider());
-        intent.setProviderIntentId(result.providerIntentId());
-        intent.setAmount(result.amount());
-        intent.setCurrency(result.currency());
-        intent.setStatus(PaymentStatus.PENDING);
-        intent.setCreatedAt(Instant.now());
-        intentRepository.save(intent);
-        return toResponse(purchase, intent);
+        // Deduct from wallet directly
+        walletService.processPayment(sellerId, quote.finalFee(), purchase.getId());
+
+        // Grant credits directly since payment is completed
+        grant(purchase, CreditType.LISTING, purchase.getListingQuantity());
+        grant(purchase, CreditType.VALUATION, purchase.getValuationQuantity());
+        grant(purchase, CreditType.AI_CHAT, purchase.getAiChatQuantity());
+
+        return toResponse(purchase, null);
+    }
+
+    private void grant(CreditPurchase purchase, CreditType type, int quantity) {
+        if (quantity <= 0) return;
+        long balanceAfter = balanceGrantRepository.grant(purchase.getUserId(), type, quantity);
+
+        CreditLedgerEntry entry = new CreditLedgerEntry();
+        entry.setUserId(purchase.getUserId());
+        entry.setCreditType(type);
+        entry.setPurchaseId(purchase.getId());
+        entry.setEntryType("PURCHASE");
+        entry.setQuantityDelta(quantity);
+        entry.setBalanceAfter(balanceAfter);
+        entry.setIdempotencyKey("PURCHASE:" + purchase.getId() + ":" + type.name());
+        entry.setCreatedAt(Instant.now());
+        ledgerRepository.save(entry);
     }
 
     @Override
@@ -101,8 +112,8 @@ public class CreditPurchaseServiceImpl implements CreditPurchaseService {
 
     private CreditPurchaseResponse toResponse(CreditPurchase purchase, PaymentIntent intent) {
         CreditQuoteResponse snapshot = new CreditQuoteResponse(purchase.getListingQuantity(),
-                purchase.getValuationQuantity(), purchase.getListingUnitPrice(),
-                purchase.getValuationUnitPrice(), purchase.getSubtotal(),
+                purchase.getValuationQuantity(), purchase.getAiChatQuantity(), purchase.getListingUnitPrice(),
+                purchase.getValuationUnitPrice(), purchase.getAiChatUnitPrice(), purchase.getSubtotal(),
                 purchase.getFinalFee(), purchase.getCurrency());
         return new CreditPurchaseResponse(purchase.getId(), purchase.getStatus(), snapshot,
                 intent == null ? null : intent.getId(), intent == null ? null : intent.getProvider(),

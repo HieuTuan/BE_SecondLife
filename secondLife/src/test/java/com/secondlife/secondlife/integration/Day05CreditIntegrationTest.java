@@ -144,7 +144,7 @@ class Day05CreditIntegrationTest {
                 new UpdateCreditPricingRequest(new BigDecimal("25.00")));
         int[] quantities = {1, 4, 5, 9, 10, 29, 30, 49, 50};
         for (int i = 0; i < quantities.length; i++) {
-            CreditQuoteResponse quote = pricingService.quote(quantities[i], 0);
+            CreditQuoteResponse quote = pricingService.quote(quantities[i], 0, 0);
             assertEquals(0, quote.subtotal().compareTo(new BigDecimal(quantities[i] * 100 + ".00")));
             assertEquals(0, quote.finalFee().compareTo(quote.subtotal()));
             assertEquals("VND", quote.currency());
@@ -163,7 +163,7 @@ class Day05CreditIntegrationTest {
                 new UpdateCreditPricingRequest(new BigDecimal("100.00")));
         pricingService.updatePrice(adminId, CreditType.VALUATION,
                 new UpdateCreditPricingRequest(new BigDecimal("25.00")));
-        CreditQuoteResponse quote = pricingService.quote(1, 1);
+        CreditQuoteResponse quote = pricingService.quote(1, 1, 0);
 
         CreditPurchase purchase = new CreditPurchase();
         purchase.setUserId(seller.getId());

@@ -26,24 +26,25 @@ public class CreditPricingServiceImpl implements CreditPricingService {
 
     @Override
     @Transactional(readOnly = true)
-    public CreditPricingResponse getPricing(Integer listingQuantity, Integer valuationQuantity) {
+    public CreditPricingResponse getPricing(Integer listingQuantity, Integer valuationQuantity, Integer aiChatQuantity) {
         CreditQuoteResponse quote = null;
-        if (listingQuantity != null || valuationQuantity != null) {
+        if (listingQuantity != null || valuationQuantity != null || aiChatQuantity != null) {
             quote = quote(listingQuantity == null ? 0 : listingQuantity,
-                    valuationQuantity == null ? 0 : valuationQuantity);
+                    valuationQuantity == null ? 0 : valuationQuantity,
+                    aiChatQuantity == null ? 0 : aiChatQuantity);
         }
         return new CreditPricingResponse(getAdminPrices(), quote);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public CreditQuoteResponse quote(int listingQuantity, int valuationQuantity) {
-        if (listingQuantity < 0 || valuationQuantity < 0) {
+    public CreditQuoteResponse quote(int listingQuantity, int valuationQuantity, int aiChatQuantity) {
+        if (listingQuantity < 0 || valuationQuantity < 0 || aiChatQuantity < 0) {
             throw new BadRequestException("Credit quantities cannot be negative");
         }
         int total;
         try {
-            total = Math.addExact(listingQuantity, valuationQuantity);
+            total = Math.addExact(listingQuantity, Math.addExact(valuationQuantity, aiChatQuantity));
         } catch (ArithmeticException ex) {
             throw new BadRequestException("Credit quantity is too large");
         }
@@ -53,14 +54,16 @@ public class CreditPricingServiceImpl implements CreditPricingService {
 
         CreditPricingRule listing = activeRule(CreditType.LISTING);
         CreditPricingRule valuation = activeRule(CreditType.VALUATION);
-        if (!listing.getCurrency().equals(valuation.getCurrency())) {
+        CreditPricingRule aiChat = activeRule(CreditType.AI_CHAT);
+        if (!listing.getCurrency().equals(valuation.getCurrency()) || !listing.getCurrency().equals(aiChat.getCurrency())) {
             throw new ConflictException("Credit prices use different currencies");
         }
         BigDecimal subtotal = listing.getUnitPrice().multiply(BigDecimal.valueOf(listingQuantity))
                 .add(valuation.getUnitPrice().multiply(BigDecimal.valueOf(valuationQuantity)))
+                .add(aiChat.getUnitPrice().multiply(BigDecimal.valueOf(aiChatQuantity)))
                 .setScale(2, RoundingMode.HALF_UP);
-        return new CreditQuoteResponse(listingQuantity, valuationQuantity,
-                listing.getUnitPrice(), valuation.getUnitPrice(), subtotal, subtotal, listing.getCurrency());
+        return new CreditQuoteResponse(listingQuantity, valuationQuantity, aiChatQuantity,
+                listing.getUnitPrice(), valuation.getUnitPrice(), aiChat.getUnitPrice(), subtotal, subtotal, listing.getCurrency());
     }
 
     @Override

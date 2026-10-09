@@ -1,7 +1,7 @@
 package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.entity.TopupPackage;
-import com.secondlife.secondlife.entity.UserCredit;
+import com.secondlife.secondlife.dto.credit.CreditBalanceResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.CreditService;
@@ -33,14 +33,14 @@ public class TopupController {
 
     @GetMapping("/my-credit")
     @PreAuthorize("hasAuthority('CREDIT_READ_SELF')")
-    public ResponseEntity<UserCredit> getMyCredit(@AuthenticationPrincipal CustomUserDetails userDetails) {
+    public ResponseEntity<CreditBalanceResponse> getMyCredit(@AuthenticationPrincipal CustomUserDetails userDetails) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(creditService.getUserCredit(userId));
     }
 
     @PostMapping("/purchase/{packageId}")
     @PreAuthorize("hasAuthority('CREDIT_PURCHASE_SELF')")
-    public ResponseEntity<UserCredit> purchasePackage(
+    public ResponseEntity<CreditBalanceResponse> purchasePackage(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID packageId) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);

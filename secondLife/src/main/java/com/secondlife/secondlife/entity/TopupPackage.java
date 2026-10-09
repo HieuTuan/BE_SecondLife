@@ -33,6 +33,9 @@ public class TopupPackage {
     @Column(name = "chat_credits", nullable = false)
     private int chatCredits;
 
+    @Column(name = "valuation_credits", nullable = false)
+    private int valuationCredits = 0;
+
     @Column(name = "price", nullable = false)
     private BigDecimal price;
 

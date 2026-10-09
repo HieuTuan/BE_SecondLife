@@ -2,5 +2,6 @@ package com.secondlife.secondlife.enums;
 
 public enum CreditType {
     LISTING,
-    VALUATION
+    VALUATION,
+    AI_CHAT
 }
