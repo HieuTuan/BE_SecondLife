@@ -26,6 +26,10 @@ public class PostDto {
     private BigDecimal aiSuggestedPrice;
     private String rejectionReason;
     private Boolean listingCreditCharged;
+    private Integer shippingWeight;
+    private Integer shippingLength;
+    private Integer shippingWidth;
+    private Integer shippingHeight;
     private SellerSummary user;
 
     @Data
@@ -75,6 +79,10 @@ public class PostDto {
                 .aiSuggestedPrice(post.getAiSuggestedPrice())
                 .rejectionReason(post.getRejectionReason())
                 .listingCreditCharged(post.isListingCreditCharged())
+                .shippingWeight(post.getShippingWeight())
+                .shippingLength(post.getShippingLength())
+                .shippingWidth(post.getShippingWidth())
+                .shippingHeight(post.getShippingHeight())
                 .user(seller)
                 .build();
     }

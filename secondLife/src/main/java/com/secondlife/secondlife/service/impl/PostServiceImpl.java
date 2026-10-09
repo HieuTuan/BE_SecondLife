@@ -323,6 +323,10 @@ public class PostServiceImpl implements PostService {
         post.setTitle(request.getTitle().trim());
         post.setDescription(request.getDescription().trim());
         post.setPrice(request.getPrice());
+        post.setShippingWeight(request.getShippingWeight());
+        post.setShippingLength(request.getShippingLength());
+        post.setShippingWidth(request.getShippingWidth());
+        post.setShippingHeight(request.getShippingHeight());
         submissionLock.lock();
         var matches = new java.util.ArrayList<UUID>();
         for (Post other : postRepository.findByIdNotAndStatusIn(postId,
@@ -605,6 +609,11 @@ public class PostServiceImpl implements PostService {
         post.setDescription(request.getDescription());
         post.setItemCondition(request.getItemCondition());
         post.setPrice(request.getPrice());
+        
+        if (request.getShippingWeight() != null) post.setShippingWeight(request.getShippingWeight());
+        if (request.getShippingLength() != null) post.setShippingLength(request.getShippingLength());
+        if (request.getShippingWidth() != null) post.setShippingWidth(request.getShippingWidth());
+        if (request.getShippingHeight() != null) post.setShippingHeight(request.getShippingHeight());
 
         // Status may remain DRAFT or whatever it is, unless we explicitly change it.
         // Frontend sends "status": 'DRAFT', let's assume it should stay DRAFT if it was DRAFT

@@ -20,4 +20,20 @@ public class PostSubmitRequest {
     @jakarta.validation.constraints.DecimalMin("1")
     @jakarta.validation.constraints.Digits(integer = 16, fraction = 2)
     private BigDecimal price;
+
+    @NotNull(message = "Shipping weight is required")
+    @jakarta.validation.constraints.Min(value = 1, message = "Shipping weight must be at least 1 gram")
+    private Integer shippingWeight;
+
+    @NotNull(message = "Shipping length is required")
+    @jakarta.validation.constraints.Min(value = 1, message = "Shipping length must be at least 1 cm")
+    private Integer shippingLength;
+
+    @NotNull(message = "Shipping width is required")
+    @jakarta.validation.constraints.Min(value = 1, message = "Shipping width must be at least 1 cm")
+    private Integer shippingWidth;
+
+    @NotNull(message = "Shipping height is required")
+    @jakarta.validation.constraints.Min(value = 1, message = "Shipping height must be at least 1 cm")
+    private Integer shippingHeight;
 }

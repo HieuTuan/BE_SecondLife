@@ -9,4 +9,8 @@ public class UpdateDraftRequest {
     private String description;
     private String itemCondition;
     private BigDecimal price;
+    private Integer shippingWeight;
+    private Integer shippingLength;
+    private Integer shippingWidth;
+    private Integer shippingHeight;
 }
