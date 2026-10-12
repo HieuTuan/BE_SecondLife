@@ -29,7 +29,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/seller")
+@RequestMapping("/api/v1/seller")
 @RequiredArgsConstructor
 @Tag(name = "Seller Credits", description = "Credit pricing, balances, purchases, and ledger")
 public class SellerCreditController {

@@ -35,7 +35,7 @@ import java.util.List;
 import java.net.URI;
 
 @RestController
-@RequestMapping("/api/admin")
+@RequestMapping("/api/v1/admin")
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('ADMIN') and hasAuthority('ADMIN_RBAC_MANAGE')")
 @Tag(name = "Admin - Permissions", description = "Permission catalog CRUD, role permission matrix and change history")
@@ -60,7 +60,7 @@ public class AdminRbacController {
     public ResponseEntity<ApiResponse<PermissionResponse>> createPermission(
             @Valid @RequestBody CreatePermissionRequest request) {
         PermissionResponse response = rbacService.createPermission(request);
-        return ResponseEntity.created(URI.create("/api/admin/permissions/" + response.code()))
+        return ResponseEntity.created(URI.create("/api/v1/admin/permissions/" + response.code()))
                 .body(ApiResponse.success(response));
     }
 

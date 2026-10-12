@@ -62,16 +62,16 @@ class FlywayMigrationTest {
 
     @Test
     void appServesHealthAndOpenApiAfterFlywayMigration() throws Exception {
-        mockMvc.perform(get("/api/health"))
+        mockMvc.perform(get("/api/v1/health"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("UP"));
         mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.paths['/api/health'].get").exists())
-                .andExpect(jsonPath("$.paths['/api/admin/permissions'].post").exists())
-                .andExpect(jsonPath("$.paths['/api/admin/permissions/{permissionCode}'].get").exists())
-                .andExpect(jsonPath("$.paths['/api/admin/permissions/{permissionCode}'].put").exists())
-                .andExpect(jsonPath("$.paths['/api/admin/permissions/{permissionCode}'].delete").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/health'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/admin/permissions'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/admin/permissions/{permissionCode}'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/admin/permissions/{permissionCode}'].put").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/admin/permissions/{permissionCode}'].delete").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/admin/users/{userId}/roles'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/admin/users/{userId}/roles'].put").exists());
     }

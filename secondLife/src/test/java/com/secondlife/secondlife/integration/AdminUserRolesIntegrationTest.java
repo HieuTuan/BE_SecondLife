@@ -59,7 +59,7 @@ class AdminUserRolesIntegrationTest {
             mvc.perform(get(path).header("Authorization", bearer(unauthorized))).andExpect(status().isForbidden());
             mvc.perform(put(path).header("Authorization", bearer(unauthorized)).contentType(MediaType.APPLICATION_JSON)
                     .content(roleBody(Set.of("BUYER"), Set.of("ADMIN")))).andExpect(status().isForbidden());
-            mvc.perform(put("/api/admin/roles/STAFF/permissions").header("Authorization", bearer(unauthorized))
+            mvc.perform(put("/api/v1/admin/roles/STAFF/permissions").header("Authorization", bearer(unauthorized))
                     .contentType(MediaType.APPLICATION_JSON).content("{\"expectedPermissionCodes\":[],\"permissionCodes\":[]}"))
                     .andExpect(status().isForbidden());
         }
@@ -78,12 +78,12 @@ class AdminUserRolesIntegrationTest {
         mvc.perform(put(path).header("Authorization", adminBearer).contentType(MediaType.APPLICATION_JSON)
                         .content(roleBody(Set.of("BUYER"), Set.of("BUYER", "STAFF"))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.roleCodes.length()").value(2));
-        mvc.perform(get("/api/users/me").header("Authorization", oldBearer)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/users/me").header("Authorization", oldBearer)).andExpect(status().isUnauthorized());
         mvc.perform(post("/api/auth/refresh").contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(Map.of("refreshToken", refresh)))).andExpect(status().isUnauthorized());
         String newBearer = login(buyer);
         mvc.perform(get("/api/v1/admin/users").header("Authorization", newBearer)).andExpect(status().isOk());
-        mvc.perform(get("/api/users/me").header("Authorization", newBearer)).andExpect(status().isOk())
+        mvc.perform(get("/api/v1/users/me").header("Authorization", newBearer)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.permissions[?(@ == 'SELLER_VERIFICATION_SUBMIT')]").exists())
                 .andExpect(jsonPath("$.data.permissions[?(@ == 'USER_READ_ANY')]").exists());
         mvc.perform(put(path).header("Authorization", adminBearer).contentType(MediaType.APPLICATION_JSON)
@@ -135,7 +135,7 @@ class AdminUserRolesIntegrationTest {
         String auth = bearer(buyer);
         buyer.setAccountStatus(AccountStatus.PENDING_VERIFICATION);
         users.saveAndFlush(buyer);
-        mvc.perform(get("/api/users/me").header("Authorization", auth)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/users/me").header("Authorization", auth)).andExpect(status().isUnauthorized());
     }
 
     @Test void adminCanGrantAdminRoleAndOnlyNewlyAuthenticatedSessionCanUseIt() throws Exception {
@@ -144,8 +144,8 @@ class AdminUserRolesIntegrationTest {
         mvc.perform(put("/api/v1/admin/users/{id}/roles", buyer.getId()).header("Authorization", bearer(admin))
                 .contentType(MediaType.APPLICATION_JSON).content(roleBody(Set.of("BUYER"), Set.of("BUYER", "ADMIN"))))
                 .andExpect(status().isOk());
-        mvc.perform(get("/api/admin/permissions").header("Authorization", old)).andExpect(status().isUnauthorized());
-        mvc.perform(get("/api/admin/permissions").header("Authorization", login(buyer))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/admin/permissions").header("Authorization", old)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/admin/permissions").header("Authorization", login(buyer))).andExpect(status().isOk());
     }
 
     @Test void chatRejectsOtherUsersSessionAndForgedPostAssociationBeforeReadingHistoryOrCallingAi() throws Exception {

@@ -112,6 +112,22 @@ class SellerVerificationServiceTest {
     }
 
     @Test
+    void existingApplicationExplainsHowToReadResultAfterRetryWithoutCreatingDuplicate() {
+        when(userRepository.findByIdWithAuthorities(buyerId)).thenReturn(Optional.of(buyer));
+        when(sellerVerificationRepository.existsByUserIdAndStatusIn(eq(buyerId), anyCollection()))
+                .thenReturn(true);
+        var request = new SellerVerificationRequest(VerificationType.CITIZEN_ID,
+                "012345678901", "http://f", "http://b");
+
+        var error = assertThrows(ConflictException.class,
+                () -> service.submitVerification(buyerId, request));
+
+        assertEquals("Bạn đã có hồ sơ xác thực người bán đang được xử lý. Retry xử lý lại hồ sơ cũ, không tạo hồ sơ mới. Gọi GET /api/v1/seller-verifications/me để xem trạng thái hiện tại.", error.getMessage());
+        verify(sellerVerificationRepository, never()).save(any());
+        verifyNoInteractions(ekycService);
+    }
+
+    @Test
     void missingShopInformationMustBlockEkycBeforeSavingApplication() {
         doThrow(new ConflictException("Complete shop information first")).when(onboarding).requireCompleted(buyerId);
         when(userRepository.findByIdWithAuthorities(buyerId)).thenReturn(Optional.of(buyer));

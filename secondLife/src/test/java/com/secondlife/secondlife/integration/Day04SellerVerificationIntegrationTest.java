@@ -96,21 +96,21 @@ class Day04SellerVerificationIntegrationTest {
                         .param("categoryId", UUID.randomUUID().toString()))
                 .andExpect(status().isForbidden());
 
-        mockMvc.perform(post("/api/seller-verifications")
+        mockMvc.perform(post("/api/v1/seller-verifications")
                         .header("Authorization", bearer(buyerToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(verificationJson("012345678901")))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.status").value("APPROVED"))
                 .andExpect(jsonPath("$.data.documentNumber").value("********8901"));
-        mockMvc.perform(get("/api/users/me").header("Authorization", bearer(buyerToken)))
+        mockMvc.perform(get("/api/v1/users/me").header("Authorization", bearer(buyerToken)))
                 .andExpect(status().isUnauthorized());
         UUID sellerId = userRepository.findByEmailIgnoreCase(email).orElseThrow().getId();
         assertNull(sellerVerificationRepository.findTopByUserIdOrderBySubmittedAtDesc(sellerId)
                 .orElseThrow().getDocumentNumber());
 
         String sellerToken = field(login(email), "accessToken");
-        mockMvc.perform(get("/api/users/me").header("Authorization", bearer(sellerToken)))
+        mockMvc.perform(get("/api/v1/users/me").header("Authorization", bearer(sellerToken)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.roles", hasItem("BUYER")))
                 .andExpect(jsonPath("$.data.roles", hasItem("SELLER")));
@@ -129,7 +129,7 @@ class Day04SellerVerificationIntegrationTest {
     void onlyAdminCanDecideReviewAndDecisionIsAudited() throws Exception {
         String email = randomEmail("review");
         String buyerToken = field(register(email), "accessToken");
-        String body = mockMvc.perform(post("/api/seller-verifications")
+        String body = mockMvc.perform(post("/api/v1/seller-verifications")
                         .header("Authorization", bearer(buyerToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(verificationJson("012345678803")))
@@ -142,30 +142,30 @@ class Day04SellerVerificationIntegrationTest {
 
         String staffToken = tokenForRole("STAFF");
         String adminToken = tokenForRole("ADMIN");
-        mockMvc.perform(get("/api/staff/seller-verifications/" + id)
+        mockMvc.perform(get("/api/v1/staff/seller-verifications/" + id)
                         .header("Authorization", bearer(staffToken)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.eventHistory").isArray());
-        mockMvc.perform(post("/api/admin/seller-verifications/" + id + "/approve")
+        mockMvc.perform(post("/api/v1/admin/seller-verifications/" + id + "/approve")
                         .header("Authorization", bearer(staffToken)))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/admin/seller-verifications/" + id + "/approve")
+        mockMvc.perform(post("/api/v1/admin/seller-verifications/" + id + "/approve")
                         .header("Authorization", bearer(buyerToken)))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(get("/api/users/me").header("Authorization", bearer(staffToken)))
+        mockMvc.perform(get("/api/v1/users/me").header("Authorization", bearer(staffToken)))
                 .andExpect(jsonPath("$.data.permissions", not(hasItem("ADMIN_PERMANENT_BAN"))));
-        mockMvc.perform(get("/api/users/me").header("Authorization", bearer(adminToken)))
+        mockMvc.perform(get("/api/v1/users/me").header("Authorization", bearer(adminToken)))
                 .andExpect(jsonPath("$.data.permissions", hasItem("ADMIN_PERMANENT_BAN")));
 
-        mockMvc.perform(post("/api/admin/seller-verifications/" + id + "/approve")
+        mockMvc.perform(post("/api/v1/admin/seller-verifications/" + id + "/approve")
                         .header("Authorization", bearer(adminToken)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("APPROVED"));
-        mockMvc.perform(get("/api/admin/seller-verifications/" + id)
+        mockMvc.perform(get("/api/v1/admin/seller-verifications/" + id)
                         .header("Authorization", bearer(adminToken)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.eventHistory[*].eventType", hasItem("ADMIN_APPROVED")));
-        mockMvc.perform(post("/api/admin/seller-verifications/" + id + "/approve")
+        mockMvc.perform(post("/api/v1/admin/seller-verifications/" + id + "/approve")
                         .header("Authorization", bearer(adminToken)))
                 .andExpect(status().isConflict());
         User approved = userRepository.findByIdWithAuthorities(buyerId).orElseThrow();
@@ -181,7 +181,7 @@ class Day04SellerVerificationIntegrationTest {
         String email = randomEmail("banned");
         String buyerToken = field(register(email), "accessToken");
 
-        mockMvc.perform(post("/api/seller-verifications")
+        mockMvc.perform(post("/api/v1/seller-verifications")
                         .header("Authorization", bearer(buyerToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(verificationJson("0123-4567 8911")))
@@ -201,7 +201,7 @@ class Day04SellerVerificationIntegrationTest {
         String document = "012345678912";
         IdentityRestriction restriction = restrict(document, "MANUAL_REVIEW_REQUIRED");
         String buyerToken = field(register(randomEmail("restricted")), "accessToken");
-        String body = mockMvc.perform(post("/api/seller-verifications")
+        String body = mockMvc.perform(post("/api/v1/seller-verifications")
                         .header("Authorization", bearer(buyerToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(verificationJson(document)))
@@ -212,12 +212,12 @@ class Day04SellerVerificationIntegrationTest {
         String id = field(body, "id");
         String adminToken = tokenForRole("ADMIN");
 
-        mockMvc.perform(post("/api/admin/seller-verifications/" + id + "/approve")
+        mockMvc.perform(post("/api/v1/admin/seller-verifications/" + id + "/approve")
                         .header("Authorization", bearer(adminToken)))
                 .andExpect(status().isConflict());
         restriction.setRevokedAt(Instant.now());
         restrictionRepository.saveAndFlush(restriction);
-        mockMvc.perform(post("/api/admin/seller-verifications/" + id + "/approve")
+        mockMvc.perform(post("/api/v1/admin/seller-verifications/" + id + "/approve")
                         .header("Authorization", bearer(adminToken)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("APPROVED"));
@@ -227,7 +227,7 @@ class Day04SellerVerificationIntegrationTest {
     void providerFailureRemainsPendingAcrossAdminRetry() throws Exception {
         String email = randomEmail("provider");
         String buyerToken = field(register(email), "accessToken");
-        String body = mockMvc.perform(post("/api/seller-verifications")
+        String body = mockMvc.perform(post("/api/v1/seller-verifications")
                         .header("Authorization", bearer(buyerToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(verificationJson("012345677702")))
@@ -250,12 +250,12 @@ class Day04SellerVerificationIntegrationTest {
         assertTrue(retried.getNextRetryAt().isAfter(Instant.now()));
         String adminToken = tokenForRole("ADMIN");
 
-        mockMvc.perform(post("/api/admin/seller-verifications/" + id + "/retry-ekyc")
+        mockMvc.perform(post("/api/v1/admin/seller-verifications/" + id + "/retry-ekyc")
                         .header("Authorization", bearer(adminToken)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("EKYC_PENDING"))
                 .andExpect(jsonPath("$.data.ekycStatus").value("PROVIDER_ERROR"));
-        mockMvc.perform(get("/api/admin/seller-verifications/" + id)
+        mockMvc.perform(get("/api/v1/admin/seller-verifications/" + id)
                         .header("Authorization", bearer(adminToken)))
                 .andExpect(jsonPath("$.data.eventHistory[*].eventType", hasItem("EKYC_RETRY_REQUESTED")));
     }
@@ -265,7 +265,7 @@ class Day04SellerVerificationIntegrationTest {
         String applicantEmail = randomEmail("resubmit");
         String applicantToken = field(register(applicantEmail), "accessToken");
         String otherToken = field(register(randomEmail("other")), "accessToken");
-        String body = mockMvc.perform(post("/api/seller-verifications")
+        String body = mockMvc.perform(post("/api/v1/seller-verifications")
                         .header("Authorization", bearer(applicantToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(verificationJson("012345678801")))
@@ -279,11 +279,11 @@ class Day04SellerVerificationIntegrationTest {
                  "selfieUrl":"https://example.test/new-selfie.jpg"}
                 """;
 
-        mockMvc.perform(post("/api/seller-verifications/" + id + "/resubmit")
+        mockMvc.perform(post("/api/v1/seller-verifications/" + id + "/resubmit")
                         .header("Authorization", bearer(otherToken))
                         .contentType(MediaType.APPLICATION_JSON).content(newImages))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/seller-verifications/" + id + "/resubmit")
+        mockMvc.perform(post("/api/v1/seller-verifications/" + id + "/resubmit")
                         .header("Authorization", bearer(applicantToken))
                         .contentType(MediaType.APPLICATION_JSON).content(newImages))
                 .andExpect(status().isOk())
@@ -295,7 +295,7 @@ class Day04SellerVerificationIntegrationTest {
     void adminRejectionIsAuditedAndDoesNotGrantSeller() throws Exception {
         String email = randomEmail("rejected");
         String buyerToken = field(register(email), "accessToken");
-        String body = mockMvc.perform(post("/api/seller-verifications")
+        String body = mockMvc.perform(post("/api/v1/seller-verifications")
                         .header("Authorization", bearer(buyerToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(verificationJson("012345678804")))
@@ -305,14 +305,14 @@ class Day04SellerVerificationIntegrationTest {
         String id = field(body, "id");
         String adminToken = tokenForRole("ADMIN");
 
-        mockMvc.perform(post("/api/admin/seller-verifications/" + id + "/reject")
+        mockMvc.perform(post("/api/v1/admin/seller-verifications/" + id + "/reject")
                         .header("Authorization", bearer(adminToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"rejectionReason\":\"Identity evidence is inconsistent\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("REJECTED"))
                 .andExpect(jsonPath("$.data.reviewSource").value("ADMIN"));
-        mockMvc.perform(get("/api/admin/seller-verifications/" + id)
+        mockMvc.perform(get("/api/v1/admin/seller-verifications/" + id)
                         .header("Authorization", bearer(adminToken)))
                 .andExpect(jsonPath("$.data.eventHistory[*].eventType", hasItem("ADMIN_REJECTED")));
         UUID buyerId = userRepository.findByEmailIgnoreCase(email).orElseThrow().getId();

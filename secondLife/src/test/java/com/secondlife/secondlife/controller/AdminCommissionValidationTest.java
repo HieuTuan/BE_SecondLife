@@ -23,7 +23,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class AdminCommissionValidationTest {
-    private static final String BASE = "/api/admin/commission-rules";
+    private static final String BASE = "/api/v1/admin/commission-rules";
     private static final UUID ID = UUID.randomUUID();
     private final CommissionService service = mock(CommissionService.class);
     private final SettlementService settlements = mock(SettlementService.class);
@@ -74,7 +74,7 @@ class AdminCommissionValidationTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"/api/admin/commission-rules/{id}/deactivate", "/api/admin/orders/{id}/commission-snapshot"})
+    @CsvSource({"/api/v1/admin/commission-rules/{id}/deactivate", "/api/v1/admin/orders/{id}/commission-snapshot"})
     void reasonEndpointsRejectWrongTypeAndUnknownFields(String path) throws Exception {
         for (String body : new String[]{"{\"reason\":123}", "{\"reason\":\" \"}",
                 "{\"reason\":\"Audit reason\",\"unexpected\":true}"}) {

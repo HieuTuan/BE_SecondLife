@@ -204,17 +204,17 @@ public class PostServiceImpl implements PostService {
                 .orElseGet(() -> {
                     // Generate new template
                     String promptText = String.format(
-                            "Báº¡n lÃ  chuyÃªn gia vá» Ä‘á»“ cÅ©. HÃ£y táº¡o má»™t Ä‘oáº¡n máº«u cÃ¢u há»i (template) báº±ng tiáº¿ng Viá»‡t Ä‘á»ƒ há»i ngÆ°á»i dÃ¹ng cÃ¡c thÃ´ng tin cáº§n thiáº¿t khi há» muá»‘n Ä‘Äƒng bÃ¡n má»™t sáº£n pháº©m thuá»™c danh má»¥c '%s', loáº¡i sáº£n pháº©m '%s'. \n" +
+                            "Bạn là chuyên gia về đồ cũ. Hãy tạo một đoạn mẫu câu hỏi (template) bằng tiếng Việt để hỏi người dùng các thông tin cần thiết khi họ muốn đăng bán một sản phẩm thuộc danh mục '%s', loại sản phẩm '%s'. \n" +
                                     "\n" +
-                                    "YÃŠU Cáº¦U Äá»ŠNH Dáº NG Báº®T BUá»˜C:\n" +
-                                    "Má»—i cÃ¢u há»i pháº£i theo ÄÃšNG Ä‘á»‹nh dáº¡ng sau, trÃªn tá»«ng dÃ²ng riÃªng biá»‡t:\n" +
-                                    "**[TÃªn thÃ´ng tin cáº§n há»i]** (VÃ­ dá»¥: gá»£i Ã½ 1, gá»£i Ã½ 2, gá»£i Ã½ 3)\n" +
+                                    "YÊU CẦU ĐỊNH DẠNG BẮT BUỘC:\n" +
+                                    "Mỗi câu hỏi phải theo ĐÚNG định dạng sau, trên từng dòng riêng biệt:\n" +
+                                    "**[Tên thông tin cần hỏi]** (Ví dụ: gợi ý 1, gợi ý 2, gợi ý 3)\n" +
                                     "\n" +
-                                    "LÆ°u Ã½:\n" +
-                                    "- Báº¯t buá»™c pháº£i cÃ³ tá»« 'VÃ­ dá»¥:' trong ngoáº·c Ä‘Æ¡n, cÃ¡c gá»£i Ã½ tráº£ lá»i (quick replies) ngÄƒn cÃ¡ch nhau báº±ng dáº¥u pháº©y.\n" +
-                                    "- ÄÆ°a ra 3-5 cÃ¢u há»i quan trá»ng nháº¥t vá» tÃ¬nh tráº¡ng sáº£n pháº©m.\n" +
-                                    "- KHÃ”NG ÄÆ¯á»¢C Há»ŽI vá» thÆ°Æ¡ng hiá»‡u, hÃ£ng sáº£n xuáº¥t hay tÃªn sáº£n pháº©m vÃ¬ ngÆ°á»i dÃ¹ng Ä‘Ã£ chá»n hoáº·c cung cáº¥p thÃ´ng tin nÃ y rá»“i.\n" +
-                                    "- KhÃ´ng viáº¿t thÃªm cÃ¢u dáº«n dáº¯t hay káº¿t luáº­n. Chá»‰ tráº£ vá» danh sÃ¡ch cÃ¢u há»i.",
+                                    "Lưu ý:\n" +
+                                    "- Bắt buộc phải có từ 'Ví dụ:' trong ngoặc đơn, các gợi ý trả lời (quick replies) ngăn cách nhau bằng dấu phẩy.\n" +
+                                    "- Đưa ra 3-5 câu hỏi quan trọng nhất về tình trạng sản phẩm.\n" +
+                                    "- KHÔNG ĐƯỢC HỎI về thương hiệu, hãng sản xuất hay tên sản phẩm vì người dùng đã chọn hoặc cung cấp thông tin này rồi.\n" +
+                                    "- Không viết thêm câu dẫn dắt hay kết luận. Chỉ trả về danh sách câu hỏi.",
                             categoryName, itemName);
 
                     String generatedTemplate = chatClient.prompt(promptText).call().content();
@@ -237,8 +237,8 @@ public class PostServiceImpl implements PostService {
         postRepository.save(post);
 
         String combinedResponse;
-        if (aiResponse.getReply().contains("[Cáº¢NH BÃO]")) {
-            combinedResponse = aiResponse.getReply() + "\n\n*(Há»‡ thá»‘ng Ä‘Ã£ táº¡m dá»«ng Ä‘Æ°a ra cÃ¢u há»i gá»£i Ã½ vÃ¬ hÃ¬nh áº£nh khÃ´ng khá»›p. Vui lÃ²ng kiá»ƒm tra láº¡i hÃ¬nh áº£nh hoáº·c danh má»¥c báº¡n Ä‘Ã£ chá»n!)*";
+        if (aiResponse.getReply().contains("[CẢNH BÁO]")) {
+            combinedResponse = aiResponse.getReply() + "\n\n*(Hệ thống đã tạm dừng đưa ra câu hỏi gợi ý vì hình ảnh không khớp. Vui lòng kiểm tra lại hình ảnh hoặc danh mục bạn đã chọn!)*";
         } else {
             combinedResponse = aiResponse.getReply() + "\n\n" + templateText;
         }
@@ -543,7 +543,7 @@ public class PostServiceImpl implements PostService {
         BigDecimal fairPriceMin = BigDecimal.ZERO;
         BigDecimal fairPriceMax = BigDecimal.ZERO;
         BigDecimal suggestedPrice = BigDecimal.ZERO;
-        String expectedSellTime = "3-5 ngÃ y";
+        String expectedSellTime = "3-5 ngày";
 
         try {
             // Extract JSON from the AI response

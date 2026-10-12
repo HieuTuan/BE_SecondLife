@@ -95,7 +95,7 @@ class AuthRbacIntegrationTest {
         String loginAccessToken = field(loginBody, "accessToken");
         String oldRefreshToken = field(loginBody, "refreshToken");
 
-        mockMvc.perform(get("/api/users/me").header("Authorization", "Bearer " + loginAccessToken))
+        mockMvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + loginAccessToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.email").value(email));
 
@@ -190,7 +190,7 @@ class AuthRbacIntegrationTest {
     @Test
     void disabledAccountCannotUseExistingAccessToken() throws Exception {
         User disabled = saveUser("disabled", "BUYER", AccountStatus.DISABLED);
-        mockMvc.perform(get("/api/users/me").header("Authorization", bearer(disabled)))
+        mockMvc.perform(get("/api/v1/users/me").header("Authorization", bearer(disabled)))
                 .andExpect(status().isUnauthorized());
     }
 

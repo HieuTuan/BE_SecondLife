@@ -57,18 +57,18 @@ public class SecurityConfig {
                                 "/webjars/**"
                         ).permitAll()
                         .requestMatchers("/api/auth/change-password").authenticated()
-                        .requestMatchers("/api/payment-callbacks/mock").permitAll()
+                        .requestMatchers("/api/v1/payment-callbacks/mock").permitAll()
                         // Public auth endpoints
                         .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/api/health").permitAll()
+                        .requestMatchers("/api/v1/health").permitAll()
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/v1/webhooks/sepay").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.POST,"/api/v1/shipping/callback").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/posts").permitAll()
                         .requestMatchers("/error").permitAll()
                         // Administrative role assignment is also guarded at the filter boundary.
-                        .requestMatchers("/api/admin/permissions", "/api/admin/permissions/**",
-                                "/api/admin/roles", "/api/admin/roles/**",
+                        .requestMatchers("/api/v1/admin/permissions", "/api/v1/admin/permissions/**",
+                                "/api/v1/admin/roles", "/api/v1/admin/roles/**",
                                 "/api/v1/admin/users/*/roles", "/api/v1/admin/users/*/role-changes")
                         .access(AuthorizationManagers.allOf(
                                 AuthorityAuthorizationManager.hasRole("ADMIN"),

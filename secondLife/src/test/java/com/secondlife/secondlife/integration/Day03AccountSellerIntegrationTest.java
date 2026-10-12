@@ -76,16 +76,16 @@ class Day03AccountSellerIntegrationTest {
         String firstToken = field(register(firstEmail), "accessToken");
         String secondToken = field(register(secondEmail), "accessToken");
 
-        mockMvc.perform(get("/api/users/me"))
+        mockMvc.perform(get("/api/v1/users/me"))
                 .andExpect(status().isUnauthorized());
-        mockMvc.perform(patch("/api/users/me")
+        mockMvc.perform(patch("/api/v1/users/me")
                         .header("Authorization", bearer(firstToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"fullName\":\"Owner Updated\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.email").value(firstEmail))
                 .andExpect(jsonPath("$.data.fullName").value("Owner Updated"));
-        mockMvc.perform(get("/api/users/me").header("Authorization", bearer(secondToken)))
+        mockMvc.perform(get("/api/v1/users/me").header("Authorization", bearer(secondToken)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.email").value(secondEmail))
                 .andExpect(jsonPath("$.data.fullName").value("Day Three Buyer"));
@@ -124,7 +124,7 @@ class Day03AccountSellerIntegrationTest {
         mockMvc.perform(post("/api/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON).content(refreshJson(initialRefresh)))
                 .andExpect(status().isUnauthorized());
-        mockMvc.perform(get("/api/users/me")
+        mockMvc.perform(get("/api/v1/users/me")
                         .header("Authorization", bearer(field(registration, "accessToken"))))
                 .andExpect(status().isUnauthorized());
 
@@ -145,7 +145,7 @@ class Day03AccountSellerIntegrationTest {
         mockMvc.perform(post("/api/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON).content(refreshJson(refreshToken)))
                 .andExpect(status().isUnauthorized());
-        mockMvc.perform(get("/api/users/me").header("Authorization", bearer(accessToken)))
+        mockMvc.perform(get("/api/v1/users/me").header("Authorization", bearer(accessToken)))
                 .andExpect(status().isUnauthorized());
         login(email, "Changed@12345");
     }
@@ -164,16 +164,16 @@ class Day03AccountSellerIntegrationTest {
         String applicantToken = field(register(applicantEmail), "accessToken");
         String otherToken = field(register(randomEmail("other")), "accessToken");
 
-        mockMvc.perform(post("/api/seller-verifications")
+        mockMvc.perform(post("/api/v1/seller-verifications")
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isUnauthorized());
-        mockMvc.perform(get("/api/seller-verifications/me").header("Authorization", bearer(otherToken)))
+        mockMvc.perform(get("/api/v1/seller-verifications/me").header("Authorization", bearer(otherToken)))
                 .andExpect(status().isNotFound());
-        mockMvc.perform(post("/api/seller-verifications")
+        mockMvc.perform(post("/api/v1/seller-verifications")
                         .header("Authorization", bearer(applicantToken))
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest());
-        mockMvc.perform(post("/api/seller-verifications")
+        mockMvc.perform(post("/api/v1/seller-verifications")
                         .header("Authorization", bearer(applicantToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -185,10 +185,10 @@ class Day03AccountSellerIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.status").value("EKYC_PENDING"))
                 .andExpect(jsonPath("$.data.ekycStatus").value("PROVIDER_ERROR"));
-        mockMvc.perform(get("/api/seller-verifications/me").header("Authorization", bearer(applicantToken)))
+        mockMvc.perform(get("/api/v1/seller-verifications/me").header("Authorization", bearer(applicantToken)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("EKYC_PENDING"));
-        mockMvc.perform(get("/api/seller-verifications/me").header("Authorization", bearer(otherToken)))
+        mockMvc.perform(get("/api/v1/seller-verifications/me").header("Authorization", bearer(otherToken)))
                 .andExpect(status().isNotFound());
         UUID applicantId = userRepository.findByEmailIgnoreCase(applicantEmail).orElseThrow().getId();
         assertFalse(userRepository.findByIdWithAuthorities(applicantId).orElseThrow().hasRole("SELLER"));
@@ -204,7 +204,7 @@ class Day03AccountSellerIntegrationTest {
 
         roleAssignmentService.grantRole(userId, RoleCode.INSPECTOR);
         roleAssignmentService.grantRole(userId, RoleCode.INSPECTOR);
-        mockMvc.perform(get("/api/users/me").header("Authorization", bearer(accessToken)))
+        mockMvc.perform(get("/api/v1/users/me").header("Authorization", bearer(accessToken)))
                 .andExpect(status().isUnauthorized());
         assertTrue(userRepository.findByIdWithAuthorities(userId).orElseThrow().hasRole("INSPECTOR"));
         mockMvc.perform(post("/api/auth/refresh")

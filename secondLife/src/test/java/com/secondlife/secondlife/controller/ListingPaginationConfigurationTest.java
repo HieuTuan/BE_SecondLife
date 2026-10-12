@@ -50,7 +50,7 @@ class ListingPaginationConfigurationTest {
     void staffQueueUsesConfiguredPaginationDefaults() {
         when(reviews.queue(any())).thenAnswer(invocation -> new PageImpl<>(List.of(), invocation.getArgument(0), 20));
         controllers().run(context -> mockMvc(context.getBean(StaffListingController.class), context)
-                .perform(get("/api/staff/listings"))
+                .perform(get("/api/v1/staff/listings"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.number").value(2))
                 .andExpect(jsonPath("$.data.size").value(3)));

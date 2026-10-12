@@ -185,7 +185,7 @@ class GhnShippingIntegrationTest {
                 .header("Authorization", bearer(f.buyer()))).andExpect(status().isOk()).andReturn()).get("data");
         assertMoney(new BigDecimal("50000"), snapshot.get("platformCommission").decimalValue());
         assertMoney(new BigDecimal("950000"), snapshot.get("sellerPayout").decimalValue());
-        mvc.perform(put("/api/admin/commission-rules/" + rule.get("id").asText())
+        mvc.perform(put("/api/v1/admin/commission-rules/" + rule.get("id").asText())
                 .header("Authorization", bearer(admin)).contentType(MediaType.APPLICATION_JSON)
                 .content(body(ruleBody("0.10", "0", null))))
                 .andExpect(status().isOk());
@@ -214,7 +214,7 @@ class GhnShippingIntegrationTest {
         payload.put("name", "Default commission with limits"); payload.put("rate", new BigDecimal("0.01"));
         payload.put("minCommission", new BigDecimal("20000")); payload.put("maxCommission", new BigDecimal("30000"));
         payload.put("active", true); payload.put("reason", "Configure one default policy");
-        var rule = tree(mvc.perform(post("/api/admin/commission-rules").header("Authorization", bearer(admin))
+        var rule = tree(mvc.perform(post("/api/v1/admin/commission-rules").header("Authorization", bearer(admin))
                 .contentType(MediaType.APPLICATION_JSON).content(body(payload)))
                 .andExpect(status().isCreated()).andReturn()).get("data");
         UUID category = UUID.randomUUID();
@@ -245,7 +245,7 @@ class GhnShippingIntegrationTest {
     @Test void defaultCommissionRejectsInvalidLimitsScopeFieldsAndUnauthorizedWritesAndKeepsAudit() throws Exception {
         var admin = user("ADMIN", BigDecimal.ZERO);
         var rule = commissionRule(admin, "0.05", "0", null);
-        var url = "/api/admin/commission-rules";
+        var url = "/api/v1/admin/commission-rules";
         for (var actor : List.of(user("BUYER", FUNDS), user("SELLER", BigDecimal.ZERO), user("STAFF", BigDecimal.ZERO))) {
             mvc.perform(post(url).header("Authorization", bearer(actor)).contentType(MediaType.APPLICATION_JSON)
                     .content(body(ruleBody("0.05", "0", null)))).andExpect(status().isForbidden());
@@ -374,7 +374,7 @@ class GhnShippingIntegrationTest {
     }
 
     private JsonNode commissionRule(User admin, String rate, String min, String max) throws Exception {
-        return tree(mvc.perform(post("/api/admin/commission-rules").header("Authorization", bearer(admin))
+        return tree(mvc.perform(post("/api/v1/admin/commission-rules").header("Authorization", bearer(admin))
                 .contentType(MediaType.APPLICATION_JSON).content(body(ruleBody(rate, min, max))))
                 .andExpect(status().isCreated()).andReturn()).get("data");
     }
@@ -884,7 +884,7 @@ class GhnShippingIntegrationTest {
                 .andExpect(status().isOk()).andReturn()).get("data");
         assertEquals(shipmentId.toString(), replayed.get("shipmentId").asText());
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM shipments WHERE order_id = ?", Integer.class, orderId));
-        mvc.perform(post("/api/admin/orders/" + orderId + "/commission-snapshot")
+        mvc.perform(post("/api/v1/admin/orders/" + orderId + "/commission-snapshot")
                         .header("Authorization", bearer(user("ADMIN", BigDecimal.ZERO)))
                         .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("reason", "Explicitly bind legacy delivery to configured policy"))))
                 .andExpect(status().isOk());

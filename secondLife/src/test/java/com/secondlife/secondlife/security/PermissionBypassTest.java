@@ -73,25 +73,25 @@ class PermissionBypassTest {
     @Test
     @WithMockUser(roles = "BUYER")
     void rbacCrudRemainsAdminOnlyWhenMethodPermissionsAreDisabled() throws Exception {
-        mockMvc.perform(get("/api/admin/permissions")).andExpect(status().isForbidden());
-        mockMvc.perform(get("/api/admin/roles")).andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/admin/permissions")).andExpect(status().isForbidden());
-        mockMvc.perform(put("/api/admin/permissions/REPORT_EXPORT")).andExpect(status().isForbidden());
-        mockMvc.perform(delete("/api/admin/permissions/REPORT_EXPORT")).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/admin/permissions")).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/admin/roles")).andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/admin/permissions")).andExpect(status().isForbidden());
+        mockMvc.perform(put("/api/v1/admin/permissions/REPORT_EXPORT")).andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/v1/admin/permissions/REPORT_EXPORT")).andExpect(status().isForbidden());
         verifyNoInteractions(rbacService);
     }
 
     @Test
     @WithMockUser(roles = "ADMIN")
     void rbacManagementStillRequiresPermissionWhenMethodPermissionsAreDisabled() throws Exception {
-        mockMvc.perform(get("/api/admin/permissions")).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/admin/permissions")).andExpect(status().isForbidden());
         verifyNoInteractions(rbacService);
     }
 
     @Test
     @WithMockUser(authorities = {"ROLE_ADMIN", "ADMIN_RBAC_MANAGE"})
     void authorizedAdminCanReadCatalogWhenMethodPermissionsAreDisabled() throws Exception {
-        mockMvc.perform(get("/api/admin/permissions")).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/admin/permissions")).andExpect(status().isOk());
         verify(rbacService).getPermissions();
     }
 }
