@@ -86,7 +86,7 @@ class SellerOnboardingIntegrationTest {
 
     @Test void informationAndEmailAreRequiredForBothEkycEntryPoints() throws Exception {
         User buyer = buyer();
-        mvc.perform(get("/api/seller-onboarding/me").header("Authorization", bearer(buyer)))
+        mvc.perform(get("/api/v1/seller-onboarding/me").header("Authorization", bearer(buyer)))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.canStartEkyc").value(false));
         assertEkycBlocked(buyer);
         save(buyer, "Shop A", "shop@example.test");
@@ -116,7 +116,7 @@ class SellerOnboardingIntegrationTest {
         when(ekyc.verifyIdentity(any())).thenReturn(EkycResult.providerError(ReasonCode.PROVIDER_UNAVAILABLE, "TEST", null, "Test provider unavailable"));
         mvc.perform(applicationRequest(buyer)).andExpect(status().isCreated());
         verify(ekyc).verifyIdentity(any());
-        mvc.perform(put("/api/seller-onboarding/me").header("Authorization", bearer(buyer))
+        mvc.perform(put("/api/v1/seller-onboarding/me").header("Authorization", bearer(buyer))
                 .contentType(MediaType.APPLICATION_JSON).content(profile("Changed shop", "shop@example.test")))
                 .andExpect(status().isConflict());
     }
@@ -148,7 +148,7 @@ class SellerOnboardingIntegrationTest {
         mvc.perform(verifyRequest(buyer, otp)).andExpect(status().isConflict());
         save(buyer, "Shop B", "new@example.test");
         mvc.perform(verifyRequest(buyer, otp)).andExpect(status().isBadRequest());
-        mvc.perform(post("/api/seller-onboarding/email/send-code").header("Authorization", bearer(buyer)))
+        mvc.perform(post("/api/v1/seller-onboarding/email/send-code").header("Authorization", bearer(buyer)))
                 .andExpect(status().isConflict());
         assertEkycBlocked(buyer);
     }
@@ -156,7 +156,7 @@ class SellerOnboardingIntegrationTest {
     @Test void resendReplacesOldCodeAndUsesSavedEmail() throws Exception {
         User buyer = buyer(); save(buyer, "Shop A", "shop@example.test"); sendCode(buyer);
         String oldHash = onboarding.findById(buyer.getId()).orElseThrow().getEmailOtpHash();
-        mvc.perform(post("/api/seller-onboarding/email/send-code").header("Authorization", bearer(buyer)))
+        mvc.perform(post("/api/v1/seller-onboarding/email/send-code").header("Authorization", bearer(buyer)))
                 .andExpect(status().isConflict());
         jdbc.update("update seller_onboarding set email_otp_sent_at = now() - interval '61 seconds' where user_id = ?", buyer.getId());
         String fresh = sendCode(buyer);
@@ -168,7 +168,7 @@ class SellerOnboardingIntegrationTest {
     @Test void smtpFailureReturns502AndRollsBackCodeWithoutLeakingProviderError() throws Exception {
         User buyer = buyer(); save(buyer, "Shop A", "shop@example.test");
         doThrow(new MailSendException("private-smtp-error")).when(mail).send(any(SimpleMailMessage.class));
-        mvc.perform(post("/api/seller-onboarding/email/send-code").header("Authorization", bearer(buyer)))
+        mvc.perform(post("/api/v1/seller-onboarding/email/send-code").header("Authorization", bearer(buyer)))
                 .andExpect(status().isBadGateway()).andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("private-smtp-error"))));
         var row = onboarding.findById(buyer.getId()).orElseThrow();
         assertNull(row.getEmailOtpHash());
@@ -177,29 +177,29 @@ class SellerOnboardingIntegrationTest {
     }
 
     @Test void validatesInformationAndRequiresAuthenticationAndBuyerPermission() throws Exception {
-        mvc.perform(get("/api/seller-onboarding/me")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/seller-onboarding/me")).andExpect(status().isUnauthorized());
         User buyer = buyer();
-        mvc.perform(put("/api/seller-onboarding/me").header("Authorization", bearer(buyer))
+        mvc.perform(put("/api/v1/seller-onboarding/me").header("Authorization", bearer(buyer))
                 .contentType(MediaType.APPLICATION_JSON).content(profile("a".repeat(31), "shop@example.test")))
                 .andExpect(status().isBadRequest());
-        mvc.perform(put("/api/seller-onboarding/me").header("Authorization", bearer(buyer))
+        mvc.perform(put("/api/v1/seller-onboarding/me").header("Authorization", bearer(buyer))
                 .contentType(MediaType.APPLICATION_JSON).content(profile("Shop A", "invalid-email")))
                 .andExpect(status().isBadRequest());
         User staff = user("STAFF");
-        mvc.perform(put("/api/seller-onboarding/me").header("Authorization", bearer(staff))
+        mvc.perform(put("/api/v1/seller-onboarding/me").header("Authorization", bearer(staff))
                 .contentType(MediaType.APPLICATION_JSON).content(profile("Shop A", "shop@example.test")))
                 .andExpect(status().isForbidden());
     }
 
     @Test void rejectsWrongWardAndDoesNotSaveInformationWhenGhnIsUnavailable() throws Exception {
         User buyer = buyer();
-        mvc.perform(put("/api/seller-onboarding/me").header("Authorization", bearer(buyer))
+        mvc.perform(put("/api/v1/seller-onboarding/me").header("Authorization", bearer(buyer))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(profile("Shop A", "shop@example.test").replace("1003646", "9999999")))
                 .andExpect(status().isBadRequest());
         assertTrue(onboarding.findById(buyer.getId()).isEmpty());
         when(carrier.provinces()).thenThrow(new ShippingProviderException("GHN is unavailable"));
-        mvc.perform(put("/api/seller-onboarding/me").header("Authorization", bearer(buyer))
+        mvc.perform(put("/api/v1/seller-onboarding/me").header("Authorization", bearer(buyer))
                 .contentType(MediaType.APPLICATION_JSON).content(profile("Shop A", "shop@example.test")))
                 .andExpect(status().isBadGateway());
         assertTrue(onboarding.findById(buyer.getId()).isEmpty());
@@ -245,7 +245,7 @@ class SellerOnboardingIntegrationTest {
         mvc.perform(directRequest().header("Authorization", bearer(buyer))).andExpect(status().isConflict());
     }
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder applicationRequest(User buyer) {
-        return post("/api/seller-verifications").header("Authorization", bearer(buyer)).contentType(MediaType.APPLICATION_JSON)
+        return post("/api/v1/seller-verifications").header("Authorization", bearer(buyer)).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"verificationType\":\"CITIZEN_ID\",\"documentNumber\":\"012345678901\",\"documentFrontUrl\":\"https://example.test/f.jpg\",\"documentBackUrl\":\"https://example.test/b.jpg\"}");
     }
     private org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder directRequest() {
@@ -256,16 +256,16 @@ class SellerOnboardingIntegrationTest {
                 .param("clientSession", "test-session").param("token", "test-request");
     }
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder verifyRequest(User user, String otp) {
-        return post("/api/seller-onboarding/email/verify").header("Authorization", bearer(user))
+        return post("/api/v1/seller-onboarding/email/verify").header("Authorization", bearer(user))
                 .contentType(MediaType.APPLICATION_JSON).content("{\"otp\":\"" + otp + "\"}");
     }
     private void save(User buyer, String name, String email) throws Exception {
-        mvc.perform(put("/api/seller-onboarding/me").header("Authorization", bearer(buyer))
+        mvc.perform(put("/api/v1/seller-onboarding/me").header("Authorization", bearer(buyer))
                 .contentType(MediaType.APPLICATION_JSON).content(profile(name, email)))
                 .andExpect(status().isOk());
     }
     private String sendCode(User buyer) throws Exception {
-        mvc.perform(post("/api/seller-onboarding/email/send-code").header("Authorization", bearer(buyer)))
+        mvc.perform(post("/api/v1/seller-onboarding/email/send-code").header("Authorization", bearer(buyer)))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.otp").doesNotExist());
         var messages = ArgumentCaptor.forClass(SimpleMailMessage.class);
         verify(mail, atLeastOnce()).send(messages.capture());

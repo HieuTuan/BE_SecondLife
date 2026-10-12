@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/seller-onboarding")
+@RequestMapping("/api/v1/seller-onboarding")
 @Tag(name = "Seller Onboarding", description = "Shop information and email verification before seller eKYC")
 public class SellerOnboardingController {
     private final SellerOnboardingService onboarding;

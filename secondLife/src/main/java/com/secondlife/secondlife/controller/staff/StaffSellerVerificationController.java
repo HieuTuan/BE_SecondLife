@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/staff/seller-verifications")
+@RequestMapping("/api/v1/staff/seller-verifications")
 @RequiredArgsConstructor
 @Tag(name = "Staff - Seller Verifications", description = "Staff verification exception inquiry (read-only, approval reserved for Admin)")
 public class StaffSellerVerificationController {

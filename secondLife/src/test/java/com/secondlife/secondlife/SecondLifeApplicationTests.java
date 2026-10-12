@@ -10,6 +10,9 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import javax.sql.DataSource;
 
+import static org.hamcrest.Matchers.anyOf;
+import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -31,18 +34,23 @@ class SecondLifeApplicationTests {
 
     @Test
     void healthAndOpenApiArePublic() throws Exception {
-        mockMvc.perform(get("/api/health"))
+        mockMvc.perform(get("/api/v1/health"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("UP"));
 
         mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.paths['/api/health'].get").exists());
+                .andExpect(jsonPath("$.paths['/api/v1/health'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/auth/login'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/auth/login']").doesNotExist())
+                .andExpect(jsonPath("$.paths['/api/v1/seller-onboarding/me'].put").exists())
+                .andExpect(jsonPath("$.paths.keys()").value(everyItem(anyOf(
+                        startsWith("/api/v1/"), startsWith("/api/auth/")))));
     }
 
     @Test
     void protectedApiRequiresAuthentication() throws Exception {
-        mockMvc.perform(get("/api/seller-verifications"))
+        mockMvc.perform(get("/api/v1/seller-verifications"))
                 .andExpect(status().isUnauthorized());
     }
 

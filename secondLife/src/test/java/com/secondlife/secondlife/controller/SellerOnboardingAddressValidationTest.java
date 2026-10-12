@@ -19,7 +19,7 @@ class SellerOnboardingAddressValidationTest {
         var mvc = MockMvcBuilders.standaloneSetup(new SellerOnboardingController(service, current))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver()).build();
-        mvc.perform(put("/api/seller-onboarding/me").contentType(MediaType.APPLICATION_JSON).content("""
+        mvc.perform(put("/api/v1/seller-onboarding/me").contentType(MediaType.APPLICATION_JSON).content("""
                 {"shopName":"Shop A","email":"shop@example.test","phone":"0901234567",
                  "pickupAddress":{"name":"Seller","phone":"0901234567","address":"123 Street",
                  "provinceName":"Made up province","wardName":"Made up ward","newAddress":true}}

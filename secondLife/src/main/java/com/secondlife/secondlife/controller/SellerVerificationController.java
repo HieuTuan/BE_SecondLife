@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/seller-verifications")
+@RequestMapping("/api/v1/seller-verifications")
 @RequiredArgsConstructor
 @Tag(name = "Seller Verification", description = "Seller identity verification submission and status APIs")
 public class SellerVerificationController {

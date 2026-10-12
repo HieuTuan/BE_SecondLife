@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/staff/listings")
+@RequestMapping("/api/v1/staff/listings")
 @PreAuthorize("(hasRole('STAFF') and hasAuthority('STAFF_LISTING_REVIEW')) or (hasRole('ADMIN') and hasAuthority('POST_REVIEW'))")
 public class StaffListingController {
     private final ListingReviewService reviews;

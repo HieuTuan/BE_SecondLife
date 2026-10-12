@@ -30,7 +30,7 @@ class MainFlowDescriptionTest {
         PostRepository posts = mock(PostRepository.class);
         CreditService legacyCredits = mock(CreditService.class);
         User owner = new User(); owner.setId(UUID.randomUUID());
-        when(users.findByIdForRoleUpdate(owner.getId())).thenReturn(Optional.of(owner));
+        when(users.findById(owner.getId())).thenReturn(Optional.of(owner));
         AiChatSession session = new AiChatSession();
         session.setId(UUID.randomUUID()); session.setUser(owner);
         when(sessions.findById(session.getId())).thenReturn(Optional.of(session));

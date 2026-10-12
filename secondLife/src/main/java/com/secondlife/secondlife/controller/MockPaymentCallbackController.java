@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class MockPaymentCallbackController {
     private final CreditPaymentCallbackService callbackService;
 
-    @PostMapping("/api/payment-callbacks/mock")
+    @PostMapping("/api/v1/payment-callbacks/mock")
     @Operation(summary = "Accept a signed mock payment status event")
     public ResponseEntity<ApiResponse<Void>> accept(
             @RequestBody String rawBody,

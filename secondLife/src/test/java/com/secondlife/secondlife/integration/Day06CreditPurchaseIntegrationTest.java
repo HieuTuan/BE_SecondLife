@@ -98,18 +98,18 @@ class Day06CreditPurchaseIntegrationTest {
         TestUser otherSeller = userForRole("SELLER");
         TestUser buyer = userForRole("BUYER");
 
-        mockMvc.perform(post("/api/seller/credit-purchases")
+        mockMvc.perform(post("/api/v1/seller/credit-purchases")
                         .contentType(MediaType.APPLICATION_JSON).content("{\"listingQuantity\":2,\"valuationQuantity\":3}"))
                 .andExpect(status().isUnauthorized());
-        mockMvc.perform(post("/api/seller/credit-purchases")
+        mockMvc.perform(post("/api/v1/seller/credit-purchases")
                         .header("Authorization", bearer(buyer.token()))
                         .contentType(MediaType.APPLICATION_JSON).content("{\"listingQuantity\":2,\"valuationQuantity\":3}"))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/seller/credit-purchases")
+        mockMvc.perform(post("/api/v1/seller/credit-purchases")
                         .header("Authorization", bearer(seller.token()))
                         .contentType(MediaType.APPLICATION_JSON).content("{\"listingQuantity\":-1,\"valuationQuantity\":1}"))
                 .andExpect(status().isBadRequest());
-        mockMvc.perform(post("/api/seller/credit-purchases")
+        mockMvc.perform(post("/api/v1/seller/credit-purchases")
                         .header("Authorization", bearer(seller.token()))
                         .contentType(MediaType.APPLICATION_JSON).content("{\"listingQuantity\":0,\"valuationQuantity\":0}"))
                 .andExpect(status().isBadRequest());
@@ -126,7 +126,7 @@ class Day06CreditPurchaseIntegrationTest {
 
         pricingService.updatePrice(null, CreditType.LISTING,
                 new UpdateCreditPricingRequest(new BigDecimal("200.00")));
-        mockMvc.perform(get("/api/seller/credit-purchases")
+        mockMvc.perform(get("/api/v1/seller/credit-purchases")
                         .header("Authorization", bearer(seller.token())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElements").value(1))
@@ -135,11 +135,11 @@ class Day06CreditPurchaseIntegrationTest {
                 .andExpect(jsonPath("$.data.items[0].snapshot.discountTierId").doesNotExist())
                 .andExpect(jsonPath("$.data.items[0].snapshot.discountRate").doesNotExist())
                 .andExpect(jsonPath("$.data.items[0].snapshot.discountAmount").doesNotExist());
-        mockMvc.perform(get("/api/seller/credit-purchases")
+        mockMvc.perform(get("/api/v1/seller/credit-purchases")
                         .header("Authorization", bearer(otherSeller.token())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElements").value(0));
-        mockMvc.perform(get("/api/seller/credit-ledger")
+        mockMvc.perform(get("/api/v1/seller/credit-ledger")
                         .header("Authorization", bearer(seller.token())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElements").value(0));
@@ -169,7 +169,7 @@ class Day06CreditPurchaseIntegrationTest {
                 && entry.getQuantityDelta() == 2 && entry.getBalanceAfter() == 2));
         assertTrue(grants.stream().anyMatch(entry -> entry.getCreditType() == CreditType.VALUATION
                 && entry.getQuantityDelta() == 3 && entry.getBalanceAfter() == 3));
-        mockMvc.perform(get("/api/seller/credit-ledger")
+        mockMvc.perform(get("/api/v1/seller/credit-ledger")
                         .header("Authorization", bearer(seller.token())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElements").value(2));
@@ -248,7 +248,7 @@ class Day06CreditPurchaseIntegrationTest {
         configurePrices();
         TestUser seller = userForRole("SELLER");
         doThrow(new IllegalStateException("provider unavailable")).when(mockProvider).createIntent(any());
-        mockMvc.perform(post("/api/seller/credit-purchases")
+        mockMvc.perform(post("/api/v1/seller/credit-purchases")
                         .header("Authorization", bearer(seller.token()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"listingQuantity\":1,\"valuationQuantity\":1}"))
@@ -291,7 +291,7 @@ class Day06CreditPurchaseIntegrationTest {
     }
 
     private UUID createPurchase(TestUser seller, int listing, int valuation) throws Exception {
-        String response = mockMvc.perform(post("/api/seller/credit-purchases")
+        String response = mockMvc.perform(post("/api/v1/seller/credit-purchases")
                         .header("Authorization", bearer(seller.token()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"listingQuantity\":%d,\"valuationQuantity\":%d}".formatted(listing, valuation)))
@@ -317,7 +317,7 @@ class Day06CreditPurchaseIntegrationTest {
     }
 
     private void sendCallback(String body, String signature, int expectedStatus) throws Exception {
-        mockMvc.perform(post("/api/payment-callbacks/mock")
+        mockMvc.perform(post("/api/v1/payment-callbacks/mock")
                         .contentType(MediaType.APPLICATION_JSON)
                         .header("X-Mock-Signature", signature)
                         .content(body))

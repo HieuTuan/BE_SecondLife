@@ -31,7 +31,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/admin")
+@RequestMapping("/api/v1/admin")
 @RequiredArgsConstructor
 @Tag(name = "Admin - Seller Verifications", description = "Admin seller verification review and Inspection Center provisioning APIs")
 public class AdminSellerVerificationController {

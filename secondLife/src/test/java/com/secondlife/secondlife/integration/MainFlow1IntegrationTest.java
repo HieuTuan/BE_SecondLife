@@ -395,8 +395,8 @@ class MainFlow1IntegrationTest {
         when(google.call(any(Prompt.class))).thenThrow(new RuntimeException("Moderation offline"));
         assertEquals("PENDING", postService.submitPost(seller.getId(), duplicate.getId(), submit(duplicate, "1000000")).getStatus());
         assertEquals(1, balance(seller, CreditType.LISTING)); assertEquals(0, consumes(seller));
-        var staff = user("STAFF", false); String url = "/api/staff/listings/" + duplicate.getId();
-        mvc.perform(get("/api/staff/listings").header("Authorization", bearer(staff))).andExpect(status().isOk());
+        var staff = user("STAFF", false); String url = "/api/v1/staff/listings/" + duplicate.getId();
+        mvc.perform(get("/api/v1/staff/listings").header("Authorization", bearer(staff))).andExpect(status().isOk());
         mvc.perform(get(url).header("Authorization", bearer(seller))).andExpect(status().isForbidden());
         mvc.perform(get(url).header("Authorization", bearer(staff))).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.duplicateMatches[0]").value(original.getId().toString()));
@@ -410,7 +410,7 @@ class MainFlow1IntegrationTest {
     @Test void staffApprovalWithoutCreditRollsBackAndRejectionRemainsFree() throws Exception {
         var seller = user("SELLER", true); var pending = draft(seller);
         pending.setStatus("PENDING"); pending.setPrice(new BigDecimal("1000000")); posts.saveAndFlush(pending);
-        var staff = user("STAFF", false); String url = "/api/staff/listings/" + pending.getId();
+        var staff = user("STAFF", false); String url = "/api/v1/staff/listings/" + pending.getId();
         mvc.perform(post(url + "/approve").header("Authorization", bearer(staff))).andExpect(status().isConflict());
         assertEquals("PENDING", posts.findById(pending.getId()).orElseThrow().getStatus());
         mvc.perform(post(url + "/reject").header("Authorization", bearer(staff)).contentType(MediaType.APPLICATION_JSON)

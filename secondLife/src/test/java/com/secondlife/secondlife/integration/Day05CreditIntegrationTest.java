@@ -85,48 +85,48 @@ class Day05CreditIntegrationTest {
         String staff = tokenForRole("STAFF");
         String buyer = tokenForRole("BUYER");
 
-        mockMvc.perform(get("/api/seller/credits"))
+        mockMvc.perform(get("/api/v1/seller/credits"))
                 .andExpect(status().isUnauthorized());
-        mockMvc.perform(get("/api/seller/credits").header("Authorization", bearer(buyer)))
+        mockMvc.perform(get("/api/v1/seller/credits").header("Authorization", bearer(buyer)))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(get("/api/seller/credits").header("Authorization", bearer(seller)))
+        mockMvc.perform(get("/api/v1/seller/credits").header("Authorization", bearer(seller)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.listing").value(0))
                 .andExpect(jsonPath("$.data.valuation").value(0));
-        mockMvc.perform(get("/api/seller/credit-pricing").header("Authorization", bearer(seller)))
+        mockMvc.perform(get("/api/v1/seller/credit-pricing").header("Authorization", bearer(seller)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.prices.length()").value(2))
                 .andExpect(jsonPath("$.data.discountTiers").doesNotExist());
-        mockMvc.perform(put("/api/admin/credit-pricing/LISTING")
+        mockMvc.perform(put("/api/v1/admin/credit-pricing/LISTING")
                         .header("Authorization", bearer(staff)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"unitPrice\":\"100.00\"}"))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(put("/api/admin/credit-pricing/LISTING")
+        mockMvc.perform(put("/api/v1/admin/credit-pricing/LISTING")
                         .header("Authorization", bearer(admin)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"unitPrice\":\"-1\"}"))
                 .andExpect(status().isBadRequest());
-        mockMvc.perform(put("/api/admin/credit-pricing/LISTING")
+        mockMvc.perform(put("/api/v1/admin/credit-pricing/LISTING")
                         .header("Authorization", bearer(admin)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"unitPrice\":\"100.00\"}"))
                 .andExpect(status().isOk());
-        mockMvc.perform(put("/api/admin/credit-pricing/VALUATION")
+        mockMvc.perform(put("/api/v1/admin/credit-pricing/VALUATION")
                         .header("Authorization", bearer(admin)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"unitPrice\":\"25.00\"}"))
                 .andExpect(status().isOk());
-        mockMvc.perform(get("/api/seller/credit-pricing?listingQuantity=2&valuationQuantity=3")
+        mockMvc.perform(get("/api/v1/seller/credit-pricing?listingQuantity=2&valuationQuantity=3")
                         .header("Authorization", bearer(seller)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.quote.subtotal").value(275.00))
                 .andExpect(jsonPath("$.data.quote.discountRate").doesNotExist())
                 .andExpect(jsonPath("$.data.quote.discountAmount").doesNotExist())
                 .andExpect(jsonPath("$.data.quote.finalFee").value(275.00));
-        mockMvc.perform(get("/api/admin/credit-discount-tiers").header("Authorization", bearer(admin)))
+        mockMvc.perform(get("/api/v1/admin/credit-discount-tiers").header("Authorization", bearer(admin)))
                 .andExpect(status().isNotFound());
-        mockMvc.perform(post("/api/admin/credit-discount-tiers")
+        mockMvc.perform(post("/api/v1/admin/credit-discount-tiers")
                         .header("Authorization", bearer(admin)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"minQuantity\":4,\"maxQuantity\":6,\"discountRate\":0.2,\"active\":true}"))
                 .andExpect(status().isNotFound());
-        mockMvc.perform(put("/api/admin/credit-discount-tiers/" + UUID.randomUUID())
+        mockMvc.perform(put("/api/v1/admin/credit-discount-tiers/" + UUID.randomUUID())
                         .header("Authorization", bearer(admin)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"minQuantity\":60,\"maxQuantity\":80,\"discountRate\":0.2,\"active\":true}"))
                 .andExpect(status().isNotFound());

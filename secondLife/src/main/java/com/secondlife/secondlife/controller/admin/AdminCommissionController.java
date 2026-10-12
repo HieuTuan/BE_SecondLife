@@ -18,7 +18,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
-@RestController @RequestMapping("/api/admin") @RequiredArgsConstructor
+@RestController @RequestMapping("/api/v1/admin") @RequiredArgsConstructor
 @PreAuthorize("hasRole('ADMIN') and hasAuthority('ADMIN_COMMISSION_MANAGE')")
 @Tag(name = "Admin - Commission", description = "Default commission for all products with optional fee limits. Rates are fractions; 0.05 means 5%.")
 public class AdminCommissionController {
