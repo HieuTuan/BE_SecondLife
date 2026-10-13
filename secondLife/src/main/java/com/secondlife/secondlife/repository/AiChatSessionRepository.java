@@ -10,4 +10,5 @@ import java.util.UUID;
 @Repository
 public interface AiChatSessionRepository extends JpaRepository<AiChatSession, UUID> {
     List<AiChatSession> findByUserIdOrderByCreatedAtDesc(UUID userId);
+    List<AiChatSession> findByPostIdAndUser_Id(UUID postId, UUID userId);
 }

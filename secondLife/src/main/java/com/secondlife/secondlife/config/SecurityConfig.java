@@ -63,7 +63,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/health").permitAll()
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/v1/webhooks/sepay").permitAll()
-                        .requestMatchers(org.springframework.http.HttpMethod.POST,"/api/v1/shipping/callback").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.POST,"/api/v1/shipping/lalamove/callback").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/posts").permitAll()
                         .requestMatchers("/error").permitAll()
                         // Administrative role assignment is also guarded at the filter boundary.

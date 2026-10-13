@@ -27,7 +27,8 @@ public class UserMapper {
                 phone,
                 avatarUrl,
                 user.getAccountStatus(),
-                user.isEmailVerified()
+                user.isEmailVerified(),
+                user.getProfile()!=null?user.getProfile().getGender():null
         );
     }
 
@@ -65,7 +66,8 @@ public class UserMapper {
                 ward,
                 streetAddress,
                 latitude,
-                longitude
+                longitude,
+                user.getProfile()!=null?user.getProfile().getGender():null
         );
     }
 

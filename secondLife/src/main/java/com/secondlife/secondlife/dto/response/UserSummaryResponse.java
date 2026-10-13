@@ -11,5 +11,10 @@ public record UserSummaryResponse(
     String phone,
     String avatarUrl,
     AccountStatus accountStatus,
-    boolean emailVerified
-) {}
+    boolean emailVerified,
+    com.secondlife.secondlife.enums.Gender gender
+) {
+    public UserSummaryResponse(UUID id,String email,String fullName,String phone,String avatarUrl,AccountStatus accountStatus,boolean emailVerified) {
+        this(id,email,fullName,phone,avatarUrl,accountStatus,emailVerified,null);
+    }
+}

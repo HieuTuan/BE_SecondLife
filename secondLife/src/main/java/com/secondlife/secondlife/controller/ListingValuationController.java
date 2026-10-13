@@ -37,6 +37,15 @@ public class ListingValuationController {
     public ApiResponse<ListingDraftResponse> get(@AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID postId) {
         return ApiResponse.success(drafts.get(currentUser.resolveUserId(user), postId));
     }
+    @DeleteMapping("/draft")
+    @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
+    @io.swagger.v3.oas.annotations.Operation(summary = "Delete an owned unpublished draft",
+            description = "Only DRAFT posts can be deleted. AI valuation and credit history are retained; spent credits are not refunded.")
+    public ApiResponse<Void> deleteDraft(@AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID postId) {
+        drafts.delete(currentUser.resolveUserId(user), postId);
+        return ApiResponse.success("Draft deleted successfully");
+    }
+
 //    @PutMapping("/draft")
 //    @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
 //    public ApiResponse<ListingDraftResponse> update(@AuthenticationPrincipal CustomUserDetails user,

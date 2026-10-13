@@ -73,6 +73,9 @@ public class UserServiceImpl implements UserService {
         if (request.avatarUrl() != null) {
             profile.setAvatarUrl(request.avatarUrl().trim());
         }
+        if (request.gender() != null) {
+            profile.setGender(request.gender());
+        }
         if (request.province() != null) {
             profile.setProvince(request.province().trim());
         }

@@ -33,7 +33,7 @@ public class SellerOnboardingController {
 
     @PutMapping("/me")
     @PreAuthorize("hasAuthority('SELLER_VERIFICATION_SUBMIT')")
-    @Operation(summary = "Save shop name, pickup address, email and phone before eKYC")
+    @Operation(summary = "Save shop information before eKYC", description = "Send pickup contacts and coordinates. Backend resolves the address using Geoapify and checks the allowed city.")
     public ApiResponse<SellerOnboardingResponse> save(@AuthenticationPrincipal CustomUserDetails user,
             @Valid @RequestBody SellerOnboardingRequest request) {
         return ApiResponse.success(onboarding.save(currentUser.resolveUserId(user), request));

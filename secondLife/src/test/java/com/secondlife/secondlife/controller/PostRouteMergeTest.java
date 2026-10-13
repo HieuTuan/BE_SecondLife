@@ -13,9 +13,25 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class PostRouteMergeTest {
+    @Test
+    void ownerCanDeleteDraftWithoutARequestBody() throws Exception {
+        var drafts = mock(ListingDraftService.class);
+        var current = mock(CurrentUserProvider.class);
+        UUID sellerId = UUID.randomUUID(), postId = UUID.randomUUID();
+        when(current.resolveUserId(any())).thenReturn(sellerId);
+        var mvc = MockMvcBuilders.standaloneSetup(
+                new ListingValuationController(mock(AiValuationService.class), drafts, current, 100))
+                .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver()).build();
+        mvc.perform(delete("/api/v1/posts/" + postId + "/draft"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true));
+        verify(drafts).delete(sellerId, postId);
+    }
+
     @Test
     void mergedPostControllersKeepPublicListAndOwnerDraftRoutesDistinct() throws Exception {
         var posts = mock(PostService.class);

@@ -33,7 +33,7 @@ class RequiredEnvironmentConfigurationTest {
 
     @Test
     void missingVariableForDisabledIntegrationStillFailsStartup() throws IOException {
-        configuredRunner("GHN_TOKEN").withPropertyValues("GHN_ENABLED=false")
+        configuredRunner("LALAMOVE_API_KEY").withPropertyValues("LALAMOVE_ENABLED=false")
                 .run(context -> assertThat(context).hasFailed());
     }
 
@@ -50,7 +50,7 @@ class RequiredEnvironmentConfigurationTest {
 
     @Test
     void explicitlyConfiguredBlankCredentialCanBeUsedWhenIntegrationIsDisabled() throws IOException {
-        configuredRunner(null).withPropertyValues("GHN_ENABLED=false", "GHN_TOKEN=")
+        configuredRunner(null).withPropertyValues("LALAMOVE_ENABLED=false", "LALAMOVE_API_KEY=")
                 .run(context -> assertThat(context).hasNotFailed());
     }
 

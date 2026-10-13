@@ -10,6 +10,7 @@ public interface ShipmentRepository extends JpaRepository<Shipment,UUID> {
     List<Shipment> findByOrderIdOrderByCreatedAtAsc(UUID id);
     List<Shipment> findByInspectionOrderIdOrderByCreatedAtAsc(UUID id);
     Optional<Shipment> findByOrderCode(String code);
+    Optional<Shipment> findByProviderAndOrderCode(String provider, String code);
     Optional<Shipment> findByClientOrderCode(String code);
     boolean existsByOrderId(UUID id);
 }

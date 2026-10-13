@@ -9,7 +9,7 @@ import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.exception.*;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.shipping.ShippingQuoteService;
-import com.secondlife.secondlife.service.shipping.GhnPickupAddressResolver;
+import com.secondlife.secondlife.service.shipping.SellerPickupAddressResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import tools.jackson.databind.json.JsonMapper;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,7 +31,7 @@ class SellerOnboardingServiceTest {
     @Mock SellerVerificationRepository verifications;
     @Mock ShippingQuoteService shipping;
     @Mock SellerOnboardingMailer mailer;
-    @Mock GhnPickupAddressResolver pickupAddresses;
+    @Mock SellerPickupAddressResolver pickupAddresses;
     final UUID userId = UUID.randomUUID();
     final JsonMapper mapper = JsonMapper.builder().findAndAddModules().build();
     final BCryptPasswordEncoder passwords = new BCryptPasswordEncoder();
@@ -46,16 +47,35 @@ class SellerOnboardingServiceTest {
         properties.setResendCooldownSeconds(60);
         properties.setMaxAttempts(2);
         service = new SellerOnboardingService(onboarding, users, verifications, shipping, mailer, properties, passwords, mapper, pickupAddresses);
-        address = new ShippingAddress("Nguyễn A", "+84976404178", "123, Ấp Vĩnh Thành",
-                "Cần Thơ", null, "Phường Ngã Năm", null, null, true);
+        address = new ShippingAddress("Nguyễn A", "+84976404178", "123, Ấp Vĩnh Thành", new BigDecimal("10.7756"), new BigDecimal("106.7019"));
         row = new SellerOnboarding();
         row.setUserId(userId); row.setShopName("Shop A"); row.setEmail("shop@example.test");
         row.setPhone("+84976404178"); row.setPickupAddressJson(mapper.writeValueAsString(address));
-        pickupRequest = new SellerPickupAddressRequest(address.name(), address.phone(), address.address(), 1000001, 1003646);
+        pickupRequest = new SellerPickupAddressRequest(address.name(), address.phone(), address.address(), address.latitude(), address.longitude());
         row.setPickupProvinceId(1000001); row.setPickupWardId(1003646);
         lenient().when(pickupAddresses.resolve(pickupRequest)).thenReturn(address);
         lenient().when(users.findByIdForRoleUpdate(userId)).thenReturn(Optional.of(new User()));
         lenient().when(onboarding.findById(userId)).thenReturn(Optional.of(row));
+    }
+
+    @Test void verifiedLegacyProfileWithoutCoordinatesCannotStartEkyc() {
+        row.setEmailVerifiedAt(Instant.now());
+        row.setPickupAddressJson("{\"name\":\"Nguyễn A\",\"phone\":\"+84976404178\",\"address\":\"123, Ấp Vĩnh Thành\",\"provinceName\":\"Hồ Chí Minh\"}");
+        assertThrows(BadRequestException.class, () -> service.requireCompleted(userId));
+        assertFalse(service.get(userId).canStartEkyc());
+    }
+
+    @Test void legacyCoordinateCompletionPreservesVerifiedEmailEvenAfterVerificationStarted() {
+        row.setEmailVerifiedAt(Instant.now());
+        row.setPickupAddressJson("{\"name\":\"Nguyễn A\",\"phone\":\"+84976404178\",\"address\":\"123, Ấp Vĩnh Thành\"}");
+        var seller = new User();
+        seller.addRole(new com.secondlife.secondlife.entity.Role("SELLER", "Seller", "Seller"));
+        when(users.findByIdForRoleUpdate(userId)).thenReturn(Optional.of(seller));
+        var result = service.save(userId, new SellerOnboardingRequest("Shop A", pickupRequest, row.getEmail(), row.getPhone()));
+        assertTrue(result.emailVerified());
+        assertTrue(result.canStartEkyc());
+        assertEquals(address.latitude(), result.pickupAddress().latitude());
+        verify(shipping).savePickup(userId, address);
     }
 
     @Test void noProfileOrUnverifiedEmailCannotStartEkyc() {
@@ -65,6 +85,18 @@ class SellerOnboardingServiceTest {
         assertThrows(ConflictException.class, () -> service.requireCompleted(userId));
         row.setEmailVerifiedAt(Instant.now());
         assertDoesNotThrow(() -> service.requireCompleted(userId));
+    }
+
+    @Test void refreshedMapAddressAtSamePointKeepsVerifiedShopAndEmail() {
+        row.setEmailVerifiedAt(Instant.now());
+        var seller=new User();seller.addRole(new com.secondlife.secondlife.entity.Role("SELLER","Seller","Seller"));
+        when(users.findByIdForRoleUpdate(userId)).thenReturn(Optional.of(seller));
+        var canonical=new ShippingAddress(address.name(),address.phone(),"Địa chỉ chuẩn mới từ Geoapify",address.latitude(),address.longitude());
+        when(pickupAddresses.resolve(pickupRequest)).thenReturn(canonical);
+        var result=service.save(userId,new SellerOnboardingRequest("Shop A",pickupRequest,row.getEmail(),row.getPhone()));
+        assertTrue(result.emailVerified());assertTrue(result.canStartEkyc());
+        assertEquals(canonical.address(),result.pickupAddress().address());
+        verify(shipping).savePickup(userId,canonical);
     }
 
     @Test void savesNormalizedInformationAndInvalidatesConfirmationWhenChanged() {
@@ -83,6 +115,40 @@ class SellerOnboardingServiceTest {
     @Test void identicalInformationKeepsEmailConfirmation() {
         row.setEmailVerifiedAt(Instant.now());
         assertTrue(service.save(userId, new SellerOnboardingRequest("Shop A", pickupRequest, row.getEmail(), row.getPhone())).canStartEkyc());
+        verify(onboarding, never()).save(any());
+    }
+
+    @Test void changingPickupCoordinatesInvalidatesEmailConfirmation() {
+        var original = new ShippingAddress("Seller", "0901234567", "123 Street, HCMC", new BigDecimal("10.7756"), new BigDecimal("106.7019"));
+        row.setPickupAddressJson(mapper.writeValueAsString(original));
+        row.setPickupProvinceId(null);
+        row.setPickupWardId(null);
+        row.setEmailVerifiedAt(Instant.now());
+        var changedRequest = new SellerPickupAddressRequest("Seller", "0901234567", "123 Street, HCMC", new BigDecimal("10.7800"), new BigDecimal("106.7019"));
+        when(pickupAddresses.resolve(changedRequest)).thenReturn(new ShippingAddress("Seller", "0901234567", "123 Street, HCMC", new BigDecimal("10.7800"), new BigDecimal("106.7019")));
+
+        var result = service.save(userId, new SellerOnboardingRequest("Shop A", changedRequest, row.getEmail(), row.getPhone()));
+
+        assertEquals(new BigDecimal("10.78"), result.pickupAddress().latitude());
+        assertEquals(new BigDecimal("106.7019"), result.pickupAddress().longitude());
+        assertFalse(result.emailVerified());
+        assertNull(row.getPickupProvinceId());
+        assertNull(row.getPickupWardId());
+        verify(onboarding).save(row);
+    }
+
+    @Test void equivalentCoordinatePrecisionKeepsEmailConfirmation() {
+        var saved = new ShippingAddress("Seller", "0901234567", "123 Street, HCMC", new BigDecimal("10.7756"), new BigDecimal("106.7019"));
+        row.setPickupAddressJson(mapper.writeValueAsString(saved));
+        row.setPickupProvinceId(null);
+        row.setPickupWardId(null);
+        row.setEmailVerifiedAt(Instant.now());
+        var equivalentRequest = new SellerPickupAddressRequest("Seller", "0901234567", "123 Street, HCMC", new BigDecimal("10.775600"), new BigDecimal("106.701900"));
+        when(pickupAddresses.resolve(equivalentRequest)).thenReturn(new ShippingAddress("Seller", "0901234567", "123 Street, HCMC", equivalentRequest.latitude(), equivalentRequest.longitude()));
+
+        var result = service.save(userId, new SellerOnboardingRequest("Shop A", equivalentRequest, row.getEmail(), row.getPhone()));
+
+        assertTrue(result.emailVerified());
         verify(onboarding, never()).save(any());
     }
 

@@ -163,18 +163,6 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
                         var pa = onbResp.pickupAddress();
                         StringBuilder sb = new StringBuilder();
                         if (pa.address() != null && !pa.address().isBlank()) sb.append(pa.address().trim());
-                        if (pa.wardName() != null && !pa.wardName().isBlank()) {
-                            if (!sb.isEmpty()) sb.append(", ");
-                            sb.append(pa.wardName().trim());
-                        }
-                        if (pa.districtName() != null && !pa.districtName().isBlank()) {
-                            if (!sb.isEmpty()) sb.append(", ");
-                            sb.append(pa.districtName().trim());
-                        }
-                        if (pa.provinceName() != null && !pa.provinceName().isBlank()) {
-                            if (!sb.isEmpty()) sb.append(", ");
-                            sb.append(pa.provinceName().trim());
-                        }
                         pickupAddressText = sb.toString();
                     }
                 }
@@ -337,18 +325,6 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
                         var pa = onbResp.pickupAddress();
                         StringBuilder sb = new StringBuilder();
                         if (pa.address() != null && !pa.address().isBlank()) sb.append(pa.address().trim());
-                        if (pa.wardName() != null && !pa.wardName().isBlank()) {
-                            if (!sb.isEmpty()) sb.append(", ");
-                            sb.append(pa.wardName().trim());
-                        }
-                        if (pa.districtName() != null && !pa.districtName().isBlank()) {
-                            if (!sb.isEmpty()) sb.append(", ");
-                            sb.append(pa.districtName().trim());
-                        }
-                        if (pa.provinceName() != null && !pa.provinceName().isBlank()) {
-                            if (!sb.isEmpty()) sb.append(", ");
-                            sb.append(pa.provinceName().trim());
-                        }
                         pickupAddressText = sb.toString();
                     }
                 }

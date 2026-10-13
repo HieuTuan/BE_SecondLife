@@ -1,0 +1,15 @@
+{
+  "results": [
+    {
+      "name": "Đại học Khoa học Xã hội và Nhân văn",
+      "result_type": "amenity",
+      "formatted": "Đại học Khoa học Xã hội và Nhân văn, Đường Quảng Trường Sáng Tạo, Phường Linh Xuân, Thành phố Dĩ An, BI 00084, Việt Nam",
+      "country_code": "vn",
+      "state": "Bình Dương",
+      "state_code": "BI",
+      "city": "Thành phố Dĩ An",
+      "county": "Dĩ An",
+      "suburb": "Phường Linh Xuân"
+    }
+  ]
+}

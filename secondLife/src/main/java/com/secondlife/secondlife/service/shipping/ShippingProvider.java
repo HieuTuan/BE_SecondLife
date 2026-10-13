@@ -5,15 +5,12 @@ import tools.jackson.databind.JsonNode;
 import java.util.Map;
 
 public interface ShippingProvider {
-    JsonNode provinces();
-    JsonNode legacyProvinces();
-    JsonNode wards(int provinceId);
-    JsonNode districts(int provinceId);
-    JsonNode legacyWards(int districtId);
-    JsonNode services(int fromDistrictId, int toDistrictId);
+    default String code() { return "LALAMOVE"; }
+    default ShippingProvider forProvider(String code) { return this; }
+    default JsonNode cities() { throw new com.secondlife.secondlife.exception.BadRequestException("This carrier has no city service catalogue"); }
+    default JsonNode driver(String orderCode, String driverId) { throw new com.secondlife.secondlife.exception.BadRequestException("This carrier does not expose driver coordinates"); }
     JsonNode quote(Map<String, Object> payload);
     JsonNode preview(Map<String, Object> payload);
-    JsonNode leadtime(Map<String, Object> payload);
     JsonNode create(Map<String, Object> payload);
     JsonNode detail(String orderCode);
     JsonNode cancel(String orderCode);

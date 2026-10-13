@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.ApiResponse;
+import com.secondlife.secondlife.common.ErrorResponse;
 import com.secondlife.secondlife.dto.request.*;
 import com.secondlife.secondlife.dto.response.AuthResponse;
 import com.secondlife.secondlife.dto.response.TokenResponse;
@@ -9,6 +10,9 @@ import com.secondlife.secondlife.service.UserService;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -37,7 +41,15 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    @Operation(summary = "Authenticate with email and password")
+    @Operation(summary = "Authenticate with email and password",
+            description = "Returns tokens and user DTO on success. All credential/account-status failures return the same 401 response.")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Login successful"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Invalid email/password format or JSON type",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Invalid email or password",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
     public ResponseEntity<ApiResponse<AuthResponse>> login(@Valid @RequestBody LoginRequest request) {
         AuthResponse response = authService.login(request);
         return ResponseEntity.ok(ApiResponse.success("Login successful", response));
