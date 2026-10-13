@@ -40,7 +40,7 @@ class InspectionEscrowServiceTest {
     private PostRepository postRepository;
 
     @InjectMocks
-    private InspectionEscrowService escrowService;
+    private com.secondlife.secondlife.service.impl.InspectionEscrowServiceImpl escrowService;
 
     private UUID buyerId;
     private UUID sellerId;

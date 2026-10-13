@@ -19,4 +19,5 @@ public class InspectionTravelTierDto {
     private BigDecimal pricePerKm;
     private BigDecimal distanceChargedInTier;
     private BigDecimal feeInTier;
+    private String status;
 }

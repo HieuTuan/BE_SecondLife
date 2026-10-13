@@ -39,12 +39,12 @@ public class InspectionBuyRequest {
 
     public java.math.BigDecimal getBuyerLatitude() {
         if (buyerLatitude != null) return buyerLatitude;
-        return buyerDeliveryAddress != null ? buyerDeliveryAddress.getLatitude() : null;
+        return buyerDeliveryAddress != null ? buyerDeliveryAddress.latitude() : null;
     }
 
     public java.math.BigDecimal getBuyerLongitude() {
         if (buyerLongitude != null) return buyerLongitude;
-        return buyerDeliveryAddress != null ? buyerDeliveryAddress.getLongitude() : null;
+        return buyerDeliveryAddress != null ? buyerDeliveryAddress.longitude() : null;
     }
 
     public boolean isBuyerConsentZinLoss() {

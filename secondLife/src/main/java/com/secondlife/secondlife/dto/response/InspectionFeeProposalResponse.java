@@ -20,6 +20,7 @@ public class InspectionFeeProposalResponse {
     private String categoryName;
     private BigDecimal baseInspectionFee;
     private String tiersJson;
+    private java.util.List<InspectionTravelTierDto> tiers;
     private UUID proposedById;
     private String proposedByName;
     private String proposedByEmail;

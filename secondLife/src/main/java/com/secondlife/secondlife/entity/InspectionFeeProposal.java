@@ -52,6 +52,10 @@ public class InspectionFeeProposal {
     @Column(name = "reviewed_at")
     private Instant reviewedAt;
 
+    public UUID getCategoryId() {
+        return category != null ? category.getId() : null;
+    }
+
     @PrePersist
     protected void onCreate() {
         this.createdAt = Instant.now();
