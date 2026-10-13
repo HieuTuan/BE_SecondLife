@@ -97,7 +97,7 @@ class LalamoveReturnSafetyTest {
                 "order_code", "1234567890123456789", "status", "ASSIGNING_DRIVER", "total_fee", 28000)));
         var service = new ShipmentService(shipments, mock(ShipmentEventRepository.class), orders,
                 mock(InspectionOrderRepository.class), quotes, mock(ShippingQuoteService.class), mock(com.secondlife.secondlife.service.shipping.ReverseGeocodingService.class), router,
-                mapper, mock(EntityManager.class), wallets, transactions);
+                mapper, mock(EntityManager.class), wallets, transactions, mock(SystemWalletService.class));
         var request = new CreateShipmentRequest(UUID.randomUUID(), "BUYER_TO_SELLER", null, null, "Approved dispute return");
 
         var first = service.createForOrder(UUID.randomUUID(), true, order.getId(), request);
@@ -145,7 +145,7 @@ class LalamoveReturnSafetyTest {
         when(posts.findByIdForUpdate(order.getPost().getId())).thenReturn(Optional.of(order.getPost()));
         when(shipments.findByOrderIdOrderByCreatedAtAsc(order.getId())).thenReturn(List.of(cancelled));
         var service = new OrderServiceImpl(orders, posts, mock(UserRepository.class), mock(NegotiationRepository.class),
-                wallets, mock(ShippingQuoteService.class), shipments, mock(CommissionService.class), mock(SettlementService.class));
+                wallets, mock(ShippingQuoteService.class), shipments, mock(CommissionService.class), mock(SettlementService.class), mock(SystemWalletService.class));
 
         var result = service.cancelOrder(order.getBuyer().getId(), order.getId());
 
