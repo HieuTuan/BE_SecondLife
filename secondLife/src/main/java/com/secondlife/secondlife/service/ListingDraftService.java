@@ -13,6 +13,26 @@ import java.util.UUID;
 public class ListingDraftService {
     private final ListingAccessService access;
     private final PostRepository posts;
+    private final com.secondlife.secondlife.repository.AiChatSessionRepository sessions;
+
+    @Transactional
+    public void delete(UUID userId, UUID postId) {
+        var post = access.owned(userId, postId, true);
+        if (!"DRAFT".equals(post.getStatus()) || post.isListingCreditCharged() || post.getPublishedAt() != null)
+            throw new com.secondlife.secondlife.exception.ConflictException("Only an unpublished DRAFT post can be deleted");
+        // Keep chat/valuation history for audit, but stop further chat on the removed draft.
+        for (var session : sessions.findByPostIdAndUser_Id(postId, userId)) {
+            session.setCompleted(true);
+            sessions.save(session);
+        }
+        try {
+            // JPA removes the gallery collection; immutable valuations and credit entries are independent.
+            posts.delete(post);
+            posts.flush();
+        } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+            throw new com.secondlife.secondlife.exception.ConflictException("Draft is referenced by another workflow and cannot be deleted");
+        }
+    }
 
     @Transactional(readOnly = true)
     public ListingDraftResponse get(UUID userId, UUID postId) {
