@@ -183,6 +183,9 @@ public class RbacDataSeeder implements ApplicationRunner {
                 Map.entry(PermissionCode.INSPECTION_ORDER_READ_ANY, new String[]{"Read All Inspections", "Read and filter all inspection orders"}),
                 Map.entry(PermissionCode.INSPECTION_ORDER_ASSIGN, new String[]{"Assign Inspection Orders", "Assign orders to active inspectors"}),
                 Map.entry(PermissionCode.INSPECTION_STAFF_MANAGE, new String[]{"Manage Inspectors", "Create and list inspectors"}),
+                Map.entry(PermissionCode.INSPECTION_CHECKLIST_MANAGE, new String[]{"Manage Inspection Checklist", "Allows managing inspection checklists and criteria"}),
+                Map.entry(PermissionCode.INSPECTION_FEE_MANAGE, new String[]{"Manage Inspection Fees", "Allows proposing and managing inspection fees"}),
+                Map.entry(PermissionCode.INSPECTION_REQUEST_SELF, new String[]{"Request Inspection", "Allows requesting and negotiating inspection on items"}),
                 Map.entry(PermissionCode.AI_CHAT_SELF, new String[]{"Use Own AI Chat", "Use own chat sessions"}),
                 Map.entry(PermissionCode.MEDIA_UPLOAD_SELF, new String[]{"Upload Media", "Upload images"})
         );
@@ -235,7 +238,8 @@ public class RbacDataSeeder implements ApplicationRunner {
                 permissions.get(PermissionCode.PROFILE_UPDATE_SELF),
                 permissions.get(PermissionCode.PASSWORD_CHANGE_SELF),
                 permissions.get(PermissionCode.SELLER_VERIFICATION_SUBMIT),
-                permissions.get(PermissionCode.SELLER_VERIFICATION_READ_SELF)
+                permissions.get(PermissionCode.SELLER_VERIFICATION_READ_SELF),
+                permissions.get(PermissionCode.INSPECTION_REQUEST_SELF)
         ));
 
         // SELLER
@@ -248,7 +252,8 @@ public class RbacDataSeeder implements ApplicationRunner {
                 permissions.get(PermissionCode.LISTING_PUBLISH_SELF),
                 permissions.get(PermissionCode.LISTING_VALUATION_SELF),
                 permissions.get(PermissionCode.CREDIT_READ_SELF),
-                permissions.get(PermissionCode.CREDIT_PURCHASE_SELF)
+                permissions.get(PermissionCode.CREDIT_PURCHASE_SELF),
+                permissions.get(PermissionCode.INSPECTION_REQUEST_SELF)
         ));
 
         // STAFF
@@ -282,6 +287,8 @@ public class RbacDataSeeder implements ApplicationRunner {
                 permissions.get(PermissionCode.INSPECTION_ORDER_READ_ANY),
                 permissions.get(PermissionCode.INSPECTION_ORDER_ASSIGN),
                 permissions.get(PermissionCode.INSPECTION_STAFF_MANAGE),
+                permissions.get(PermissionCode.INSPECTION_CHECKLIST_MANAGE),
+                permissions.get(PermissionCode.INSPECTION_FEE_MANAGE),
                 permissions.get(PermissionCode.PROFILE_READ_SELF),
                 permissions.get(PermissionCode.PROFILE_UPDATE_SELF),
                 permissions.get(PermissionCode.PASSWORD_CHANGE_SELF)
