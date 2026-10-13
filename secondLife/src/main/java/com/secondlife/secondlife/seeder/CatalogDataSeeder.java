@@ -113,15 +113,34 @@ public class CatalogDataSeeder implements ApplicationRunner {
             log.info("Đã dịch các Item cũ từ tiếng Anh sang tiếng Việt.");
         }
 
-        // 2. Nếu DB trống (chưa có Category nào), thì tạo bộ mặc định
+        // 2. Bổ sung các Item đồ gia dụng phổ biến còn thiếu vào các Category hiện có
+        for (Category cat : categoryRepository.findAll()) {
+            if ("Bếp & Phòng ăn".equalsIgnoreCase(cat.getName())) {
+                ensureItemExists(cat, "Nồi chiên không dầu");
+                ensureItemExists(cat, "Nồi áp suất điện");
+                ensureItemExists(cat, "Bình đun siêu tốc / Bình thủy điện");
+                ensureItemExists(cat, "Máy rửa bát");
+                ensureItemExists(cat, "Bộ nồi chảo");
+            } else if ("Ban công & Giặt giũ".equalsIgnoreCase(cat.getName())) {
+                ensureItemExists(cat, "Giàn phơi thông minh");
+            } else if ("Khác".equalsIgnoreCase(cat.getName()) || "Thiết bị & Tiện ích khác".equalsIgnoreCase(cat.getName())) {
+                ensureItemExists(cat, "Máy lạnh / Điều hòa");
+                ensureItemExists(cat, "Máy lọc nước gia đình");
+                ensureItemExists(cat, "Máy hút ẩm");
+            } else if ("Phòng ngủ".equalsIgnoreCase(cat.getName())) {
+                ensureItemExists(cat, "Ghế công thái học / Ghế xoay");
+            }
+        }
+
+        // 3. Nếu DB trống (chưa có Category nào), thì tạo bộ mặc định
         if (categories.isEmpty()) {
             log.info("Không tìm thấy Category nào. Đang tạo bộ dữ liệu chuẩn bằng tiếng Việt...");
             
             seedCategoryWithItems("Bếp & Phòng ăn", "Thiết bị và đồ dùng nhà bếp",
-                    List.of("Lò vi sóng / Lò nướng", "Bếp từ / Bếp hồng ngoại", "Nồi cơm điện", "Tủ lạnh", "Bàn ăn", "Máy xay sinh tố"));
+                    List.of("Lò vi sóng / Lò nướng", "Bếp từ / Bếp hồng ngoại", "Nồi cơm điện", "Nồi chiên không dầu", "Tủ lạnh", "Bàn ăn", "Máy xay sinh tố", "Bình đun siêu tốc / Bình thủy điện"));
 
             seedCategoryWithItems("Phòng ngủ", "Nội thất và phụ kiện phòng ngủ",
-                    List.of("Tủ quần áo", "Khung giường", "Nệm / Đệm", "Tủ đầu giường", "Bàn làm việc", "Bàn trang điểm"));
+                    List.of("Tủ quần áo", "Khung giường", "Nệm / Đệm", "Tủ đầu giường", "Bàn làm việc", "Bàn trang điểm", "Ghế công thái học / Ghế xoay"));
 
             seedCategoryWithItems("Ban công & Giặt giũ", "Thiết bị giặt ủi và đồ dùng ban công",
                     List.of("Máy sấy", "Máy giặt", "Giỏ đựng đồ giặt", "Bàn ban công", "Bàn ủi / Bàn là", "Giá phơi đồ"));
@@ -133,9 +152,23 @@ public class CatalogDataSeeder implements ApplicationRunner {
                     List.of("Sofa / Ghế dài", "Kệ Tivi", "Đèn đứng", "Giá sách / Kệ sách", "Bàn trà / Bàn sofa", "Ghế bành"));
 
             seedCategoryWithItems("Khác", "Các đồ dùng gia đình khác",
-                    List.of("Quạt máy", "Hộp đồ nghề", "Tủ đựng đồ", "Máy lọc không khí", "Kệ để giày", "Máy hút bụi"));
+                    List.of("Máy lạnh / Điều hòa", "Quạt máy", "Máy lọc nước gia đình", "Máy hút bụi", "Máy lọc không khí", "Kệ để giày", "Tủ đựng đồ"));
 
             log.info("Tạo xong bộ Category và Item tiếng Việt.");
+        }
+    }
+
+    private void ensureItemExists(Category cat, String itemName) {
+        boolean exists = itemRepository.findAll().stream()
+                .anyMatch(i -> i.getCategory() != null 
+                        && i.getCategory().getId().equals(cat.getId()) 
+                        && i.getName().equalsIgnoreCase(itemName));
+        if (!exists) {
+            Item item = new Item();
+            item.setCategory(cat);
+            item.setName(itemName);
+            itemRepository.save(item);
+            log.info("Đã bổ sung item đồ gia dụng '{}' vào danh mục '{}'", itemName, cat.getName());
         }
     }
 

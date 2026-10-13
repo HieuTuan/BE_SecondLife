@@ -170,15 +170,30 @@ public class InspectionServiceImpl implements InspectionService {
      */
     private String aiScanPost(Post post) {
         ChatClient client = ChatClient.builder(googleChatModel).build();
-        String prompt = String.format(
-            "Bạn là hệ thống kiểm duyệt tự động của sàn mua bán đồ cũ SecondLife. " +
-            "Hãy đánh giá bài đăng sản phẩm sau có phù hợp để hiển thị trên sàn không? " +
-            "Kiểm tra: (1) Mô tả có khớp với loại sản phẩm, (2) Không có dấu hiệu lừa đảo, " +
-            "(3) Không vi phạm nội quy (hàng cấm, hàng giả, thông tin sai lệch). " +
-            "Tiêu đề: %s. Mô tả: %s. Giá: %s VNĐ. " +
-            "CHỈ trả về đúng một trong hai dạng sau, không giải thích thêm: " +
-            "APPROVED hoặc REJECTED:<lý do ngắn gọn bằng tiếng Việt>",
-            post.getTitle(), post.getDescription(), post.getPrice()
+        String prompt = String.format("""
+                Bạn là hệ thống kiểm duyệt tự động cho sàn mua bán đồ cũ SecondLife.
+                Hãy đánh giá bài đăng sản phẩm sau có phù hợp để hiển thị trên sàn hay không:
+                Tiêu đề: %s
+                Mô tả: %s
+                Giá: %s VNĐ
+
+                TIÊU CHÍ KIỂM DUYỆT:
+                1. HỢP LỆ (APPROVED):
+                   - Sản phẩm là đồ dùng, gia dụng, thiết bị sinh hoạt cũ/đã qua sử dụng hợp pháp.
+                   - Mô tả rõ ràng (chấp nhận định dạng Markdown hoặc mô tả do AI hỗ trợ tạo).
+                   - Mức giá khả thi (không phải giá 0 VNĐ hoặc spam số ảo).
+                2. TỪ CHỐI (REJECTED):
+                   - Hàng cấm theo quy định (vũ khí, ma túy, chất kích thích, động vật quý hiếm, nội dung đồi trụy).
+                   - Dấu hiệu lừa đảo trắng trợn, spam vô nghĩa, lôi kéo giao dịch ngoài sàn.
+                   - Tiêu đề và mô tả hoàn toàn sai lệch hoặc không liên quan đến đồ dùng cần bán.
+
+                QUY TẮC BẮT BUỘC:
+                CHỈ trả về đúng một trong hai dạng sau trên một dòng duy nhất, không giải thích thêm:
+                APPROVED
+                hoặc
+                REJECTED:<lý do ngắn gọn bằng tiếng Việt>
+                """,
+                post.getTitle(), post.getDescription(), post.getPrice()
         );
 
         Prompt aiPrompt = new Prompt(new UserMessage(prompt));

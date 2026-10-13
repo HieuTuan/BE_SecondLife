@@ -16,8 +16,14 @@ public class ListingAccessService {
     private final com.secondlife.secondlife.repository.SellerVerificationRepository verifications;
 
     public void requireVerifiedSeller(UUID userId) {
-        if (!verifications.existsByUserIdAndStatus(userId, com.secondlife.secondlife.enums.SellerVerificationStatus.APPROVED))
-            throw new ConflictException("An approved seller verification is required before publish");
+        if (verifications.existsByUserIdAndStatus(userId, com.secondlife.secondlife.enums.SellerVerificationStatus.APPROVED)) {
+            return;
+        }
+        com.secondlife.secondlife.entity.User user = users.findByIdWithAuthorities(userId).orElse(null);
+        if (user != null && (user.hasRole("SELLER") || user.hasRole("ADMIN"))) {
+            return;
+        }
+        throw new ConflictException("An approved seller verification is required before publish");
     }
 
     public Post owned(UUID userId, UUID postId, boolean lock) {

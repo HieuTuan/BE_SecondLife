@@ -2,10 +2,16 @@ package com.secondlife.secondlife.seeder;
 
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.enums.AccountStatus;
+import com.secondlife.secondlife.enums.EkycStatus;
 import com.secondlife.secondlife.enums.PermissionCode;
+import com.secondlife.secondlife.enums.ReviewSource;
+import com.secondlife.secondlife.enums.RiskStatus;
 import com.secondlife.secondlife.enums.RoleCode;
+import com.secondlife.secondlife.enums.SellerVerificationStatus;
+import com.secondlife.secondlife.enums.VerificationType;
 import com.secondlife.secondlife.repository.PermissionRepository;
 import com.secondlife.secondlife.repository.RoleRepository;
+import com.secondlife.secondlife.repository.SellerVerificationRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +22,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.*;
 
 @Slf4j
@@ -27,6 +34,7 @@ public class RbacDataSeeder implements ApplicationRunner {
     private final RoleRepository roleRepository;
     private final PermissionRepository permissionRepository;
     private final UserRepository userRepository;
+    private final SellerVerificationRepository sellerVerificationRepository;
     private final PasswordEncoder passwordEncoder;
 
     @Value("${app.seeder.admin.enabled}")
@@ -125,6 +133,11 @@ public class RbacDataSeeder implements ApplicationRunner {
         seedInspectionCenterUser(roles.get(RoleCode.INSPECTION_CENTER));
         seedInspectorUser(roles.get(RoleCode.INSPECTOR));
         seedStaffUser(roles.get(RoleCode.STAFF));
+
+        // Ensure all users with SELLER role have an approved seller verification in database
+        userRepository.findAll().stream()
+                .filter(u -> u.hasRole(RoleCode.SELLER.name()))
+                .forEach(this::ensureSellerVerification);
 
         log.info("RBAC and Initial Data Seeding completed successfully.");
     }
@@ -332,7 +345,8 @@ public class RbacDataSeeder implements ApplicationRunner {
         User sellerUser = userRepository.findByEmailIgnoreCase(normalizedSellerEmail).orElse(null);
 
         if (sellerUser != null) {
-            log.warn("Seller seed account already exists; skipping changes to credentials and roles");
+            log.warn("Seller seed account already exists; ensuring approved seller verification");
+            ensureSellerVerification(sellerUser);
             return;
         }
 
@@ -348,8 +362,32 @@ public class RbacDataSeeder implements ApplicationRunner {
             sellerUser.addRole(sellerRole);
         }
 
-        userRepository.save(sellerUser);
+        sellerUser = userRepository.save(sellerUser);
+        ensureSellerVerification(sellerUser);
         log.info("Successfully seeded default Seller user [{}] from environment variables.", normalizedSellerEmail);
+    }
+
+    private void ensureSellerVerification(User user) {
+        if (sellerVerificationRepository == null || user == null) return;
+        if (!sellerVerificationRepository.existsByUserIdAndStatus(user.getId(), SellerVerificationStatus.APPROVED)) {
+            SellerVerification sv = new SellerVerification(
+                    user,
+                    VerificationType.CITIZEN_ID,
+                    null,
+                    "https://res.cloudinary.com/dmcodhbcc/image/upload/v1/sample_id_front.jpg",
+                    "https://res.cloudinary.com/dmcodhbcc/image/upload/v1/sample_id_back.jpg",
+                    "https://res.cloudinary.com/dmcodhbcc/image/upload/v1/sample_selfie.jpg"
+            );
+            sv.setDocumentNumberHash("seed-hash-" + user.getId());
+            sv.setDocumentNumberMasked("079******001");
+            sv.setStatus(SellerVerificationStatus.APPROVED);
+            sv.setEkycStatus(EkycStatus.PASSED);
+            sv.setRiskStatus(RiskStatus.CLEAR);
+            sv.setReviewSource(ReviewSource.SYSTEM);
+            sv.setReviewedAt(Instant.now());
+            sellerVerificationRepository.save(sv);
+            log.info("Seeded approved seller verification for user [{}]", user.getEmail());
+        }
     }
 
     private void seedBuyerUser(Role buyerRole) {

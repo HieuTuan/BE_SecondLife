@@ -25,6 +25,7 @@ import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.beans.factory.annotation.Value;
 import com.secondlife.secondlife.service.ListingCreditService;
 import com.secondlife.secondlife.enums.CreditType;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Propagation;
@@ -34,6 +35,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 @Service
 public class AiChatServiceImpl implements AiChatService {
 
@@ -127,9 +129,14 @@ public class AiChatServiceImpl implements AiChatService {
             if (!media.isEmpty()) {
                 aiReply = googleChatClient.prompt(new Prompt(aiMessages)).call().content();
             } else {
-                aiReply = ollamaChatClient.prompt(
-                        new Prompt(aiMessages, OllamaChatOptions.builder().model(ollamaModel).build())
-                ).call().content();
+                try {
+                    aiReply = ollamaChatClient.prompt(
+                            new Prompt(aiMessages, OllamaChatOptions.builder().model(ollamaModel).build())
+                    ).call().content();
+                } catch (Exception ollamaEx) {
+                    log.warn("Ollama chat failed, falling back to Google Gemini: {}", ollamaEx.getMessage());
+                    aiReply = googleChatClient.prompt(new Prompt(aiMessages)).call().content();
+                }
             }
         } catch (Exception ex) {
             refundAiChatCredit(currentUserId, sessionId, currentMessageCount);
@@ -214,23 +221,37 @@ public class AiChatServiceImpl implements AiChatService {
                                                   java.util.List<org.springframework.ai.content.Media> media) {
         List<Message> aiMessages = new ArrayList<>();
         String systemPromptText = """
-                Bạn là một trợ lý AI chat bot cho hệ thống Secondlife, chuyên hỗ trợ người dùng mua bán đồ gia dụng cũ.
-                Nhiệm vụ của bạn là hỗ trợ thu thập thông tin chuyên sâu dựa trên loại sản phẩm (item) và danh mục (category) mà người dùng đang muốn bán để viết mô tả hoặc định giá.
-                Hãy chủ động đặt các câu hỏi chi tiết, bám sát vào đặc thù kỹ thuật của từng loại sản phẩm.
-                Dựa vào ngôn ngữ của user mà lựa chọn ngôn ngữ trả lời phù hợp (ưu tiên tiếng Việt).
-                Chỉ trả lời những mặt hàng liên quan đến đồ gia dụng cũ, từ chối lịch sự các chủ đề khác.
-                QUY TẮC BẮT BUỘC: KHÔNG BAO GIỜ bắt đầu câu trả lời bằng các câu dẫn dắt như 'Dưới đây là...', 'Đây là...', 'Sau đây là...', 'Vâng, đây là...'. Đi thẳng vào nội dung chính.
-                Chỉ hỗ trợ thu thập thông tin và viết mô tả. Tuyệt đối không đưa ra giá hay khoảng giá trực tiếp trong chat.
-                Khi người dùng muốn định giá, hướng dẫn sử dụng chức năng Định giá AI riêng trên bài đăng.
+                Bạn là trợ lý AI chuyên nghiệp của sàn SecondLife, chuyên hỗ trợ người bán mua bán đồ gia dụng cũ.
+                NHIỆM VỤ CỦA BẠN:
+                1. Khi nhận hình ảnh ban đầu: Phân tích khách quan tình trạng ngoại quan, màu sắc, chi tiết nhìn thấy của sản phẩm. Không suy đoán thông số không thể nhìn thấy trên ảnh.
+                2. Khi người dùng trò chuyện: Đóng vai trò chuyên viên tư vấn thu thập thông tin còn thiếu (thời gian đã sử dụng, tình trạng hoạt động thực tế, lỗi nếu có, phụ kiện kèm theo).
+                QUY TẮC BẮT BUỘC:
+                - Đi thẳng vào nội dung chính, KHÔNG bắt đầu câu trả lời bằng các câu dẫn dắt rườm rà như 'Dưới đây là...', 'Đây là...', 'Sau đây là...', 'Vâng, đây là...'.
+                - Ngôn ngữ: Tiếng Việt tự nhiên, súc tích, lịch sự.
+                - Phạm vi: Chỉ phục vụ các mặt hàng đồ gia dụng cũ, thiết bị đời sống; từ chối lịch sự nếu người dùng hỏi về các chủ đề khác hoặc hàng cấm.
+                - KHÔNG BAO GIỜ đưa ra mức giá hoặc khoảng giá cụ thể trong cuộc trò chuyện. Khi người dùng muốn định giá, hãy hướng dẫn họ sử dụng chức năng 'Định giá AI' riêng trên bài đăng sau khi hoàn tất mô tả.
                 """;
         aiMessages.add(new SystemMessage(systemPromptText));
 
         List<AiChatMessage> history = messageRepository.findBySessionIdOrderBySentAtAsc(sessionId);
-        for (AiChatMessage msg : history) {
-            if ("USER".equals(msg.getRole())) {
-                aiMessages.add(new UserMessage(msg.getMessageContent()));
+        if (history.isEmpty()) {
+            if (media != null && !media.isEmpty()) {
+                aiMessages.add(UserMessage.builder().text(userMessage).media(media).build());
             } else {
-                aiMessages.add(new AssistantMessage(msg.getMessageContent()));
+                aiMessages.add(new UserMessage(userMessage));
+            }
+        } else {
+            for (int i = 0; i < history.size(); i++) {
+                AiChatMessage msg = history.get(i);
+                if ("USER".equals(msg.getRole())) {
+                    if (i == history.size() - 1 && media != null && !media.isEmpty()) {
+                        aiMessages.add(UserMessage.builder().text(msg.getMessageContent()).media(media).build());
+                    } else {
+                        aiMessages.add(new UserMessage(msg.getMessageContent()));
+                    }
+                } else {
+                    aiMessages.add(new AssistantMessage(msg.getMessageContent()));
+                }
             }
         }
         return aiMessages;
@@ -285,6 +306,11 @@ public class AiChatServiceImpl implements AiChatService {
                 .orElseThrow(() -> new NotFoundException("Session not found"));
 
         List<Message> aiMessages = new ArrayList<>();
+        aiMessages.add(new SystemMessage("""
+                Bạn là chuyên gia biên tập mô tả sản phẩm cho sàn thương mại điện tử đồ gia dụng cũ SecondLife.
+                Nhiệm vụ của bạn là tổng hợp toàn bộ thông tin đã trao đổi thành một bài viết mô tả sản phẩm hoàn chỉnh, trung thực, chuyên nghiệp và hấp dẫn người mua.
+                """));
+
         // Load history
         List<AiChatMessage> history = messageRepository.findBySessionIdOrderBySentAtAsc(session.getId());
         for (AiChatMessage msg : history) {
@@ -295,30 +321,58 @@ public class AiChatServiceImpl implements AiChatService {
             }
         }
 
-        // Add final prompt to summarize
+        // Add final prompt to summarize both engaging title and professional description
         String finalizePrompt = """
-                Dựa vào toàn bộ cuộc trò chuyện trên, hãy tổng hợp và viết MỘT ĐOẠN VĂN MÔ TẢ NGẮN GỌN, CHUYÊN NGHIỆP về sản phẩm để đăng bán.
-                
+                Dựa vào toàn bộ cuộc trò chuyện trên, hãy tổng hợp bài đăng bán sản phẩm gồm TIÊU ĐỀ HẤP DẪN và ĐOẠN VĂN MÔ TẢ CHUYÊN NGHIỆP:
+
                 YÊU CẦU QUAN TRỌNG:
-                1. BẮT BUỘC đặt toàn bộ nội dung mô tả vào trong cặp thẻ <desc> và </desc>.
-                2. TUYỆT ĐỐI không viết gì thêm bên ngoài cặp thẻ này.
-                3. Nội dung bên trong thẻ <desc> phải là VĂN XUÔI THUẦN TÚY, súc tích, thu hút người mua.
-                4. TUYỆT ĐỐI KHÔNG sao chép lại dạng bảng hỏi-đáp, không có dòng kiểu '• Hãng?: ...', '• Tình trạng?: ...' vào trong mô tả.
-                5. Các thông tin từ cuộc trò chuyện phải được tích hợp tự nhiên vào đoạn văn mô tả.
-                6. Có thể dùng Markdown (in đậm, xuống dòng) để làm nổi bật nội dung bên trong thẻ.
+                1. TIÊU ĐỀ BÀI ĐĂNG (BẮT BUỘC đặt trong cặp thẻ <title> và </title>):
+                   - Tiêu đề phải hấp dẫn, chuyên nghiệp chuẩn sàn TMĐT theo cấu trúc:
+                     [Tên loại thiết bị] [Thương hiệu] [Dung tích/Công suất/Model cốt lõi] - [Tình trạng độ mới nổi bật].
+                   - Ví dụ:
+                     * 'Nồi Cơm Điện BlueStone 1.8L - Hàng Lướt Like New 99%'
+                     * 'Bàn Ăn Hòa Phát Gỗ Tự Nhiên - Mới 99% Chắc Chắn Bền Đẹp'
+                     * 'Máy Giặt Electrolux Inverter 8.5kg Cửa Ngang - Vắt Êm Chạy Tốt'
+                   - Tuyệt đối KHÔNG viết tiêu đề chung chung sơ sài như 'BlueStone Nồi cơm điện' hay 'Bàn ăn'.
+
+                2. ĐOẠN VĂN MÔ TẢ (BẮT BUỘC đặt trong cặp thẻ <desc> và </desc>):
+                   - Tóm tắt tình trạng chung, ngoại quan và điểm nổi bật của sản phẩm.
+                   - Chi tiết thông số và hiện trạng thực tế (độ mới, trầy xước nếu có, phụ kiện đi kèm).
+                   - Lý do thanh lý hoặc lưu ý sử dụng cho người mua.
+                   - Diễn đạt bằng lời văn tự nhiên kết hợp các gạch đầu dòng rõ ràng, không sao chép dạng hỏi-đáp thô sơ.
+                   - Có thể dùng Markdown (in đậm, xuống dòng, gạch đầu dòng).
+
+                3. TUYỆT ĐỐI không viết gì thêm bên ngoài các cặp thẻ này.
                 """;
         aiMessages.add(new UserMessage(finalizePrompt));
 
         Prompt prompt = new Prompt(aiMessages, OllamaChatOptions.builder().model(ollamaModel).build());
-        String finalDescription = call(ollamaChatClient, prompt);
+        String rawOutput = call(ollamaChatClient, prompt);
+        String finalTitle = null;
+        String finalDescription = null;
 
-        if (finalDescription != null) {
-            int start = finalDescription.indexOf("<desc>");
-            int end = finalDescription.lastIndexOf("</desc>");
-            if (start != -1 && end != -1 && end > start + 6) {
-                finalDescription = finalDescription.substring(start + 6, end).trim();
-            } else if (start != -1 && end == -1) {
-                finalDescription = finalDescription.substring(start + 6).trim();
+        if (rawOutput != null) {
+            rawOutput = rawOutput.trim();
+
+            int tStart = rawOutput.indexOf("<title>");
+            int tEnd = rawOutput.lastIndexOf("</title>");
+            if (tStart != -1 && tEnd != -1 && tEnd > tStart + 7) {
+                finalTitle = rawOutput.substring(tStart + 7, tEnd).trim();
+            }
+
+            int dStart = rawOutput.indexOf("<desc>");
+            int dEnd = rawOutput.lastIndexOf("</desc>");
+            if (dStart != -1 && dEnd != -1 && dEnd > dStart + 6) {
+                finalDescription = rawOutput.substring(dStart + 6, dEnd).trim();
+            } else if (dStart != -1 && dEnd == -1) {
+                finalDescription = rawOutput.substring(dStart + 6).trim();
+            } else {
+                finalDescription = rawOutput;
+            }
+
+            if (finalDescription.startsWith("```")) {
+                finalDescription = finalDescription.replaceFirst("^```(?:markdown|xml|text)?\\s*", "")
+                        .replaceFirst("\\s*```$", "").trim();
             }
 
             finalDescription = finalDescription.replaceAll(
@@ -328,16 +382,16 @@ public class AiChatServiceImpl implements AiChatService {
         if (finalDescription == null || finalDescription.isBlank() || finalDescription.length() > 10000)
             throw new AiProviderException("AI description is empty or too long");
             
-        return saveFinalizeResult(sessionId, finalDescription);
+        return saveFinalizeResult(sessionId, finalTitle, finalDescription);
     }
     
     @Transactional
-    protected PostFinalizeResponse saveFinalizeResult(UUID sessionId, String finalDescription) {
+    protected PostFinalizeResponse saveFinalizeResult(UUID sessionId, String finalTitle, String finalDescription) {
         AiChatSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new NotFoundException("Session not found"));
         session.setCompleted(true);
         sessionRepository.save(session);
-        return new PostFinalizeResponse(finalDescription, null);
+        return new PostFinalizeResponse(finalTitle, finalDescription, null);
     }
 
     private static void requirePositive(String property, long value) {
@@ -354,8 +408,17 @@ public class AiChatServiceImpl implements AiChatService {
     }
 
     private String call(ChatClient client, Prompt prompt) {
-        try { return client.prompt(prompt).call().content(); }
-        catch (Exception ex) { throw new AiProviderException("AI chat unavailable; please retry", ex); }
+        try { 
+            return client.prompt(prompt).call().content(); 
+        } catch (Exception ex) { 
+            if (client != googleChatClient && googleChatClient != null) {
+                try {
+                    log.warn("Ollama call failed in finalizeChat, falling back to Google Gemini: {}", ex.getMessage());
+                    return googleChatClient.prompt(prompt).call().content();
+                } catch (Exception ignored) {}
+            }
+            throw new AiProviderException("AI chat unavailable; please retry", ex); 
+        }
     }
 
     private void requirePostOwner(UUID postId, UUID userId) {
