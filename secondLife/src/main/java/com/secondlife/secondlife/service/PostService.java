@@ -15,9 +15,13 @@ public interface PostService {
     PostInitResponse initPost(UUID userId, PostInitRequest request);
 
     PostFinalizeResponse finalizeChatAndDescription(UUID userId, UUID sessionId);
+    PostFinalizeResponse finalizeChatAndDescription(UUID userId, UUID sessionId, String message);
     PostFinalizeResponse regenerateChatAndDescription(UUID userId, UUID sessionId);
+    PostFinalizeResponse regenerateChatAndDescription(UUID userId, UUID sessionId, String message);
 
     PostSubmitResponse submitPost(UUID userId, UUID postId, PostSubmitRequest request);
+
+    String suggestTitle(UUID userId, UUID postId, String context);
 
     AiPriceEstimationResponse estimatePrice(UUID userId, UUID postId, String requestId);
 

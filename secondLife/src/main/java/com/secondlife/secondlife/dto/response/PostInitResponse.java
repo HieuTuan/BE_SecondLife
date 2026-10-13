@@ -13,4 +13,11 @@ public class PostInitResponse {
     private UUID postId;
     private UUID sessionId;
     private String aiInitialMessage;
+    private String aiDescription;
+
+    public PostInitResponse(UUID postId, UUID sessionId, String aiInitialMessage) {
+        this.postId = postId;
+        this.sessionId = sessionId;
+        this.aiInitialMessage = aiInitialMessage;
+    }
 }

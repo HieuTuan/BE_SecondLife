@@ -27,6 +27,21 @@ public class ListingCreditService {
         entry.setQuantityDelta(-1); entry.setBalanceAfter(after); entry.setIdempotencyKey(key);
         entry.setCreatedAt(Instant.now()); ledger.save(entry);
     }
+
+    /**
+     * Autonomous transaction: commits credit deduction immediately.
+     * Used when external AI resources (Vision/Scan) are consumed, so credits remain consumed
+     * even if downstream validation throws an exception.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void consumeImmediately(UUID userId, CreditType type, String key) {
+        if (ledger.existsByIdempotencyKey(key)) return;
+        long after = balances.consumeOne(userId, type);
+        CreditLedgerEntry entry = new CreditLedgerEntry();
+        entry.setUserId(userId); entry.setCreditType(type); entry.setEntryType("CONSUME");
+        entry.setQuantityDelta(-1); entry.setBalanceAfter(after); entry.setIdempotencyKey(key);
+        entry.setCreatedAt(Instant.now()); ledger.save(entry);
+    }
     @Transactional(propagation = Propagation.MANDATORY)
     public void refund(UUID userId, CreditType type, String key) {
         if (ledger.existsByIdempotencyKey(key)) return;

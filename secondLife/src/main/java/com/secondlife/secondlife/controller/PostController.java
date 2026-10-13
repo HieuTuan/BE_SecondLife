@@ -62,18 +62,34 @@ public class PostController {
     @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
     public ResponseEntity<PostFinalizeResponse> finalizeChat(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @PathVariable UUID sessionId) {
+            @PathVariable UUID sessionId,
+            @RequestBody(required = false) java.util.Map<String, String> body) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        return ResponseEntity.ok(postService.finalizeChatAndDescription(userId, sessionId));
+        String message = body != null ? body.get("message") : null;
+        return ResponseEntity.ok(postService.finalizeChatAndDescription(userId, sessionId, message));
     }
 
     @PostMapping("/regenerate-chat/{sessionId}")
     @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
     public ResponseEntity<PostFinalizeResponse> regenerateChat(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @PathVariable UUID sessionId) {
+            @PathVariable UUID sessionId,
+            @RequestBody(required = false) java.util.Map<String, String> body) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        return ResponseEntity.ok(postService.regenerateChatAndDescription(userId, sessionId));
+        String message = body != null ? body.get("message") : null;
+        return ResponseEntity.ok(postService.regenerateChatAndDescription(userId, sessionId, message));
+    }
+
+    @PostMapping("/{postId}/suggest-title")
+    @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
+    public ResponseEntity<java.util.Map<String, String>> suggestTitle(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID postId,
+            @RequestBody(required = false) java.util.Map<String, String> body) {
+        UUID userId = currentUserProvider.resolveUserId(userDetails);
+        String context = body != null ? body.get("context") : null;
+        String title = postService.suggestTitle(userId, postId, context);
+        return ResponseEntity.ok(java.util.Map.of("title", title));
     }
 
     @PostMapping("/submit/{postId}")
