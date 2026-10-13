@@ -73,10 +73,9 @@ public class ReverseGeocodingService {
             if(!result.isObject()) throw malformed();
             if(!Set.of("street","building","amenity").contains(result.path("result_type").asText())) continue;
             String country=result.path("country_code").asText().strip().toUpperCase(Locale.ROOT);
-            // A returned state is authoritative; city is a fallback only when state is absent.
-            String cityName=result.path("state").asText().strip();
-            if(cityName.isBlank()) cityName=result.path("city").asText();
-            var city=policy.allowedCity(cityName);
+            // Normalize legacy province names; an unrelated state still cannot be overridden by city text.
+            String state=result.path("state").asText("").strip();
+            var city=state.isBlank()?policy.allowedCity(result.path("city").asText("")):policy.allowedAdministrativeCity(state);
             if(!"VN".equals(country) || city==null) throw new BadRequestException("Địa chỉ nằm ngoài khu vực phục vụ Hà Nội, Đà Nẵng và Thành phố Hồ Chí Minh");
             String address=result.path("formatted").asText();
             if(address.isBlank() || address.length()>500) throw malformed();
