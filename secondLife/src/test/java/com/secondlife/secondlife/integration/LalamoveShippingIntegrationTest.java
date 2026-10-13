@@ -39,6 +39,10 @@ import tools.jackson.databind.node.ObjectNode;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.Clock;
+import java.time.Duration;
+import java.sql.Timestamp;
+import java.util.concurrent.*;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -85,6 +89,10 @@ class LalamoveShippingIntegrationTest {
     @Autowired UserWalletRepository wallets;
     @Autowired JdbcTemplate jdbc;
     @Autowired JwtTokenProvider jwt;
+    @Autowired com.secondlife.secondlife.service.impl.OrderAutoReleaseService autoRelease;
+    @Autowired com.secondlife.secondlife.service.OrderService orderService;
+    @Autowired com.secondlife.secondlife.repository.OrderRepository orderRepository;
+    @MockitoBean(name = "orderReleaseClock") Clock releaseClock;
     @MockitoBean ShippingProvider carrier;
     @MockitoBean AiPriceProvider priceProvider;
     @MockitoBean CloudinaryService cloudinary;
@@ -93,6 +101,7 @@ class LalamoveShippingIntegrationTest {
     @MockitoBean com.secondlife.secondlife.service.shipping.ReverseGeocodingService geocoding;
 
     @BeforeEach void carrierReplies() {
+        when(releaseClock.instant()).thenReturn(Instant.now());
         when(geocoding.shipping(any())).thenAnswer(invocation -> {
             com.secondlife.secondlife.dto.shipping.ShippingAddressRequest request=invocation.getArgument(0);
             return new com.secondlife.secondlife.dto.shipping.ShippingAddress(request.name(),request.phone(),
@@ -113,6 +122,8 @@ class LalamoveShippingIntegrationTest {
 
     @Test void paidCoordinateQuoteSignedCarrierDeliveryAndBuyerConfirmationSettleCommissionNetExactlyOnce() throws Exception {
         Fixture f = fixture();
+        User admin = user("ADMIN", BigDecimal.ZERO);
+        JsonNode before = systemWallet(admin);
         JsonNode quote = quote(f);
         assertMoney(PRICE.add(FEE), quote.path("totalPayable").decimalValue());
         UUID quoteId = UUID.fromString(quote.path("quoteId").asText());
@@ -149,6 +160,167 @@ class LalamoveShippingIntegrationTest {
         assertMoney(new BigDecimal("50000"), settlement.path("platformCommission").decimalValue());
         assertMoney(new BigDecimal("950000"), settlement.path("sellerPayout").decimalValue());
         assertMoney(FEE, settlement.path("shippingFee").decimalValue());
+        JsonNode after = systemWallet(admin);
+        assertMoney(before.path("heldBalance").decimalValue(), after.path("heldBalance").decimalValue());
+        assertMoney(before.path("shippingBalance").decimalValue().add(FEE), after.path("shippingBalance").decimalValue());
+        assertMoney(before.path("revenueBalance").decimalValue().add(new BigDecimal("50000")), after.path("revenueBalance").decimalValue());
+        assertEquals(1, systemTransactions(orderId, "SETTLEMENT"));
+    }
+
+    @Test void systemWalletHoldsOrderPaymentAndReturnsBothProductAndUnusedShippingOnCancellation() throws Exception {
+        Fixture f = fixture();
+        User admin = user("ADMIN", BigDecimal.ZERO);
+        JsonNode before = systemWallet(admin);
+        UUID orderId = checkout(f, quoteId(quote(f)));
+        JsonNode held = systemWallet(admin);
+        assertMoney(before.path("heldBalance").decimalValue().add(PRICE), held.path("heldBalance").decimalValue());
+        assertMoney(before.path("shippingBalance").decimalValue().add(FEE), held.path("shippingBalance").decimalValue());
+        assertMoney(before.path("revenueBalance").decimalValue(), held.path("revenueBalance").decimalValue());
+        mvc.perform(get("/api/v1/admin/system-wallet").header("Authorization", bearer(f.buyer())))
+                .andExpect(status().isForbidden());
+        for (int retry = 0; retry < 2; retry++)
+            mvc.perform(put("/api/v1/orders/" + orderId + "/cancel").header("Authorization", bearer(f.buyer())))
+                    .andExpect(status().isOk());
+        JsonNode refunded = systemWallet(admin);
+        for (String field : List.of("heldBalance", "shippingBalance", "revenueBalance", "totalBalance"))
+            assertMoney(before.path(field).decimalValue(), refunded.path(field).decimalValue());
+        assertMoney(FUNDS, balance(f.buyer()));
+        assertEquals(1, transactions(orderId, "REFUND"));
+    }
+
+    private JsonNode systemWallet(User admin) throws Exception {
+        return tree(mvc.perform(get("/api/v1/admin/system-wallet").header("Authorization", bearer(admin)))
+                .andExpect(status().isOk()).andReturn()).path("data");
+    }
+
+    @Test void autoSettlementWaitsFor48HoursAfterCarrierDeliveryAndManualReplayDoesNotPayAgain() throws Exception {
+        Fixture f = fixture();
+        User admin = user("ADMIN", BigDecimal.ZERO);
+        JsonNode before = systemWallet(admin);
+        UUID id = deliveredOrder(f);
+        Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        when(releaseClock.instant()).thenReturn(now);
+        deliveredAt(id, now.minus(Duration.ofHours(48)).plusSeconds(1));
+        assertFalse(autoRelease.releaseIfDue(id));
+        assertOrder(id, "DELIVERED", "HELD");
+        assertEquals(0, transactions(id, "EARNING"));
+        deliveredAt(id, now.minus(Duration.ofHours(48)));
+        var due = orderRepository.findDueSettlementOrders(com.secondlife.secondlife.enums.OrderStatus.DELIVERED,
+                com.secondlife.secondlife.enums.EscrowStatus.HELD, autoRelease.dueCutoff(),
+                org.springframework.data.domain.PageRequest.of(0, 1000));
+        assertTrue(due.stream().anyMatch(row -> row.getId().equals(id)));
+        var last = due.stream().filter(row -> row.getId().equals(id)).findFirst().orElseThrow();
+        assertTrue(orderRepository.findDueSettlementOrdersAfter(com.secondlife.secondlife.enums.OrderStatus.DELIVERED,
+                com.secondlife.secondlife.enums.EscrowStatus.HELD, autoRelease.dueCutoff(), last.getDeliveredAt(), last.getId(),
+                org.springframework.data.domain.PageRequest.of(0, 1000)).stream().noneMatch(row -> row.getId().equals(id)));
+        assertTrue(autoRelease.releaseIfDue(id));
+        assertFalse(autoRelease.releaseIfDue(id));
+        mvc.perform(put("/api/v1/orders/" + id + "/delivered").header("Authorization", bearer(f.buyer())))
+                .andExpect(status().isOk());
+        assertOrder(id, "COMPLETED", "RELEASED");
+        assertMoney(new BigDecimal("950000"), balance(f.seller()));
+        assertEquals(1, transactions(id, "EARNING"));
+        assertEquals(1, systemTransactions(id, "SETTLEMENT"));
+        JsonNode after = systemWallet(admin);
+        assertMoney(before.path("heldBalance").decimalValue(), after.path("heldBalance").decimalValue());
+        assertMoney(before.path("revenueBalance").decimalValue().add(new BigDecimal("50000")), after.path("revenueBalance").decimalValue());
+        JsonNode history = tree(mvc.perform(get("/api/v1/admin/system-wallet/transactions?page=0&size=1")
+                .header("Authorization", bearer(admin))).andExpect(status().isOk()).andReturn()).path("data");
+        assertEquals("SETTLEMENT", history.path("items").get(0).path("type").asText());
+        assertEquals(id.toString(), history.path("items").get(0).path("orderId").asText());
+    }
+
+    @Test void buyerConfirmationAndAutomaticSettlementRacingPaySellerOnlyOnce() throws Exception {
+        Fixture f = fixture(); UUID id = deliveredOrder(f);
+        deliveredAt(id, Instant.now().minus(Duration.ofHours(49)));
+        var executor = Executors.newFixedThreadPool(2);
+        var start = new CountDownLatch(1);
+        try {
+            var automatic = executor.submit(() -> { start.await(); return autoRelease.releaseIfDue(id); });
+            var buyer = executor.submit(() -> { start.await(); return orderService.confirmDelivery(f.buyer().getId(), id); });
+            start.countDown();
+            automatic.get(30, TimeUnit.SECONDS);
+            assertEquals(com.secondlife.secondlife.enums.OrderStatus.COMPLETED, buyer.get(30, TimeUnit.SECONDS).getStatus());
+            assertOrder(id, "COMPLETED", "RELEASED");
+            assertMoney(new BigDecimal("950000"), balance(f.seller()));
+            assertEquals(1, transactions(id, "EARNING"));
+            assertEquals(1, systemTransactions(id, "SETTLEMENT"));
+        } finally { executor.shutdownNow(); }
+    }
+
+    @Test void insufficientBuyerFundsRollBackSystemHoldOrderAndQuoteConsumption() throws Exception {
+        Fixture f = fixture(); User admin = user("ADMIN", BigDecimal.ZERO);
+        UUID quote = quoteId(quote(f)); JsonNode before = systemWallet(admin);
+        jdbc.update("UPDATE user_wallets SET balance = 0 WHERE user_id = ?", f.buyer().getId());
+        mvc.perform(post("/api/v1/orders").header("Authorization", bearer(f.buyer()))
+                .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("postId", f.post().getId(),
+                        "shippingQuoteId", quote, "requestId", UUID.randomUUID())))).andExpect(status().isBadRequest());
+        JsonNode after = systemWallet(admin);
+        assertMoney(before.path("totalBalance").decimalValue(), after.path("totalBalance").decimalValue());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM orders WHERE post_id = ?", Integer.class, f.post().getId()));
+        assertNull(jdbc.queryForObject("SELECT consumed_order_id FROM shipping_quotes WHERE id = ?", UUID.class, quote));
+        assertEquals("ACTIVE", posts.findById(f.post().getId()).orElseThrow().getStatus());
+    }
+
+    @Test void failedSellerCreditRollsBackSettlementAndSystemBalancesThenRetrySucceeds() throws Exception {
+        Fixture f = fixture(); UUID id = deliveredOrder(f); User admin = user("ADMIN", BigDecimal.ZERO);
+        JsonNode before = systemWallet(admin);
+        jdbc.update("UPDATE user_wallets SET balance = 9999999999999999.99 WHERE user_id = ?", f.seller().getId());
+        mvc.perform(put("/api/v1/orders/" + id + "/delivered").header("Authorization", bearer(f.buyer())))
+                .andExpect(status().isInternalServerError());
+        assertOrder(id, "DELIVERED", "HELD");
+        assertEquals(0, transactions(id, "EARNING"));
+        assertEquals(0, systemTransactions(id, "SETTLEMENT"));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM order_settlements WHERE order_id = ?", Integer.class, id));
+        assertMoney(before.path("totalBalance").decimalValue(), systemWallet(admin).path("totalBalance").decimalValue());
+        jdbc.update("UPDATE user_wallets SET balance = 0 WHERE user_id = ?", f.seller().getId());
+        mvc.perform(put("/api/v1/orders/" + id + "/delivered").header("Authorization", bearer(f.buyer())))
+                .andExpect(status().isOk());
+        assertMoney(new BigDecimal("950000"), balance(f.seller()));
+    }
+
+    @Test void approvedReturnFreezesEscrowAndRefundsProductWithoutPayingSellerOrCommission() throws Exception {
+        Fixture f = fixture(); User admin = user("ADMIN", BigDecimal.ZERO);
+        JsonNode before = systemWallet(admin); UUID id = deliveredOrder(f);
+        JsonNode returned = tree(mvc.perform(post("/api/v1/orders/" + id + "/shipments")
+                .header("Authorization", bearer(admin)).contentType(MediaType.APPLICATION_JSON)
+                .content(body(Map.of("requestId", UUID.randomUUID(), "leg", "BUYER_TO_SELLER", "reason", "Approved product return"))))
+                .andExpect(status().isOk()).andReturn()).path("data");
+        assertOrder(id, "DELIVERED", "FROZEN");
+        deliveredAt(id, Instant.now().minus(Duration.ofHours(49)));
+        assertFalse(autoRelease.releaseIfDue(id));
+        mvc.perform(put("/api/v1/orders/" + id + "/delivered").header("Authorization", bearer(f.buyer())))
+                .andExpect(status().isConflict());
+        callback(event(returned.path("orderCode").asText(), "COMPLETED", Instant.now().minusSeconds(1),
+                UUID.randomUUID().toString(), FEE)).andExpect(status().isOk());
+        for (int retry = 0; retry < 2; retry++)
+            mvc.perform(post("/api/v1/shipments/" + returned.path("shipmentId").asText() + "/refund")
+                    .header("Authorization", bearer(admin)).contentType(MediaType.APPLICATION_JSON)
+                    .content(body(Map.of("reason", "Product physically returned")))).andExpect(status().isOk());
+        assertOrder(id, "CANCELLED", "REFUNDED");
+        assertMoney(FUNDS.subtract(FEE), balance(f.buyer())); assertMoney(BigDecimal.ZERO, balance(f.seller()));
+        assertEquals(0, transactions(id, "EARNING")); assertEquals(1, transactions(id, "REFUND"));
+        assertEquals(1, systemTransactions(id, "REFUND"));
+        JsonNode after = systemWallet(admin);
+        assertMoney(before.path("heldBalance").decimalValue(), after.path("heldBalance").decimalValue());
+        assertMoney(before.path("shippingBalance").decimalValue().add(FEE), after.path("shippingBalance").decimalValue());
+        assertMoney(before.path("revenueBalance").decimalValue(), after.path("revenueBalance").decimalValue());
+    }
+
+    private UUID deliveredOrder(Fixture f) throws Exception {
+        UUID id = checkout(f, quoteId(quote(f))); JsonNode shipment = create(f.seller(), id, UUID.randomUUID());
+        callback(event(shipment.path("orderCode").asText(), "COMPLETED", Instant.now().minusSeconds(1),
+                UUID.randomUUID().toString(), FEE)).andExpect(status().isOk());
+        assertOrder(id, "DELIVERED", "HELD");
+        return id;
+    }
+
+    private void deliveredAt(UUID id, Instant at) {
+        jdbc.update("UPDATE orders SET shipping_delivered_at = ? WHERE id = ?", Timestamp.from(at), id);
+    }
+
+    private int systemTransactions(UUID id, String type) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM system_wallet_transactions WHERE order_id = ? AND type = ?", Integer.class, id, type);
     }
 
     @Test void forgedWebhookCannotChangeOrderAndSignedHistoryNeverIncludesCredentialOrSignature() throws Exception {

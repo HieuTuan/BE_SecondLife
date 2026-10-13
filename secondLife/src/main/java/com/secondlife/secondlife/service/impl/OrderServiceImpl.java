@@ -23,6 +23,7 @@ import com.secondlife.secondlife.service.OrderService;
 import com.secondlife.secondlife.service.WalletService;
 import com.secondlife.secondlife.service.CommissionService;
 import com.secondlife.secondlife.service.SettlementService;
+import com.secondlife.secondlife.service.SystemWalletService;
 import com.secondlife.secondlife.common.PageableUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -54,6 +55,7 @@ public class OrderServiceImpl implements OrderService {
     private final ShipmentRepository shipments;
     private final CommissionService commissions;
     private final SettlementService settlements;
+    private final SystemWalletService systemWallet;
 
     @Override
     @Transactional
@@ -132,6 +134,7 @@ public class OrderServiceImpl implements OrderService {
         orderRepository.save(order);
 
         // Deduct money from buyer. This will throw an exception if insufficient balance
+        systemWallet.hold(order);
         walletService.processPayment(buyerId, finalPrice.add(order.getShippingFee()), order.getId());
 
         // Update post status so it can't be bought again
@@ -185,8 +188,6 @@ public class OrderServiceImpl implements OrderService {
         // Persist settlement and release the net seller amount using the order's policy snapshot.
         settlements.settle(order);
 
-        order.setStatus(OrderStatus.COMPLETED);
-        order.setEscrowStatus(EscrowStatus.RELEASED);
         return mapToDTO(orderRepository.save(order));
     }
 
@@ -216,6 +217,7 @@ public class OrderServiceImpl implements OrderService {
         // Carrier-created shipments may incur pickup/cancellation charges; don't silently refund a consumed shipping fee.
         BigDecimal refund=order.getFinalPrice();
         if (shipping.stream().allMatch(s -> s.getOrderCode()==null)) refund=refund.add(order.getShippingFee());
+        systemWallet.refund(order, refund);
         walletService.processRefund(order.getBuyer().getId(), refund, order.getId());
 
         order.setStatus(OrderStatus.CANCELLED);

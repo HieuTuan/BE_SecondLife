@@ -5,6 +5,7 @@ import com.secondlife.secondlife.dto.response.OrderResponseDTO;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.OrderService;
+import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springdoc.core.annotations.ParameterObject;
@@ -64,6 +65,8 @@ public class OrderController {
     }
 
     @PutMapping("/{id}/delivered")
+    @Operation(summary = "BUYER confirms receipt and releases net seller payout immediately",
+            description = "Requires carrier-confirmed delivery and HELD escrow. Safe to retry; frozen or returned orders cannot be released.")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<OrderResponseDTO> confirmDelivery(
             @AuthenticationPrincipal CustomUserDetails userDetails,

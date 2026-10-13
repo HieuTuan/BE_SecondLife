@@ -6,6 +6,7 @@ import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.exception.*;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.WalletService;
+import com.secondlife.secondlife.service.SystemWalletService;
 import com.secondlife.secondlife.service.ListingFingerprint;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,7 @@ public class ShipmentService {
     private final EntityManager entityManager;
     private final WalletService wallets;
     private final PlatformTransactionManager transactions;
+    private final SystemWalletService systemWallet;
 
     private record Prepared(UUID id, boolean submit) {}
 
@@ -225,6 +227,7 @@ public class ShipmentService {
         var order=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();
         if (order.getEscrowStatus()==EscrowStatus.REFUNDED) return ShipmentResponse.from(shipment);
         if (order.getEscrowStatus()!=EscrowStatus.FROZEN) throw new ConflictException("Return refund requires frozen funds");
+        systemWallet.refund(order, order.getFinalPrice());
         wallets.processRefund(order.getBuyer().getId(),order.getFinalPrice(),order.getId());
         order.setStatus(OrderStatus.CANCELLED); order.setEscrowStatus(EscrowStatus.REFUNDED); orders.save(order);
         shipment.setReason(reason); shipment.setRequestedBy(actor); shipments.save(shipment);
