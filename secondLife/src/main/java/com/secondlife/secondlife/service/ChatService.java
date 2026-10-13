@@ -37,7 +37,7 @@ public class ChatService {
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new NotFoundException("Post not found"));
                 
-        return chatRoomRepository.findByPostIdAndBuyerIdAndSellerId(postId, buyerId, post.getUser().getId())
+        return chatRoomRepository.findFirstByPostIdAndBuyerIdAndSellerIdOrderByCreatedAtAsc(postId, buyerId, post.getUser().getId())
                 .map(this::toDto)
                 .orElse(null);
     }
@@ -51,7 +51,7 @@ public class ChatService {
             throw new IllegalArgumentException("Seller cannot buy their own item");
         }
 
-        ChatRoom room = chatRoomRepository.findByPostIdAndBuyerIdAndSellerId(postId, buyerId, post.getUser().getId())
+        ChatRoom room = chatRoomRepository.findFirstByPostIdAndBuyerIdAndSellerIdOrderByCreatedAtAsc(postId, buyerId, post.getUser().getId())
                 .orElseGet(() -> {
                     User buyer = userRepository.findById(buyerId)
                             .orElseThrow(() -> new NotFoundException("Buyer not found"));
@@ -67,9 +67,17 @@ public class ChatService {
 
     @Transactional(readOnly = true)
     public List<ChatRoomDto> getUserRooms(UUID userId) {
-        return chatRoomRepository.findUserChatRooms(userId).stream()
-                .map(this::toDto)
-                .collect(Collectors.toList());
+        java.util.Map<String, ChatRoomDto> uniqueRooms = new java.util.LinkedHashMap<>();
+        for (ChatRoom room : chatRoomRepository.findUserChatRooms(userId)) {
+            UUID otherUserId = room.getBuyer().getId().equals(userId)
+                    ? room.getSeller().getId()
+                    : room.getBuyer().getId();
+            String key = room.getPost().getId() + "_" + otherUserId;
+            if (!uniqueRooms.containsKey(key)) {
+                uniqueRooms.put(key, toDto(room));
+            }
+        }
+        return new java.util.ArrayList<>(uniqueRooms.values());
     }
 
     @Transactional(readOnly = true)

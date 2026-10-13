@@ -45,4 +45,32 @@ class MainFlowDescriptionTest {
         verify(ollama, times(1)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
         verifyNoInteractions(legacyCredits);
     }
+
+    @Test
+    void finalizingDescriptionFallsBackToGoogleWhenOllamaFails() {
+        ChatModel ollama = mock(ChatModel.class);
+        ChatModel google = mock(ChatModel.class);
+        when(ollama.getOptions()).thenReturn(org.springframework.ai.chat.prompt.ChatOptions.builder().build());
+        when(google.getOptions()).thenReturn(org.springframework.ai.chat.prompt.ChatOptions.builder().build());
+        AiChatSessionRepository sessions = mock(AiChatSessionRepository.class);
+        AiChatMessageRepository messages = mock(AiChatMessageRepository.class);
+        UserRepository users = mock(UserRepository.class);
+        PostRepository posts = mock(PostRepository.class);
+        User owner = new User(); owner.setId(UUID.randomUUID());
+        when(users.findById(owner.getId())).thenReturn(Optional.of(owner));
+        AiChatSession session = new AiChatSession();
+        session.setId(UUID.randomUUID()); session.setUser(owner);
+        when(sessions.findById(session.getId())).thenReturn(Optional.of(session));
+        when(messages.findBySessionIdOrderBySentAtAsc(session.getId())).thenReturn(List.of());
+        when(ollama.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenThrow(new org.springframework.web.client.ResourceAccessException("Connection refused"));
+        when(google.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage("<title>Test Title</title><desc>Fallback Description</desc>")))));
+        var service =
+                new AiChatServiceImpl(ollama, google, sessions, messages, users, posts,
+                10 * 1024 * 1024L, 6, 20, 60, 30, "gemma4:31b-cloud", mock(com.secondlife.secondlife.service.ListingCreditService.class));
+        var response = service.finalizeChat(session.getId(), owner.getId());
+        assertEquals("Fallback Description", response.getDescription());
+        assertEquals("Test Title", response.getTitle());
+        verify(ollama, times(1)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
+        verify(google, times(1)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
+    }
 }

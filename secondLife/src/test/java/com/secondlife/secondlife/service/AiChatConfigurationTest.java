@@ -182,6 +182,7 @@ class AiChatConfigurationTest {
         when(google.call(any(Prompt.class))).thenReturn(new ChatResponse(
                 List.of(new Generation(new AssistantMessage("Product description")))));
         when(users.findByIdForRoleUpdate(owner.getId())).thenReturn(Optional.of(owner));
+        when(users.findById(owner.getId())).thenReturn(Optional.of(owner));
         when(sessions.findById(session.getId())).thenReturn(Optional.of(session));
         try (var context = new AnnotationConfigApplicationContext()) {
             Map<String, Object> settings = new LinkedHashMap<>(Map.of(
@@ -199,6 +200,7 @@ class AiChatConfigurationTest {
             context.registerBean(AiChatMessageRepository.class, () -> messages);
             context.registerBean(UserRepository.class, () -> users);
             context.registerBean(PostRepository.class, () -> posts);
+            context.registerBean(ListingCreditService.class, () -> org.mockito.Mockito.mock(ListingCreditService.class));
             context.registerBean(AiChatServiceImpl.class);
             context.refresh();
             return context.getBean(AiChatServiceImpl.class);

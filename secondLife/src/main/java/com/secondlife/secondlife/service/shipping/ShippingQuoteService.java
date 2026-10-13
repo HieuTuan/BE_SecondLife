@@ -42,7 +42,12 @@ public class ShippingQuoteService {
     }
     @Transactional public ShippingQuoteResponse quote(UUID buyerId,ShippingQuoteRequest request) {
         Post post=posts.findById(request.postId()).orElseThrow(() -> new NotFoundException("Post not found"));
-        if (!"ACTIVE".equals(post.getStatus())) throw new ConflictException("Post is not available for shipping quotation");
+        if (!"ACTIVE".equals(post.getStatus()) && !"RESERVED".equals(post.getStatus())) {
+            throw new ConflictException("Post is not available for shipping quotation");
+        }
+        if ("RESERVED".equals(post.getStatus()) && request.negotiationId() == null) {
+            throw new ConflictException("Post is reserved. You must provide a valid negotiation for shipping quotation");
+        }
         if (buyerId.equals(post.getUser().getId())) throw new BadRequestException("You cannot buy your own post");
         BigDecimal price=post.getPrice();
         if (request.negotiationId()!=null) {

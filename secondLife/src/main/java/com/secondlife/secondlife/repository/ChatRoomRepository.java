@@ -11,7 +11,11 @@ import java.util.UUID;
 
 public interface ChatRoomRepository extends JpaRepository<ChatRoom, UUID> {
 
-    Optional<ChatRoom> findByPostIdAndBuyerIdAndSellerId(UUID postId, UUID buyerId, UUID sellerId);
+    Optional<ChatRoom> findFirstByPostIdAndBuyerIdAndSellerIdOrderByCreatedAtAsc(UUID postId, UUID buyerId, UUID sellerId);
+
+    default Optional<ChatRoom> findByPostIdAndBuyerIdAndSellerId(UUID postId, UUID buyerId, UUID sellerId) {
+        return findFirstByPostIdAndBuyerIdAndSellerIdOrderByCreatedAtAsc(postId, buyerId, sellerId);
+    }
 
     @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"post", "buyer", "seller", "buyer.profile", "seller.profile"})
     @Query("SELECT cr FROM ChatRoom cr WHERE cr.buyer.id = :userId OR cr.seller.id = :userId ORDER BY cr.updatedAt DESC")
