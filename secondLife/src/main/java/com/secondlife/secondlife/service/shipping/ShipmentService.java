@@ -1,6 +1,5 @@
 package com.secondlife.secondlife.service.shipping;
 
-import com.secondlife.secondlife.config.GhnProperties;
 import com.secondlife.secondlife.dto.shipping.*;
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.enums.*;
@@ -11,6 +10,8 @@ import com.secondlife.secondlife.service.ListingFingerprint;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.*;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
@@ -18,7 +19,6 @@ import java.util.*;
 import java.time.Instant;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 
 @Service @RequiredArgsConstructor
 public class ShipmentService {
@@ -28,57 +28,22 @@ public class ShipmentService {
     private final InspectionOrderRepository inspections;
     private final ShippingQuoteRepository quotes;
     private final ShippingQuoteService quoteService;
+    private final ReverseGeocodingService geocoding;
     private final ShippingProvider provider;
-    private final GhnProperties config;
     private final ObjectMapper mapper;
     private final EntityManager entityManager;
     private final WalletService wallets;
+    private final PlatformTransactionManager transactions;
 
-    private static final Set<String> SAFE_CANCEL = Set.of("READY_TO_PICK","CANCELLED");
-    private static final Set<String> ISSUES = Set.of("lost","damage","exception","scrap");
-    private static final Set<String> KNOWN = Set.of("ready_to_pick","picking","money_collect_picking","picked","storing","sorting","transporting",
-        "delivering","money_collect_delivering","delivered","delivery_fail","waiting_to_return","return","return_transporting","return_sorting","returning","return_fail","returned","cancel","exception","lost","damage","scrap");
+    private record Prepared(UUID id, boolean submit) {}
 
-    @Transactional public ShipmentResponse importLegacy(UUID actor,boolean staff,UUID orderId,ImportShipmentRequest request) {
-        if (!staff) throw new ForbiddenException("STAFF/ADMIN must verify a legacy carrier shipment");
-        var order=orders.findByIdForUpdate(orderId).orElseThrow(() -> new NotFoundException("Order not found"));
-        UUID id=UUID.nameUUIDFromBytes((orderId+":LEGACY:"+request.requestId()).getBytes(StandardCharsets.UTF_8));
-        var replay=shipments.findById(id);
-        if (replay.isPresent()) {
-            if (!request.orderCode().equals(replay.get().getOrderCode()) || !request.reason().equals(replay.get().getReason()))
-                throw new ConflictException("requestId was already used with different legacy shipment details");
-            return ShipmentResponse.from(replay.get());
-        }
-        if (order.getShippingQuoteId()!=null || order.getEscrowStatus()!=EscrowStatus.HELD
-                || !Set.of(OrderStatus.PROCESSING,OrderStatus.SHIPPED).contains(order.getStatus()))
-            throw new ConflictException("Only unsettled legacy orders without shipping quotes can import a carrier shipment");
-        if (shipments.existsByOrderId(orderId) || shipments.findByOrderCode(request.orderCode()).isPresent())
-            throw new ConflictException("Order or carrier shipment already has a shipping association");
-        var data=provider.detail(request.orderCode());
-        if (!request.orderCode().equals(data.path("order_code").asText()) || data.path("shop_id").asInt()!=config.getShopId() || config.getShopId()<=0)
-            throw new ConflictException("GHN shipment must belong to the configured shop");
-        if (!data.path("cod_amount").isNumber() || data.path("cod_amount").decimalValue().signum()!=0)
-            throw new ConflictException("An escrow order cannot import a carrier shipment with COD collection");
-        String status=data.path("status").asText();
-        Instant time=parseProviderTime(data.get("updated_date"));
-        if (!KNOWN.contains(status) || time==null || time.isAfter(Instant.now().plusSeconds(config.getWebhookMaxFutureSkewSeconds())))
-            throw new ShippingProviderException("GHN shipment has an invalid status or update time");
-        String clientCode=data.path("client_order_code").asText();
-        if (clientCode.isBlank()) clientCode="SL"+id;
-        if (clientCode.length()>50) throw new ShippingProviderException("GHN shipment client code exceeds its limit");
-        var shipment=new Shipment(); shipment.setId(id); shipment.setOrderId(orderId); shipment.setSellerId(order.getSeller().getId());
-        shipment.setBuyerId(order.getBuyer().getId()); shipment.setRequestId(request.requestId()); shipment.setLeg("SELLER_TO_BUYER");
-        shipment.setClientOrderCode(clientCode); shipment.setOrderCode(request.orderCode()); shipment.setStatus("IMPORTED");
-        shipment.setPayload(mapper.writeValueAsString(data)); shipment.setReason(request.reason()); shipment.setRequestedBy(actor);
-        shipment.setExpectedDeliveryTime(parseProviderTime(data.get("leadtime"))); shipment=shipments.saveAndFlush(shipment);
-        var callback=new LinkedHashMap<String,Object>(); callback.put("ShopID",config.getShopId()); callback.put("OrderCode",request.orderCode());
-        callback.put("ClientOrderCode",clientCode); callback.put("Type","legacy_import"); callback.put("Status",status); callback.put("Time",time.toString());
-        callback.put("Reason",request.reason()); callback.put("VerifiedBy",actor.toString());
-        if (data.has("total_fee")) callback.put("TotalFee",data.get("total_fee"));
-        receive(mapper.valueToTree(callback)); return ShipmentResponse.from(shipment);
+    private static final Set<String> LALAMOVE_STATUSES=Set.of("ASSIGNING_DRIVER","ON_GOING","PICKED_UP","COMPLETED","CANCELED","REJECTED","EXPIRED");
+
+    public ShipmentResponse createForOrder(UUID actor,boolean staff,UUID orderId,CreateShipmentRequest request) {
+        Prepared prepared=new TransactionTemplate(transactions).execute(tx -> prepareForOrder(actor,staff,orderId,request));
+        return submit(prepared);
     }
-
-    @Transactional public ShipmentResponse createForOrder(UUID actor,boolean staff,UUID orderId,CreateShipmentRequest request) {
+    private Prepared prepareForOrder(UUID actor,boolean staff,UUID orderId,CreateShipmentRequest request) {
         var order=orders.findByIdForUpdate(orderId).orElseThrow(() -> new NotFoundException("Order not found"));
         if (!staff && !actor.equals(order.getSeller().getId())) throw new ForbiddenException("Only the seller can create an outbound shipment");
         if (order.getShippingQuoteId()==null) throw new ConflictException("Order has no paid shipping quote");
@@ -95,6 +60,7 @@ public class ShipmentService {
             var original=mapper.readTree(quote.getPayload());
             var to=mapper.readValue(quote.getSellerPickupAddress(),ShippingAddress.class);
             payload=ShippingPayloads.create(from,to,ShippingPayloads.storedParcel(original),order.getPost().getTitle(),order.getFinalPrice());
+            if (original.hasNonNull("service_type")) payload.put("service_type",original.path("service_type").asText());
             quotedFee=null;
             order.setEscrowStatus(EscrowStatus.FROZEN); orders.save(order);
         } else {
@@ -104,14 +70,18 @@ public class ShipmentService {
                 if (!staff) throw new ForbiddenException("STAFF/ADMIN creates shipments from the inspection center");
                 var inspection=inspections.findByPostId(order.getPost().getId()).orElseThrow(() -> new ConflictException("Inspection is required for the center leg"));
                 if (!"PASSED".equals(inspection.getStatus())) throw new ConflictException("Inspection has not passed");
-                if (request.fromAddress()!=null && !request.fromAddress().equals(ShippingPayloads.storedAddress(mapper.readTree(quote.getPayload()),"from")))
+                if (request.fromAddress()!=null && !matchesAddress(request.fromAddress(),ShippingPayloads.storedAddress(mapper.readTree(quote.getPayload()),"from")))
                     throw new ConflictException("Inspection center address must match the paid shipping quote");
             }
         }
-        return create(actor,orderId,null,order.getSeller().getId(),order.getBuyer().getId(),request,payload,quotedFee);
+        return prepare(actor,orderId,null,order.getSeller().getId(),order.getBuyer().getId(),request,payload,quotedFee,quote.getProvider());
     }
 
-    @Transactional public ShipmentResponse createForInspection(UUID actor,boolean staff,UUID inspectionId,CreateShipmentRequest request) {
+    public ShipmentResponse createForInspection(UUID actor,boolean staff,UUID inspectionId,CreateShipmentRequest request) {
+        Prepared prepared=new TransactionTemplate(transactions).execute(tx -> prepareForInspection(actor,staff,inspectionId,request));
+        return submit(prepared);
+    }
+    private Prepared prepareForInspection(UUID actor,boolean staff,UUID inspectionId,CreateShipmentRequest request) {
         UUID seller=inspections.findOwnerId(inspectionId).orElseThrow(() -> new NotFoundException("Inspection order not found"));
         if (!staff && !actor.equals(seller)) throw new ForbiddenException("This inspection belongs to another seller");
         if (!"SELLER_TO_CENTER".equals(request.leg()) || request.toAddress()==null) throw new BadRequestException("SELLER_TO_CENTER and an inspection center address are required");
@@ -124,14 +94,14 @@ public class ShipmentService {
         if (saved.isPresent()) {
             var original=saved.get();
             if (!Objects.equals(original.getReason(),request.reason())
-                    || !request.toAddress().equals(ShippingPayloads.storedAddress(mapper.readTree(original.getPayload()),"to")))
+                    || !matchesAddress(request.toAddress(),ShippingPayloads.storedAddress(mapper.readTree(original.getPayload()),"to")))
                 throw new ConflictException("requestId was already used with different shipment details");
             payload=readMap(original.getPayload());
-        } else payload=ShippingPayloads.create(quoteService.pickup(seller),request.toAddress(),ShippingPayloads.parcel(post),post.getTitle(),post.getPrice());
-        return create(actor,null,inspectionId,seller,null,request,payload,null);
+        } else payload=ShippingPayloads.create(quoteService.pickup(seller),geocoding.shipping(request.toAddress()),ShippingPayloads.parcel(post),post.getTitle(),post.getPrice());
+        return prepare(actor,null,inspectionId,seller,null,request,payload,null,saved.map(Shipment::getProvider).orElse(activeCarrier()));
     }
 
-    private ShipmentResponse create(UUID actor,UUID orderId,UUID inspectionId,UUID seller,UUID buyer,CreateShipmentRequest request,Map<String,Object> payload,BigDecimal fee) {
+    private Prepared prepare(UUID actor,UUID orderId,UUID inspectionId,UUID seller,UUID buyer,CreateShipmentRequest request,Map<String,Object> payload,BigDecimal fee,String carrierCode) {
         UUID parent=orderId!=null?orderId:inspectionId;
         UUID id=shipmentId(parent,request);
         payload.put("client_order_code","SL"+id);
@@ -140,8 +110,8 @@ public class ShipmentService {
         Shipment shipment;
         if (existing.isPresent()) {
             shipment=existing.get();
-            if (!serialized.equals(shipment.getPayload()) || !Objects.equals(request.reason(),shipment.getReason())) throw new ConflictException("requestId was already used with different shipment details");
-            if (shipment.getOrderCode()!=null) return ShipmentResponse.from(shipment);
+            if (!sameRoute(payload,readMap(shipment.getPayload())) || !Objects.equals(request.reason(),shipment.getReason())) throw new ConflictException("requestId was already used with different shipment details");
+            if (shipment.getOrderCode()!=null || "LALAMOVE".equals(shipment.getProvider())) return new Prepared(id,false);
         } else {
             var siblings=orderId!=null?shipments.findByOrderIdOrderByCreatedAtAsc(orderId):shipments.findByInspectionOrderIdOrderByCreatedAtAsc(inspectionId);
             boolean outbound=!"BUYER_TO_SELLER".equals(request.leg());
@@ -150,29 +120,76 @@ public class ShipmentService {
                     && (s.getLeg().equals(request.leg())
                     || (outbound && Set.of("SELLER_TO_BUYER","CENTER_TO_BUYER").contains(s.getLeg())))))
                 throw new ConflictException("A shipment is already active or uncertain; retry its original requestId");
-            if (fee==null) {
-                var total=provider.preview(payload).get("total_fee");
+            // A paid quotation can still be unexpired after its pickup schedule has passed.
+            // Refresh only new booking attempts; existing requests return above without another provider mutation.
+            if (fee==null || "LALAMOVE".equals(carrierCode)) {
+                var preview=carrier(carrierCode).preview(payload);
+                var total=preview.get("total_fee");
                 if (total==null || !total.isNumber() || total.decimalValue().signum()<0 || total.decimalValue().compareTo(BigDecimal.valueOf(1000000000))>0)
-                    throw new ShippingProviderException("GHN returned an invalid shipping fee");
-                fee=total.decimalValue();
+                    throw new ShippingProviderException("Carrier returned an invalid shipping fee");
+                if (fee!=null && total.decimalValue().compareTo(fee)>0)
+                    throw new ConflictException("The current Lalamove fee exceeds the paid shipping fee; cancel the unshipped order and checkout with a new quote");
+                if (fee==null) fee=total.decimalValue();
+                if ("LALAMOVE".equals(carrierCode)) {
+                    if (!preview.hasNonNull("provider_quote")) throw new ShippingProviderException("Lalamove returned no quotation context");
+                    payload.put("provider_quote",preview.get("provider_quote"));
+                    serialized=mapper.writeValueAsString(payload);
+                }
             }
             shipment=new Shipment(); shipment.setId(id); shipment.setOrderId(orderId); shipment.setInspectionOrderId(inspectionId);
             shipment.setSellerId(seller); shipment.setBuyerId(buyer); shipment.setRequestId(request.requestId()); shipment.setLeg(request.leg());
             shipment.setClientOrderCode("SL"+id); shipment.setPayload(serialized); shipment.setReason(request.reason()); shipment.setRequestedBy(actor);
             shipment.setStatus("CREATING"); shipment.setQuotedFee(fee);
+            shipment.setProvider(carrierCode);
             shipment=shipments.saveAndFlush(shipment);
         }
+        return new Prepared(id,true);
+    }
+    private ShipmentResponse submit(Prepared prepared) {
+        return new TransactionTemplate(transactions).execute(tx -> {
+        var shipment=lock(prepared.id());
+        if (!prepared.submit() || shipment.getOrderCode()!=null) return ShipmentResponse.from(shipment);
+        Map<String,Object> payload=readMap(shipment.getPayload());
         try {
-            var result=provider.create(payload);
+            var result=carrier(shipment.getProvider()).create(payload);
             var code=result.get("order_code");
-            if (code==null || !code.isString() || !code.asText().matches("[A-Za-z0-9_-]{1,50}")) throw new ShippingProviderException("GHN returned no valid tracking code");
-            shipment.setOrderCode(code.asText()); shipment.setProviderStatus("ready_to_pick"); shipment.setStatus("READY_TO_PICK"); shipment.setLastError(null);
+            if (code==null || !code.isString() || !code.asText().matches("[A-Za-z0-9_-]{1,50}")) throw new ShippingProviderException("Carrier returned no valid tracking code");
+            shipment.setOrderCode(code.asText());
+            String status="LALAMOVE".equals(shipment.getProvider())?result.path("status").asText():"ready_to_pick";
+            if ("LALAMOVE".equals(shipment.getProvider()) && !LALAMOVE_STATUSES.contains(status)) throw new ShippingProviderException("Lalamove returned an unknown status");
+            shipment.setProviderStatus(status); shipment.setStatus("LALAMOVE".equals(shipment.getProvider())?canonicalLalamove(status):"READY_TO_PICK"); shipment.setLastError(null);
             applyFeeAndEta(shipment,result);
+            applyCarrierLinks(shipment,result);
+            if ("LALAMOVE".equals(shipment.getProvider())) {
+                Instant delivered=parseProviderTime(result.get("delivered_at"));
+                applyLalamoveStatus(shipment,status,delivered!=null?delivered:Instant.now());
+                // The HTTP response has no carrier update timestamp. Do not use its receipt time to discard delayed callbacks.
+                if (Set.of("ASSIGNING_DRIVER","ON_GOING").contains(status)) shipment.setLastEventAt(null);
+            }
         } catch (ShippingProviderException ex) {
-            // Persist uncertainty. The same deterministic client_order_code recovers a provider-created order after timeouts.
-            shipment.setStatus("CREATION_UNCERTAIN"); shipment.setLastError("GHN creation could not be confirmed; retry the same requestId");
+            boolean rejected="LALAMOVE".equals(shipment.getProvider()) && shipment.getOrderCode()==null
+                    && Set.of(400,401,402,403,404,422,429).contains(ex.getUpstreamStatus());
+            shipment.setStatus(rejected?"CANCELLED":"CREATION_UNCERTAIN");
+            String detail=ex instanceof LalamoveRequestException?ex.getMessage():"Lalamove rejected the booking (HTTP "+ex.getUpstreamStatus()+")";
+            shipment.setLastError(rejected?detail+"; correct configuration/request before trying a fresh requestId":
+                "Creation uncertain; reconcile the existing Lalamove order, do not create another booking");
+        } catch (ConflictException | BadRequestException ex) {
+            // These exceptions reject local validation before the adapter sends a creation request.
+            String detail=switch(ex.getMessage()==null?"":ex.getMessage()) {
+                case "Seller pickup phone number must be a valid Vietnamese number",
+                     "Buyer delivery phone number must be a valid Vietnamese number",
+                     "Seller pickup phone number is required and must fit the carrier limit",
+                     "Buyer delivery phone number is required and must fit the carrier limit",
+                     "Seller pickup phone number requires an international country code",
+                     "Buyer delivery phone number requires an international country code",
+                     "Lalamove quotation expired; refresh the shipping quotation before creating the shipment",
+                     "Obtain a current Lalamove quotation before creating the shipment" -> ex.getMessage();
+                default -> "Booking validation failed before submission";
+            };
+            shipment.setStatus("CANCELLED"); shipment.setLastError(detail+"; correct the request and use a fresh requestId");
         }
         shipment.setUpdatedAt(Instant.now()); shipments.save(shipment); return ShipmentResponse.from(shipment);
+        });
     }
 
     @Transactional(readOnly=true) public List<ShipmentResponse> orderShipments(UUID actor,boolean staff,UUID id) {
@@ -188,32 +205,13 @@ public class ShipmentService {
         var shipment=shipments.findById(id).orElseThrow(() -> new NotFoundException("Shipment not found")); requireRead(actor,staff,shipment);
         return events.findByShipmentIdOrderByOccurredAtAsc(id);
     }
-    @Transactional(readOnly=true) public JsonNode label(UUID actor,boolean staff,UUID id) {
-        var shipment=shipments.findById(id).orElseThrow(() -> new NotFoundException("Shipment not found"));
-        UUID sender="BUYER_TO_SELLER".equals(shipment.getLeg())?shipment.getBuyerId():shipment.getSellerId();
-        if (!staff && !actor.equals(sender)) throw new ForbiddenException("Only the shipment sender can print the label");
-        if (shipment.getOrderCode()==null) throw new ConflictException("Shipment creation is not confirmed");
-        return provider.label(shipment.getOrderCode());
-    }
-
     @Transactional public ShipmentResponse cancel(UUID actor,boolean staff,UUID id) {
         var shipment=lock(id); if (!staff && !actor.equals(shipment.getSellerId())) throw new ForbiddenException("Only the seller can cancel this shipment");
         if (!staff && "BUYER_TO_SELLER".equals(shipment.getLeg())) throw new ForbiddenException("STAFF/ADMIN must cancel an approved return shipment");
         if ("CANCELLED".equals(shipment.getStatus())) return ShipmentResponse.from(shipment);
-        if (!SAFE_CANCEL.contains(shipment.getStatus()) || shipment.getOrderCode()==null) throw new ConflictException("Carrier pickup has started or creation is uncertain; cancellation requires reconciliation");
-        provider.cancel(shipment.getOrderCode()); shipment.setStatus("CANCELLED"); shipment.setProviderStatus("cancel"); shipment.setUpdatedAt(Instant.now());
-        shipments.save(shipment); return ShipmentResponse.from(shipment);
-    }
-    @Transactional public ShipmentResponse returnToSender(UUID actor,boolean staff,UUID id,String reason) {
-        if (!staff) throw new ForbiddenException("STAFF/ADMIN must approve return-to-sender");
-        var shipment=lock(id);
-        if (reason==null || reason.isBlank()) throw new BadRequestException("Return reason is required");
-        if (!Set.of("delivery_fail","storing","waiting_to_return","return").contains(shipment.getProviderStatus())) throw new ConflictException("GHN does not allow return-to-sender in this status");
-        provider.returnToSender(shipment.getOrderCode()); shipment.setReason(reason); shipment.setStatus("RETURN_REQUESTED");
-        if (shipment.getOrderId()!=null) {
-            var order=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();
-            if (order.getEscrowStatus()==EscrowStatus.HELD) order.setEscrowStatus(EscrowStatus.FROZEN);
-        }
+        boolean allowed="LALAMOVE".equals(shipment.getProvider()) && Set.of("ASSIGNING_DRIVER","ON_GOING").contains(shipment.getProviderStatus());
+        if (!allowed || shipment.getOrderCode()==null) throw new ConflictException("Carrier pickup has started or creation is uncertain; cancellation requires reconciliation");
+        carrier(shipment.getProvider()).cancel(shipment.getOrderCode()); shipment.setStatus("CANCELLED"); shipment.setProviderStatus("CANCELED"); shipment.setUpdatedAt(Instant.now());
         shipments.save(shipment); return ShipmentResponse.from(shipment);
     }
     @Transactional public ShipmentResponse refundReturned(UUID actor,boolean staff,UUID id,String reason) {
@@ -236,77 +234,157 @@ public class ShipmentService {
 
     @Transactional public ShipmentResponse sync(UUID actor,boolean staff,UUID id) {
         var shipment=lock(id); requireRead(actor,staff,shipment);
-        if (shipment.getOrderCode()==null) throw new ConflictException("Retry the original creation request to recover its tracking code");
-        var data=provider.detail(shipment.getOrderCode());
-        if (!shipment.getOrderCode().equals(data.path("order_code").asText())) throw new ShippingProviderException("GHN detail does not match the shipment");
-        String status=data.path("status").asText();
-        if (!KNOWN.contains(status)) throw new ShippingProviderException("GHN returned an unknown shipment status");
-        var callback=new LinkedHashMap<String,Object>(); callback.put("ShopID",config.getShopId()); callback.put("OrderCode",shipment.getOrderCode());
-        callback.put("ClientOrderCode",shipment.getClientOrderCode()); callback.put("Type","reconciliation"); callback.put("Status",status);
-        // A carrier timestamp is necessary so old callback deliveries cannot overwrite reconciliation.
-        Instant time=parseProviderTime(data.get("updated_date"));
-        if (time==null) throw new ShippingProviderException("GHN detail has no update timestamp");
-        callback.put("Time",time.toString()); callback.put("TotalFee",data.path("total_fee"));
-        receive(mapper.valueToTree(callback)); return ShipmentResponse.from(shipment);
+        if(shipment.getOrderCode()==null) throw new ConflictException("Creation is uncertain; STAFF must reconcile the carrier order code");
+        var data=carrier(shipment.getProvider()).detail(shipment.getOrderCode());
+        if(!shipment.getOrderCode().equals(data.path("order_code").asText())) throw new ShippingProviderException("Lalamove detail does not match the shipment");
+        reconcileLalamove(shipment,data);
+        return ShipmentResponse.from(shipment);
     }
 
-    public void verifyWebhook(String supplied) {
-        String expected=config.getWebhookSecret();
-        if (!config.isEnabled() || expected==null || expected.isBlank() || supplied==null
-                || !MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),supplied.getBytes(StandardCharsets.UTF_8)))
-            throw new ForbiddenException("Invalid GHN webhook credentials");
-    }
-    @Transactional public void receive(JsonNode body) {
-        if (!body.isObject() || body.path("ShopID").asInt()!=config.getShopId() || config.getShopId()<=0) throw new ForbiddenException("Webhook shop does not match");
-        String code=body.path("OrderCode").asText(),type=body.path("Type").asText();
-        if (type.isBlank()) type="switch_status";
-        if (code.isBlank() || code.length()>100 || type.length()>100) throw new BadRequestException("Webhook order code and type are required");
-        Instant time=parseProviderTime(body.get("Time"));
-        if (time==null) time=Instant.now();
-        else if (time.isAfter(Instant.now().plusSeconds(config.getWebhookMaxFutureSkewSeconds()))) throw new BadRequestException("Webhook time is invalid");
-        var found=shipments.findByOrderCode(code);
-        if (found.isEmpty()) found=shipments.findByClientOrderCode(body.path("ClientOrderCode").asText());
-        if (found.isEmpty()) throw new ShippingProviderException("Shipment is not committed yet; retry callback",503);
+    @Transactional public void receiveLalamove(JsonNode body) {
+        String code=body.path("order_code").asText();
+        var found=shipments.findByProviderAndOrderCode("LALAMOVE",code);
+        if (found.isEmpty()) throw new ShippingProviderException("Shipment is not linked yet; retry callback",503);
         var shipment=lock(found.get().getId());
-        if (shipment.getOrderCode()!=null && !code.equals(shipment.getOrderCode())) throw new BadRequestException("Webhook tracking code does not match");
-        if (!body.path("ClientOrderCode").asText().isBlank() && !shipment.getClientOrderCode().equals(body.path("ClientOrderCode").asText())) throw new BadRequestException("Webhook client order code does not match");
-        String eventKey=ListingFingerprint.sha256(code+"|"+type+"|"+time);
-        if (events.existsByEventKey(eventKey)) return;
-        String status=body.path("Status").asText();
-        if (!KNOWN.contains(status)) throw new BadRequestException("Unknown GHN status");
-        var event=new ShipmentEvent(); event.setShipmentId(shipment.getId()); event.setEventKey(eventKey); event.setType(type);
-        event.setOccurredAt(time); event.setStatus(status); event.setReason(body.path("Reason").asText()); event.setPayload(mapper.writeValueAsString(body)); events.save(event);
-        JsonNode fee=body.get("TotalFee");
-        boolean hasFee="update_fee".equals(type) || "reconciliation".equals(type) || (body.path("Fee").isObject() && !body.path("Fee").isEmpty());
-        if (hasFee && fee!=null && fee.isNumber() && fee.decimalValue().signum()>=0 && fee.decimalValue().compareTo(BigDecimal.valueOf(1000000000))<=0
-                && (shipment.getLastFeeEventAt()==null || !time.isBefore(shipment.getLastFeeEventAt()))) {
-            shipment.setActualFee(fee.decimalValue()); shipment.setLastFeeEventAt(time);
+        String key=ListingFingerprint.sha256("LALAMOVE|"+body.path("event_id").asText());
+        if (events.existsByEventKey(key)) return;
+        Instant time=parseProviderTime(body.get("occurred_at"));
+        if (time==null) throw new BadRequestException("Lalamove event has no valid update time");
+        String type=body.path("event_type").asText(),status=body.path("status").asText();
+        if (!status.isBlank() && !LALAMOVE_STATUSES.contains(status)) throw new BadRequestException("Unknown Lalamove status");
+        var event=new ShipmentEvent(); event.setShipmentId(shipment.getId()); event.setEventKey(key); event.setType(type);
+        event.setStatus(status); event.setOccurredAt(time); event.setPayload(mapper.writeValueAsString(body)); events.save(event);
+        if (shipment.getLastReconciledAt()!=null && !time.isAfter(shipment.getLastReconciledAt())) return;
+        if (body.hasNonNull("replacement_order_code")) {
+            String replacement=body.path("replacement_order_code").asText();
+            var detail=carrier("LALAMOVE").detail(replacement);
+            requireLalamoveReference(shipment,detail,replacement);
+            shipment.setOrderCode(replacement); reconcileLalamove(shipment,detail); return;
+        }
+        var fee=body.get("fee");
+        if (fee!=null && !fee.isNull() && (shipment.getLastFeeEventAt()==null || !time.isBefore(shipment.getLastFeeEventAt()))) {
+            requireFee(fee); shipment.setActualFee(fee.decimalValue()); shipment.setLastFeeEventAt(time);
         }
         if (shipment.getLastEventAt()!=null && time.isBefore(shipment.getLastEventAt())) return;
-        if ("CANCELLED".equals(shipment.getStatus()) && !"cancel".equals(status)) return;
-        // Delivery and return are terminal carrier outcomes. Record contradictory events without reopening transit.
-        if (Set.of("DELIVERED","RETURNED").contains(shipment.getStatus()) && !shipment.getProviderStatus().equals(status)) {
-            if (ISSUES.contains(status) && shipment.getOrderId()!=null) {
-                var affected=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();
-                if (affected.getEscrowStatus()==EscrowStatus.HELD) affected.setEscrowStatus(EscrowStatus.FROZEN);
+        if (body.hasNonNull("driver_id")) shipment.setDriverId(body.path("driver_id").asText());
+        if (body.hasNonNull("share_link") && body.path("share_link").asText().startsWith("https://")) shipment.setShareLink(body.path("share_link").asText());
+        if (body.hasNonNull("pod_url") && body.path("pod_url").asText().startsWith("https://")) shipment.setPodUrl(body.path("pod_url").asText());
+        if ("FAILED".equals(body.path("pod_status").asText())) freeze(shipment);
+        if (!status.isBlank()) applyLalamoveStatus(shipment,status,time);
+        shipment.setUpdatedAt(Instant.now()); shipments.save(shipment);
+    }
+
+    @Transactional public ShipmentResponse reconcileCreation(UUID actor,boolean staff,UUID id,String code) {
+        if (!staff) throw new ForbiddenException("STAFF/ADMIN must reconcile an uncertain carrier booking");
+        var shipment=lock(id);
+        if (!"LALAMOVE".equals(shipment.getProvider()) || !Set.of("CREATING","CREATION_UNCERTAIN").contains(shipment.getStatus()))
+            throw new ConflictException("Only an uncertain Lalamove booking can be reconciled");
+        if (shipments.findByProviderAndOrderCode("LALAMOVE",code).isPresent()) throw new ConflictException("Lalamove order is already linked");
+        var detail=carrier("LALAMOVE").detail(code); requireLalamoveReference(shipment,detail,code);
+        shipment.setOrderCode(code); shipment.setRequestedBy(actor); reconcileLalamove(shipment,detail);
+        return ShipmentResponse.from(shipment);
+    }
+
+    @Transactional(readOnly=true) public JsonNode tracking(UUID actor,boolean staff,UUID id) {
+        var shipment=shipments.findById(id).orElseThrow(() -> new NotFoundException("Shipment not found")); requireRead(actor,staff,shipment);
+        var data=mapper.createObjectNode(); data.put("shipmentId",id.toString()); data.put("provider",shipment.getProvider());
+        data.put("orderCode",shipment.getOrderCode()); data.put("status",shipment.getStatus()); data.put("providerStatus",shipment.getProviderStatus());
+        data.put("shareLink",shipment.getShareLink()); data.put("driverId",shipment.getDriverId()); data.put("locationStatus","UNAVAILABLE"); data.putNull("driver");
+        if ("LALAMOVE".equals(shipment.getProvider()) && shipment.getOrderCode()!=null && shipment.getDriverId()!=null && !shipment.getDriverId().isBlank()
+                && Set.of("ON_GOING","PICKED_UP").contains(shipment.getProviderStatus())) {
+            try {
+                var driver=carrier(shipment.getProvider()).driver(shipment.getOrderCode(),shipment.getDriverId());
+                if(driver!=null && driver.isObject()) {
+                    var visible=(tools.jackson.databind.node.ObjectNode)driver.deepCopy();
+                    if(usableDriverCoordinates(driver.path("coordinates"))) data.put("locationStatus","AVAILABLE");
+                    else visible.putNull("coordinates");
+                    data.set("driver",visible);
+                }
+            } catch (ShippingProviderException error) {
+                if (error.getUpstreamStatus()!=403 && error.getUpstreamStatus()!=404) throw error;
             }
+        }
+        return data;
+    }
+
+    private boolean usableDriverCoordinates(JsonNode coordinates) {
+        if(coordinates==null || !coordinates.isObject()) return false;
+        try {
+            BigDecimal latitude=new BigDecimal(coordinates.path("lat").asText());
+            BigDecimal longitude=new BigDecimal(coordinates.path("lng").asText());
+            if(latitude.abs().compareTo(BigDecimal.valueOf(90))>0 || longitude.abs().compareTo(BigDecimal.valueOf(180))>0
+                || (latitude.signum()==0 && longitude.signum()==0)) return false;
+            Instant updatedAt=parseProviderTime(coordinates.get("updatedAt"));
+            return updatedAt!=null && updatedAt.isAfter(Instant.EPOCH) && !updatedAt.isAfter(Instant.now());
+        } catch(RuntimeException invalidCoordinates) { return false; }
+    }
+
+    private void reconcileLalamove(Shipment shipment,JsonNode data) {
+        String status=data.path("status").asText();
+        if (!LALAMOVE_STATUSES.contains(status)) throw new ShippingProviderException("Unknown Lalamove shipment status");
+        Instant observedAt=Instant.now();
+        applyFeeAndEta(shipment,data); applyCarrierLinks(shipment,data);
+        Instant delivered=parseProviderTime(data.get("delivered_at"));
+        applyLalamoveStatus(shipment,status,delivered!=null?delivered:observedAt);
+        shipment.setLastReconciledAt(observedAt); shipment.setUpdatedAt(observedAt); shipment.setLastError(null); shipments.save(shipment);
+        var event=new ShipmentEvent(); event.setShipmentId(shipment.getId()); event.setEventKey(ListingFingerprint.sha256("LALAMOVE|sync|"+shipment.getId()+"|"+observedAt));
+        event.setType("RECONCILIATION"); event.setStatus(status); event.setOccurredAt(observedAt); event.setPayload(mapper.writeValueAsString(data)); events.save(event);
+    }
+    private void requireLalamoveReference(Shipment shipment,JsonNode data,String code) {
+        if (!code.equals(data.path("order_code").asText()) || !shipment.getClientOrderCode().equals(data.path("raw").path("metadata").path("secondlifeClientOrderCode").asText()))
+            throw new ConflictException("Carrier order does not contain this shipment's verified client reference");
+    }
+    private void applyLalamoveStatus(Shipment shipment,String status,Instant time) {
+        if (Set.of("DELIVERED","CANCELLED").contains(shipment.getStatus()) && !Objects.equals(shipment.getProviderStatus(),status)) {
+            if (Set.of("REJECTED","EXPIRED").contains(status)) freeze(shipment);
             return;
         }
-        shipment.setOrderCode(code); shipment.setLastEventAt(time); shipment.setProviderStatus(status); shipment.setStatus("cancel".equals(status)?"CANCELLED":status.toUpperCase(Locale.ROOT));
-        shipment.setUpdatedAt(Instant.now()); shipment.setLastError(null);
-        if ("delivered".equals(status)) { shipment.setDeliveredAt(time); String pod=body.path("PodURL").asText(); if (pod.startsWith("https://")) shipment.setPodUrl(pod); }
-        shipments.save(shipment);
+        shipment.setProviderStatus(status); shipment.setStatus(canonicalLalamove(status)); shipment.setLastEventAt(time); shipment.setLastError(null);
+        if ("COMPLETED".equals(status) && shipment.getDeliveredAt()==null) shipment.setDeliveredAt(time);
+        if (Set.of("REJECTED","EXPIRED").contains(status)) freeze(shipment);
+        if (shipment.getOrderId()==null) return;
+        var order=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();
+        if (Set.of(OrderStatus.COMPLETED,OrderStatus.CANCELLED).contains(order.getStatus())) return;
+        boolean toBuyer=Set.of("SELLER_TO_BUYER","CENTER_TO_BUYER").contains(shipment.getLeg());
+        if (toBuyer && "PICKED_UP".equals(status) && order.getShippingDeliveredAt()==null) order.setStatus(OrderStatus.SHIPPED);
+        if (toBuyer && "COMPLETED".equals(status)) { order.setStatus(OrderStatus.DELIVERED); if (order.getShippingDeliveredAt()==null) order.setShippingDeliveredAt(shipment.getDeliveredAt()); }
+        orders.save(order);
+    }
+    private void freeze(Shipment shipment) {
         if (shipment.getOrderId()!=null) {
             var order=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();
-            if (order.getStatus()==OrderStatus.COMPLETED || order.getStatus()==OrderStatus.CANCELLED) return;
-            boolean toBuyer=Set.of("SELLER_TO_BUYER","CENTER_TO_BUYER").contains(shipment.getLeg());
-            if (toBuyer && "cancel".equals(status) && "legacy_import".equals(type) && order.getShippingQuoteId()==null)
-                order.setStatus(OrderStatus.PROCESSING);
-            if (toBuyer && "delivered".equals(status)) { order.setStatus(OrderStatus.DELIVERED); order.setShippingDeliveredAt(time); }
-            else if (toBuyer && Set.of("picked","storing","sorting","transporting","delivering").contains(status) && order.getShippingDeliveredAt()==null) order.setStatus(OrderStatus.SHIPPED);
-            if ((ISSUES.contains(status) || "returned".equals(status)) && order.getEscrowStatus()==EscrowStatus.HELD) order.setEscrowStatus(EscrowStatus.FROZEN);
-            orders.save(order);
+            if (order.getEscrowStatus()==EscrowStatus.HELD) { order.setEscrowStatus(EscrowStatus.FROZEN); orders.save(order); }
         }
+    }
+    private String canonicalLalamove(String status) {
+        return switch(status) {
+            case "ASSIGNING_DRIVER" -> "READY_TO_PICK";
+            case "ON_GOING" -> "ASSIGNED";
+            case "PICKED_UP" -> "PICKED";
+            case "COMPLETED" -> "DELIVERED";
+            case "CANCELED" -> "CANCELLED";
+            case "REJECTED","EXPIRED" -> "FAILED";
+            default -> throw new ShippingProviderException("Unknown Lalamove shipment status");
+        };
+    }
+    private boolean sameRoute(Map<String,Object> a,Map<String,Object> b) {
+        var left=new LinkedHashMap<>(a); var right=new LinkedHashMap<>(b);
+        left.remove("provider_quote"); right.remove("provider_quote");
+        return mapper.readTree(mapper.writeValueAsString(left)).equals(mapper.readTree(mapper.writeValueAsString(right)));
+    }
+    private String activeCarrier() { return provider.code()==null?"LALAMOVE":provider.code(); }
+    private boolean matchesAddress(ShippingAddressRequest request,ShippingAddress stored) {
+        return new ShippingAddress(request.name().strip(),request.phone().strip(),stored.address(),request.latitude(),request.longitude()).equals(stored);
+    }
+    private ShippingProvider carrier(String code) { var chosen=provider.forProvider(code); return chosen==null?provider:chosen; }
+    private void applyCarrierLinks(Shipment shipment,JsonNode data) {
+        if (data.hasNonNull("driver_id")) shipment.setDriverId(data.path("driver_id").asText());
+        if (data.path("share_link").asText().startsWith("https://")) shipment.setShareLink(data.path("share_link").asText());
+        if (data.path("pod_url").asText().startsWith("https://")) shipment.setPodUrl(data.path("pod_url").asText());
+    }
+    private void requireFee(JsonNode fee) {
+        if (!fee.isNumber() || fee.decimalValue().signum()<0 || fee.decimalValue().compareTo(BigDecimal.valueOf(1000000000))>0)
+            throw new ShippingProviderException("Carrier returned an invalid shipping fee");
     }
     private Shipment lock(UUID id) {
         var shipment=shipments.findById(id).orElseThrow(() -> new NotFoundException("Shipment not found"));
@@ -326,7 +404,7 @@ public class ShipmentService {
     }
     @SuppressWarnings("unchecked") private Map<String,Object> readMap(String json) { return mapper.readValue(json,LinkedHashMap.class); }
     private void applyFeeAndEta(Shipment shipment,JsonNode data) {
-        var fee=data.get("total_fee"); if (fee!=null && fee.isNumber() && fee.decimalValue().signum()>=0) shipment.setActualFee(fee.decimalValue());
+        var fee=data.get("total_fee"); if (fee!=null && !fee.isNull()) { requireFee(fee); shipment.setActualFee(fee.decimalValue()); }
         shipment.setExpectedDeliveryTime(parseProviderTime(data.get("expected_delivery_time")));
     }
     private Instant parseProviderTime(JsonNode node) {

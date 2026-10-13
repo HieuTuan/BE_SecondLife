@@ -16,6 +16,8 @@ import com.secondlife.secondlife.service.AuthService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -52,7 +54,7 @@ class AuthControllerTest {
     @Test
     void register_WhenValid_ShouldReturn201WithApiResponse() throws Exception {
         UserSummaryResponse summary = new UserSummaryResponse(
-                UUID.randomUUID(), "buyer@example.com", "John Doe", "1234567890", null, AccountStatus.ACTIVE, false
+                UUID.randomUUID(), "buyer@example.com", "John Doe", "0912345678", null, AccountStatus.ACTIVE, false
         );
         AuthResponse authResponse = new AuthResponse("jwt-access", "raw-refresh", 900000L, summary, Set.of("BUYER"), Set.of("PROFILE_READ_SELF"));
 
@@ -63,7 +65,7 @@ class AuthControllerTest {
                     "email": "buyer@example.com",
                     "password": "Password@123",
                     "fullName": "John Doe",
-                    "phone": "1234567890"
+                    "phone": "0912345678"
                 }
                 """;
 
@@ -75,6 +77,53 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.message").value("User registered successfully"))
                 .andExpect(jsonPath("$.data.accessToken").value("jwt-access"))
                 .andExpect(jsonPath("$.data.user.email").value("buyer@example.com"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0312345678", "0512345678", "0712345678", "0812345678", "0912345678"})
+    void register_WhenVietnameseMobileNumberIsValid_ShouldReturn201(String phone) throws Exception {
+        UserSummaryResponse summary = new UserSummaryResponse(
+                UUID.randomUUID(), "buyer@example.com", "John Doe", phone, null, AccountStatus.ACTIVE, false
+        );
+        when(authService.register(any(RegisterRequest.class))).thenReturn(
+                new AuthResponse("jwt-access", "raw-refresh", 900000L, summary, Set.of("BUYER"), Set.of())
+        );
+
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(registrationWithPhone(phone)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.user.phone").value(phone));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "1232324224", "0012345678", "0112345678", "0212345678", "0412345678", "0612345678",
+            "091234567", "09123456789", "+84912345678", "84912345678",
+            " 0912345678", "0912345678 ", "091 234 5678", "091-234-5678", "(091)2345678",
+            "091234567a", "", "０９１２３４５６７８"
+    })
+    void register_WhenPhoneNumberHasInvalidLengthPrefixOrCharacters_ShouldReturn400(String phone) throws Exception {
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(registrationWithPhone(phone)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors[?(@.field == 'phone')]").isNotEmpty());
+
+        verifyNoInteractions(authService);
+    }
+
+    private String registrationWithPhone(String phone) {
+        return """
+                {
+                    "email": "buyer@example.com",
+                    "password": "Password@123",
+                    "fullName": "John Doe",
+                    "phone": "%s",
+                    "gender": "MALE"
+                }
+                """.formatted(phone);
     }
 
     @Test

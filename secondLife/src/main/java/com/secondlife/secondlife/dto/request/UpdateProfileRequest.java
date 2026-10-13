@@ -18,5 +18,12 @@ public record UpdateProfileRequest(
     String ward,
     String streetAddress,
     Double latitude,
-    Double longitude
-) {}
+    Double longitude,
+    @io.swagger.v3.oas.annotations.media.Schema(description="Gender selection",example="MALE",allowableValues={"MALE","FEMALE","OTHER"})
+    com.secondlife.secondlife.enums.Gender gender
+) {
+    public UpdateProfileRequest(String fullName,String phone,String avatarUrl,String province,String district,String ward,
+            String streetAddress,Double latitude,Double longitude) {
+        this(fullName,phone,avatarUrl,province,district,ward,streetAddress,latitude,longitude,null);
+    }
+}

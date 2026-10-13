@@ -5,7 +5,6 @@ import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.enums.NegotiationStatus;
 import com.secondlife.secondlife.exception.*;
 import com.secondlife.secondlife.repository.*;
-import com.secondlife.secondlife.config.GhnProperties;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,10 +22,11 @@ public class ShippingQuoteService {
     private final InspectionOrderRepository inspections;
     private final ShipmentRepository shipments;
     private final ShippingProvider provider;
-    private final GhnProperties properties;
     private final ObjectMapper mapper;
+    private final ReverseGeocodingService geocoding;
 
     @Transactional public ShippingAddress savePickup(UUID userId,ShippingAddress address) {
+        if ("LALAMOVE".equals(provider.code())) ShippingPayloads.requireCoordinates(address,"Seller pickup");
         var row = new ShippingPickupAddress(); row.setUserId(userId); row.setAddressJson(mapper.writeValueAsString(address));
         addresses.save(row); return address;
     }
@@ -65,25 +65,40 @@ public class ShippingQuoteService {
                 origin=ShippingPayloads.storedAddress(mapper.readTree(center.getPayload()),"to"); leg="CENTER_TO_BUYER";
             }
         }
-        var payload=ShippingPayloads.create(origin,request.deliveryAddress(),ShippingPayloads.parcel(post),post.getTitle(),price);
+        ShippingAddress delivery=geocoding.shipping(request.deliveryAddress());
+        var payload=ShippingPayloads.create(origin,delivery,ShippingPayloads.parcel(post),post.getTitle(),price);
+        String carrier=provider.code()==null?"LALAMOVE":provider.code();
+        if ("LALAMOVE".equals(carrier)) {
+            ShippingPayloads.requireCoordinates(sellerPickup,"Original seller pickup for return shipping");
+            ShippingPayloads.requireCoordinates(origin,"Seller/inspection center pickup");
+            ShippingPayloads.requireCoordinates(delivery,"Buyer delivery");
+            if (request.serviceType()!=null) payload.put("service_type",request.serviceType());
+        }
         var result=provider.preview(payload);
         var total=result.get("total_fee");
         if (total==null || !total.isNumber() || total.decimalValue().signum()<0 || total.decimalValue().compareTo(BigDecimal.valueOf(1000000000))>0)
-            throw new ShippingProviderException("GHN returned an invalid shipping fee");
+            throw new ShippingProviderException("Carrier returned an invalid shipping fee");
+        if (result.hasNonNull("provider_quote")) payload.put("provider_quote",result.get("provider_quote"));
         var row=new ShippingQuote(); row.setBuyerId(buyerId); row.setPostId(post.getId()); row.setPayload(mapper.writeValueAsString(payload));
+        row.setProvider(carrier);
         row.setLeg(leg);
         row.setSellerPickupAddress(mapper.writeValueAsString(sellerPickup));
-        row.setDeliveryAddress(mapper.writeValueAsString(request.deliveryAddress())); row.setFee(total.decimalValue());
-        row.setExpiresAt(Instant.now().plusSeconds(properties.getQuoteTtlSeconds()));
+        row.setDeliveryAddress(mapper.writeValueAsString(delivery)); row.setFee(total.decimalValue());
+        if ("LALAMOVE".equals(carrier)) {
+            try { row.setExpiresAt(Instant.parse(result.path("expires_at").asText())); }
+            catch (RuntimeException error) { throw new ShippingProviderException("Lalamove quotation has no valid expiry"); }
+            if (!row.getExpiresAt().isAfter(Instant.now())) throw new ShippingProviderException("Lalamove quotation already expired");
+        }
         var eta=result.get("expected_delivery_time");
         try { if (eta!=null && !eta.isNull()) row.setExpectedDeliveryTime(eta.isNumber()?Instant.ofEpochSecond(eta.longValue()):Instant.parse(eta.asText())); }
-        catch (RuntimeException ex) { throw new ShippingProviderException("GHN returned an invalid delivery estimate"); }
+        catch (RuntimeException ex) { throw new ShippingProviderException("Carrier returned an invalid delivery estimate"); }
         quotes.save(row);
         return new ShippingQuoteResponse(row.getId(),row.getLeg(),row.getFee(),price,price.add(row.getFee()),
-            BigDecimal.valueOf(((Number)payload.get("insurance_value")).longValue()),row.getExpiresAt(),row.getExpectedDeliveryTime());
+            BigDecimal.ZERO,row.getExpiresAt(),row.getExpectedDeliveryTime(),
+            carrier,result.path("provider_quote").path("serviceType").asText(null),result.path("provider_quote").path("quotationId").asText(null));
     }
     @Transactional public ShippingQuote consume(UUID buyerId,UUID postId,UUID quoteId,UUID orderId,BigDecimal price) {
-        if (quoteId==null) throw new BadRequestException("shippingQuoteId is required; obtain a GHN quote before placing the order");
+        if (quoteId==null) throw new BadRequestException("shippingQuoteId is required; obtain a shipping quote before placing the order");
         var quote=quotes.findByIdForUpdate(quoteId).orElseThrow(() -> new NotFoundException("Shipping quote not found"));
         if (!buyerId.equals(quote.getBuyerId()) || !postId.equals(quote.getPostId())) throw new ForbiddenException("Shipping quote belongs to another buyer or post");
         if (quote.getConsumedOrderId()!=null || !quote.getExpiresAt().isAfter(Instant.now())) throw new ConflictException("Shipping quote was consumed or expired; request a new quote");
