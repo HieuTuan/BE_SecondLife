@@ -11,7 +11,9 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import tools.jackson.databind.JsonNode;
 import java.util.UUID;
-@RestController @RequiredArgsConstructor @RequestMapping("/api/v1/shipping")
+@RestController
+@RequiredArgsConstructor
+@RequestMapping("/api/v1/shipping")
 public class ShippingController {
     private final ShippingCatalogService catalog;
     private final ShippingQuoteService quotes;

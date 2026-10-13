@@ -33,8 +33,11 @@ class ReverseGeocodingServiceTest {
                 "result_type",type,"country_code",country.toLowerCase(Locale.ROOT),"state",city))));
     }
     private void reply(Module module,String body) {
+        reply(module,body,lat(),lng());
+    }
+    private void reply(Module module,String body,BigDecimal latitude,BigDecimal longitude) {
         module.server.expect(requestTo(org.hamcrest.Matchers.startsWith(URL+"?"))).andExpect(method(HttpMethod.GET))
-             .andExpect(queryParam("lat","21.0333")).andExpect(queryParam("lon","105.7937"))
+             .andExpect(queryParam("lat",latitude.toPlainString())).andExpect(queryParam("lon",longitude.toPlainString()))
             .andExpect(queryParam("lang","vi")).andExpect(queryParam("format","json"))
             .andExpect(queryParam("apiKey","private-test-key")).andRespond(withSuccess(body,MediaType.APPLICATION_JSON));
     }
@@ -45,13 +48,39 @@ class ReverseGeocodingServiceTest {
         assertEquals("Địa chỉ do Geoapify xác định",result.address());assertEquals(lat(),result.latitude());assertEquals(lng(),result.longitude());
         assertNotNull(result.city());assertEquals("VN",result.countryCode());module.server.verify();
     }
+    @Test void studentCulturalHousePointReportedUnderLegacyBinhDuongBelongsToHoChiMinh() throws Exception {
+        var module=module();
+        var latitude=new BigDecimal("10.87368");var longitude=new BigDecimal("106.80174");
+        String captured=new org.springframework.core.io.ClassPathResource("geocoding/student-cultural-house.json")
+                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        reply(module,captured,latitude,longitude);
+        var result=module.service.reverse(latitude,longitude);
+        assertEquals(ShippingCatalogProperties.City.HO_CHI_MINH,result.city());
+        assertEquals(latitude,result.latitude());assertEquals(longitude,result.longitude());
+        assertEquals(mapper.readTree(captured).path("results").get(0).path("formatted").asText(),result.address());
+        module.server.verify();
+    }
+    @ParameterizedTest @ValueSource(strings={"Bình Dương","Tỉnh Bình Dương","Binh Duong Province","Bà Rịa - Vũng Tàu","Ba Ria-Vung Tau Province"})
+    void mergedHoChiMinhProvincesAreRecognizedFromLegacyGeocodingState(String state) {
+        var module=module();reply(module,response(state,"VN","Địa chỉ do Geoapify xác định","street"));
+        assertEquals(ShippingCatalogProperties.City.HO_CHI_MINH,module.service.reverse(lat(),lng()).city());module.server.verify();
+    }
+    @ParameterizedTest @ValueSource(strings={"Quảng Nam","Tỉnh Quảng Nam","Quang Nam Province"})
+    void mergedDaNangProvinceIsRecognizedFromLegacyGeocodingState(String state) {
+        var module=module();reply(module,response(state,"VN","Địa chỉ do Geoapify xác định","building"));
+        assertEquals(ShippingCatalogProperties.City.DANANG,module.service.reverse(lat(),lng()).city());module.server.verify();
+    }
+    @Test void foreignCountryCannotPassByUsingALegacyMergedProvinceName() {
+        var module=module();reply(module,response("Bình Dương","TH","Street","street"));
+        assertThrows(BadRequestException.class,()->module.service.reverse(lat(),lng()));module.server.verify();
+    }
     @Test void shippingAddressUsesOnlyProviderTextAndPreservesContactsAndInputPoint() {
         var module=module();reply(module,response("Hà Nội","VN","123 Cầu Giấy, Hà Nội, Việt Nam","building"));
         var result=module.service.shipping(new ShippingAddressRequest(" Seller "," 0912345678 ",lat(),lng()));
         assertEquals("123 Cầu Giấy, Hà Nội, Việt Nam",result.address());assertEquals("Seller",result.name());assertEquals("0912345678",result.phone());
         module.server.verify();
     }
-    @ParameterizedTest @ValueSource(strings={"Cần Thơ","Hải Phòng","Hà Nội giả"})
+    @ParameterizedTest @ValueSource(strings={"Cần Thơ","Hải Phòng","Hà Nội giả","Đồng Nai","Bình Phước","Long An","Bình Dương giả"})
     void citiesOutsideServiceAreaAreRejected(String city) {
         var module=module();reply(module,response(city,"VN","Street, Hà Nội","street"));
         assertThrows(BadRequestException.class,()->module.service.reverse(lat(),lng()));module.server.verify();

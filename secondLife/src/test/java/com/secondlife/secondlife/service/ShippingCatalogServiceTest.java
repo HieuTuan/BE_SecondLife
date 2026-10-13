@@ -48,4 +48,19 @@ class ShippingCatalogServiceTest {
         when(provider.cities()).thenReturn(mapper.readTree("[{\"locode\":\"VN HAN\"},{\"locode\":\"VN SGN\"}]"));
         assertEquals(1,restricted.cities().size());
     }
+    @Test void legacyGeocodingProvinceNamesDoNotExpandCarrierCityCatalogue() {
+        when(provider.cities()).thenReturn(mapper.readTree("""
+            [{"locode":"VN SGN","name":"Ho Chi Minh City"}, {"name":"Bình Dương"},
+             {"name":"Quảng Nam"}, {"locode":"VN XXX","name":"Bà Rịa - Vũng Tàu"}]
+            """));
+        assertEquals(1,service.cities().size());
+    }
+    @Test void administrativeAliasesRespectConfiguredAllowedCities() {
+        var properties=new ShippingCatalogProperties(); properties.setAllowedCities(List.of(ShippingCatalogProperties.City.HANOI));
+        var policy=new ShippingCatalogPolicy(properties,mapper);
+        assertNull(policy.allowedAdministrativeCity("Bình Dương"));
+        assertNull(policy.allowedAdministrativeCity("Bà Rịa - Vũng Tàu"));
+        assertNull(policy.allowedAdministrativeCity("Quảng Nam"));
+        assertEquals(ShippingCatalogProperties.City.HANOI,policy.allowedAdministrativeCity("Hà Nội"));
+    }
 }
