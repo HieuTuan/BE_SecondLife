@@ -144,7 +144,7 @@ class AuthServiceTest {
     }
 
     @Test
-    void login_WhenAccountLocked_ShouldThrowForbiddenException() {
+    void login_WhenAccountLocked_ShouldReturnGenericCredentialsError() {
         user.setAccountStatus(AccountStatus.LOCKED);
         LoginRequest request = new LoginRequest("buyer@example.com", "Pass@1234");
 
@@ -153,12 +153,14 @@ class AuthServiceTest {
         when(userRepository.findByEmailWithAuthoritiesIgnoreCase("buyer@example.com"))
                 .thenReturn(Optional.of(user));
 
-        ForbiddenException ex = assertThrows(ForbiddenException.class, () -> authService.login(request));
-        assertTrue(ex.getMessage().contains("locked"));
+        BadCredentialsException ex = assertThrows(BadCredentialsException.class, () -> authService.login(request));
+        assertEquals("Invalid email or password", ex.getMessage());
+        verifyNoInteractions(tokenService);
+        verify(userRepository, never()).save(any());
     }
 
     @Test
-    void login_WhenAccountDisabled_ShouldThrowForbiddenException() {
+    void login_WhenAccountDisabled_ShouldReturnGenericCredentialsError() {
         user.setAccountStatus(AccountStatus.DISABLED);
         LoginRequest request = new LoginRequest("buyer@example.com", "Pass@1234");
 
@@ -167,8 +169,37 @@ class AuthServiceTest {
         when(userRepository.findByEmailWithAuthoritiesIgnoreCase("buyer@example.com"))
                 .thenReturn(Optional.of(user));
 
-        ForbiddenException ex = assertThrows(ForbiddenException.class, () -> authService.login(request));
-        assertTrue(ex.getMessage().contains("disabled"));
+        BadCredentialsException ex = assertThrows(BadCredentialsException.class, () -> authService.login(request));
+        assertEquals("Invalid email or password", ex.getMessage());
+        verifyNoInteractions(tokenService);
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void login_WhenAccountDisappearsAfterAuthentication_ShouldNotRevealExistence() {
+        when(userRepository.findByEmailWithAuthoritiesIgnoreCase("buyer@example.com"))
+                .thenReturn(Optional.empty());
+
+        BadCredentialsException ex = assertThrows(BadCredentialsException.class,
+                () -> authService.login(new LoginRequest("buyer@example.com", "Pass@1234")));
+
+        assertEquals("Invalid email or password", ex.getMessage());
+        verifyNoInteractions(tokenService);
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void login_WhenStatusChangesToPending_ShouldNotIssueTokens() {
+        user.setAccountStatus(AccountStatus.PENDING_VERIFICATION);
+        when(userRepository.findByEmailWithAuthoritiesIgnoreCase("buyer@example.com"))
+                .thenReturn(Optional.of(user));
+
+        BadCredentialsException ex = assertThrows(BadCredentialsException.class,
+                () -> authService.login(new LoginRequest("buyer@example.com", "Pass@1234")));
+
+        assertEquals("Invalid email or password", ex.getMessage());
+        verifyNoInteractions(tokenService);
+        verify(userRepository, never()).save(any());
     }
 
     @Test

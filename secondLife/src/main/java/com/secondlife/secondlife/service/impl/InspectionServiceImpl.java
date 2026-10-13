@@ -101,7 +101,7 @@ public class InspectionServiceImpl implements InspectionService {
         var carrierLegs=shipments.findByInspectionOrderIdOrderByCreatedAtAsc(orderId).stream()
                 .filter(s -> "SELLER_TO_CENTER".equals(s.getLeg()) && !"CANCELLED".equals(s.getStatus())).toList();
         if (!carrierLegs.isEmpty() && !"DELIVERED".equals(carrierLegs.getLast().getStatus()))
-            throw new ConflictException("GHN must confirm delivery to the inspection center before the inspection result");
+            throw new ConflictException("Carrier must confirm delivery to the inspection center before the inspection result");
 
         order.setNote(request.getNote());
 

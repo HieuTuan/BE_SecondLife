@@ -7,6 +7,7 @@ import java.math.BigDecimal;
 @Entity @Table(name="shipping_quotes") @Getter @Setter @NoArgsConstructor
 public class ShippingQuote {
     @Id @GeneratedValue(strategy=GenerationType.UUID) private UUID id;
+    @Column(nullable=false) private String provider="LALAMOVE";
     @Column(nullable=false) private UUID buyerId;
     @Column(nullable=false) private UUID postId;
     @Column(nullable=false) private String leg="SELLER_TO_BUYER";

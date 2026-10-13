@@ -11,7 +11,7 @@ import com.secondlife.secondlife.enums.SellerVerificationStatus;
 import com.secondlife.secondlife.exception.*;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.shipping.ShippingQuoteService;
-import com.secondlife.secondlife.service.shipping.GhnPickupAddressResolver;
+import com.secondlife.secondlife.service.shipping.SellerPickupAddressResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -40,13 +40,13 @@ public class SellerOnboardingService {
     private final SellerOnboardingProperties properties;
     private final PasswordEncoder passwords;
     private final ObjectMapper mapper;
-    private final GhnPickupAddressResolver pickupAddresses;
+    private final SellerPickupAddressResolver pickupAddresses;
 
     @Transactional(readOnly = true)
     public SellerOnboardingResponse get(UUID userId) {
         return onboarding.findById(userId).map(this::response)
                 .orElseGet(() -> new SellerOnboardingResponse(null, null, null, null,
-                        false, false, "SHOP_INFORMATION", null, null, null));
+                        false, false, "SHOP_INFORMATION", null));
     }
 
     @Transactional
@@ -57,10 +57,39 @@ public class SellerOnboardingService {
         boolean changed = !Objects.equals(row.getShopName(), request.shopName())
                 || !Objects.equals(row.getEmail(), request.email())
                 || !Objects.equals(row.getPhone(), request.phone())
-                || !Objects.equals(row.getPickupAddressJson(), addressJson)
-                || !Objects.equals(row.getPickupProvinceId(), request.pickupAddress().provinceId())
-                || !Objects.equals(row.getPickupWardId(), request.pickupAddress().wardId());
+                || !Objects.equals(row.getPickupAddressJson(), addressJson);
         if (!changed) return response(row);
+        // Existing verified profiles may complete missing coordinates without replacing verified shop details.
+        if (row.getPickupAddressJson() != null) {
+            var previous = mapper.readValue(row.getPickupAddressJson(), ShippingAddress.class);
+            var updated = mapper.readValue(addressJson, ShippingAddress.class);
+            boolean samePoint = previous.latitude()!=null && previous.longitude()!=null
+                    && previous.latitude().compareTo(updated.latitude())==0
+                    && previous.longitude().compareTo(updated.longitude())==0
+                    && Objects.equals(row.getShopName(),request.shopName())
+                    && Objects.equals(row.getEmail(),request.email()) && Objects.equals(row.getPhone(),request.phone())
+                    && Objects.equals(previous.name(),updated.name()) && Objects.equals(previous.phone(),updated.phone());
+            if (samePoint) {
+                row.setPickupAddressJson(addressJson);
+                row.setPickupProvinceId(null); row.setPickupWardId(null);
+                onboarding.save(row);
+                if (row.getEmailVerifiedAt()!=null) shipping.savePickup(userId,updated);
+                return response(row);
+            }
+            boolean coordinateCompletion = (previous.latitude() == null || previous.longitude() == null)
+                    && Objects.equals(row.getShopName(), request.shopName())
+                    && Objects.equals(row.getEmail(), request.email())
+                    && Objects.equals(row.getPhone(), request.phone())
+                    && Objects.equals(previous.name(), updated.name())
+                    && Objects.equals(previous.phone(), updated.phone());
+            if (coordinateCompletion) {
+                row.setPickupAddressJson(addressJson);
+                row.setPickupProvinceId(null); row.setPickupWardId(null);
+                onboarding.save(row);
+                if (row.getEmailVerifiedAt() != null) shipping.savePickup(userId, updated);
+                return response(row);
+            }
+        }
         if (user.hasRole("SELLER") || verifications.existsByUserIdAndStatusIn(userId, STARTED_VERIFICATION)) {
             throw new ConflictException("Shop information cannot be changed after seller verification has started");
         }
@@ -69,8 +98,8 @@ public class SellerOnboardingService {
         row.setEmail(request.email());
         row.setPhone(request.phone());
         row.setPickupAddressJson(addressJson);
-        row.setPickupProvinceId(request.pickupAddress().provinceId());
-        row.setPickupWardId(request.pickupAddress().wardId());
+        row.setPickupProvinceId(null);
+        row.setPickupWardId(null);
         row.setEmailVerifiedAt(null);
         clearCode(row);
         // Keep the last send time so changing email cannot bypass the resend cooldown.
@@ -131,6 +160,8 @@ public class SellerOnboardingService {
         if (row.getEmailVerifiedAt() == null) {
             throw new ConflictException("Verify the shop email before starting eKYC");
         }
+        com.secondlife.secondlife.service.shipping.ShippingPayloads.requireCoordinates(
+                mapper.readValue(row.getPickupAddressJson(), ShippingAddress.class), "Seller pickup before eKYC");
     }
 
     private User lockUser(UUID userId) {
@@ -150,10 +181,12 @@ public class SellerOnboardingService {
 
     private SellerOnboardingResponse response(SellerOnboarding row) {
         boolean verified = row.getEmailVerifiedAt() != null;
+        var address = mapper.readValue(row.getPickupAddressJson(), ShippingAddress.class);
+        boolean ready = verified && address.latitude() != null && address.longitude() != null;
         return new SellerOnboardingResponse(row.getShopName(),
-                mapper.readValue(row.getPickupAddressJson(), ShippingAddress.class), row.getEmail(), row.getPhone(),
-                verified, verified, verified ? "EKYC" : "EMAIL_VERIFICATION", row.getEmailVerifiedAt(),
-                row.getPickupProvinceId(), row.getPickupWardId());
+                address, row.getEmail(), row.getPhone(), verified, ready,
+                address.latitude() == null || address.longitude() == null ? "SHOP_INFORMATION" : ready ? "EKYC" : "EMAIL_VERIFICATION",
+                row.getEmailVerifiedAt());
     }
 
 }

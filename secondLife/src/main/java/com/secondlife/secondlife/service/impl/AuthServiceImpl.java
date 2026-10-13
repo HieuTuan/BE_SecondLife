@@ -13,7 +13,6 @@ import com.secondlife.secondlife.enums.RoleCode;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.ForbiddenException;
-import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
@@ -24,12 +23,16 @@ import com.secondlife.secondlife.service.TokenService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
@@ -37,6 +40,9 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
+
+    private static final String INVALID_LOGIN_MESSAGE = "Invalid email or password";
+    private static final int BCRYPT_MAX_PASSWORD_BYTES = 72;
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
@@ -64,6 +70,7 @@ public class AuthServiceImpl implements AuthService {
 
         UserProfile profile = new UserProfile(user, request.fullName().trim(),
                 request.phone() != null ? request.phone().trim() : null, null);
+        profile.setGender(request.gender());
         user.setProfile(profile);
         user.addRole(buyerRole);
 
@@ -92,20 +99,26 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public AuthResponse login(LoginRequest request) {
-        String normalizedEmail = request.email().trim().toLowerCase();
+        String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
 
-        authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(normalizedEmail, request.password())
-        );
+        // BCrypt's limit is measured in UTF-8 bytes, not Java character count.
+        if (request.password().getBytes(StandardCharsets.UTF_8).length > BCRYPT_MAX_PASSWORD_BYTES) {
+            throw new BadCredentialsException(INVALID_LOGIN_MESSAGE);
+        }
+        try {
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(normalizedEmail, request.password())
+            );
+        } catch (AuthenticationException ex) {
+            // Keep unknown users, incorrect passwords and account-status failures indistinguishable.
+            throw new BadCredentialsException(INVALID_LOGIN_MESSAGE, ex);
+        }
 
         User user = userRepository.findByEmailWithAuthoritiesIgnoreCase(normalizedEmail)
-                .orElseThrow(() -> new NotFoundException("User not found: " + request.email()));
+                .orElseThrow(() -> new BadCredentialsException(INVALID_LOGIN_MESSAGE));
 
-        if (user.getAccountStatus() == AccountStatus.LOCKED) {
-            throw new ForbiddenException("Account is locked. Please contact support.");
-        }
-        if (user.getAccountStatus() == AccountStatus.DISABLED) {
-            throw new ForbiddenException("Account is disabled. Please contact support.");
+        if (user.getAccountStatus() != AccountStatus.ACTIVE) {
+            throw new BadCredentialsException(INVALID_LOGIN_MESSAGE);
         }
 
         user.setLastLoginAt(Instant.now());

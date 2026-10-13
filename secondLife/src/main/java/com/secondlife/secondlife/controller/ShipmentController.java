@@ -31,11 +31,6 @@ public class ShipmentController {
     public ApiResponse<ShipmentResponse> create(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID orderId,@Valid @RequestBody CreateShipmentRequest body) {
         return ApiResponse.success(shipments.createForOrder(actor(user),staff(),orderId,body));
     }
-    @PostMapping("/orders/{orderId}/shipments/import") @PreAuthorize("hasRole('STAFF') or hasRole('ADMIN')")
-    @io.swagger.v3.oas.annotations.Operation(summary="Link a verified GHN shipment to a legacy order", description="Only for unsettled orders created before shipping quotes existed. STAFF verifies that this carrier shipment belongs to the order; reason is audited. No additional buyer fee is charged.")
-    public ApiResponse<ShipmentResponse> importLegacy(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID orderId,@Valid @RequestBody ImportShipmentRequest body) {
-        return ApiResponse.success(shipments.importLegacy(actor(user),staff(),orderId,body));
-    }
     @GetMapping("/orders/{orderId}/shipments")
     public ApiResponse<List<ShipmentResponse>> order(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID orderId) {
         return ApiResponse.success(shipments.orderShipments(actor(user),staff(),orderId));
@@ -52,9 +47,15 @@ public class ShipmentController {
     public ApiResponse<List<ShipmentEvent>> events(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID shipmentId) {
         return ApiResponse.success(shipments.timeline(actor(user),staff(),shipmentId));
     }
-    @GetMapping("/shipments/{shipmentId}/label")
-    public ApiResponse<JsonNode> label(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID shipmentId) {
-        return ApiResponse.success(shipments.label(actor(user),staff(),shipmentId));
+    @GetMapping("/shipments/{shipmentId}/tracking")
+    @io.swagger.v3.oas.annotations.Operation(summary="Track shipment and available Lalamove driver location", description="Only shipment participants or STAFF/ADMIN. Coordinates may be unavailable before driver arrival or after completion; poll at most once every 10 seconds.")
+    public ApiResponse<JsonNode> tracking(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID shipmentId) {
+        return ApiResponse.success(shipments.tracking(actor(user),staff(),shipmentId));
+    }
+    @PostMapping("/shipments/{shipmentId}/reconcile-creation") @PreAuthorize("hasRole('STAFF') or hasRole('ADMIN')")
+    @io.swagger.v3.oas.annotations.Operation(summary="Recover an uncertain Lalamove booking", description="Supply the existing carrier orderCode from Lalamove Sandbox. Backend verifies the stored client reference using authenticated carrier detail; this API creates no new carrier order.")
+    public ApiResponse<ShipmentResponse> reconcile(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID shipmentId,@Valid @RequestBody ReconcileShipmentRequest body) {
+        return ApiResponse.success(shipments.reconcileCreation(actor(user),staff(),shipmentId,body.orderCode()));
     }
     @PostMapping("/shipments/{shipmentId}/cancel")
     public ApiResponse<ShipmentResponse> cancel(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID shipmentId) {
@@ -63,10 +64,6 @@ public class ShipmentController {
     @PostMapping("/shipments/{shipmentId}/sync")
     public ApiResponse<ShipmentResponse> sync(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID shipmentId) {
         return ApiResponse.success(shipments.sync(actor(user),staff(),shipmentId));
-    }
-    @PostMapping("/shipments/{shipmentId}/return-to-sender") @PreAuthorize("hasRole('STAFF') or hasRole('ADMIN')")
-    public ApiResponse<ShipmentResponse> returnToSender(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID shipmentId,@Valid @RequestBody ShippingDecisionRequest body) {
-        return ApiResponse.success(shipments.returnToSender(actor(user),staff(),shipmentId,body.reason()));
     }
     @PostMapping("/shipments/{shipmentId}/refund") @PreAuthorize("hasRole('STAFF') or hasRole('ADMIN')")
     public ApiResponse<ShipmentResponse> refund(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID shipmentId,@Valid @RequestBody ShippingDecisionRequest body) {

@@ -74,14 +74,54 @@ class SellerOnboardingIntegrationTest {
     @MockitoBean NotificationService notifications;
     @MockitoBean EkycService ekyc;
     @MockitoBean VnptEkycOrchestrator directEkyc;
+    @MockitoBean com.secondlife.secondlife.service.shipping.ReverseGeocodingService geocoding;
 
-    @BeforeEach void ghnCatalogue() {
-        when(carrier.provinces()).thenReturn(mapper.readTree("""
-                [{"_id":1000001,"name":"Cần Thơ","type":"province","status":1}]
-                """));
-        when(carrier.wards(1000001)).thenReturn(mapper.readTree("""
-                [{"_id":1003646,"name":"Phường Ngã Năm","type":"ward","status":1,"parent_id":1000001}]
-                """));
+    @BeforeEach void lalamoveCarrier() {
+        when(carrier.code()).thenReturn("LALAMOVE");
+        when(geocoding.shipping(any())).thenAnswer(invocation -> {
+            com.secondlife.secondlife.dto.shipping.ShippingAddressRequest request=invocation.getArgument(0);
+            return new com.secondlife.secondlife.dto.shipping.ShippingAddress(request.name(),request.phone(),
+                    "123 Nguyễn Huệ, Thành phố Hồ Chí Minh",request.latitude(),request.longitude());
+        });
+    }
+
+    @Test void geocodingFailureDoesNotSaveShopOrAllowEkyc() throws Exception {
+        User buyer=buyer();
+        doThrow(new ShippingProviderException("Geoapify unavailable",503)).when(geocoding).shipping(any());
+        mvc.perform(put("/api/v1/seller-onboarding/me").header("Authorization",bearer(buyer))
+                .contentType(MediaType.APPLICATION_JSON).content(profile("Shop A","shop@example.test")))
+                .andExpect(status().isServiceUnavailable());
+        assertTrue(onboarding.findById(buyer.getId()).isEmpty());
+        assertEkycBlocked(buyer);
+        verifyNoInteractions(ekyc,directEkyc);
+    }
+
+    @Test void addressSuppliedByClientCannotOverrideGeocodedPickup() throws Exception {
+        User buyer=buyer();
+        mvc.perform(put("/api/v1/seller-onboarding/me").header("Authorization",bearer(buyer))
+                .contentType(MediaType.APPLICATION_JSON).content(profile("Shop A","shop@example.test")
+                        .replace("\"latitude\"", "\"address\":\"FAKE ADDRESS\",\"latitude\"")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.pickupAddress.address").value("123 Nguyễn Huệ, Thành phố Hồ Chí Minh"));
+        mvc.perform(get("/api/v1/seller-onboarding/me").header("Authorization",bearer(buyer)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.pickupAddress.address").value("123 Nguyễn Huệ, Thành phố Hồ Chí Minh"));
+    }
+
+    @Test void coordinatePreviewRequiresLoginAndReturnsTheResolvedAddress() throws Exception {
+        String body="{\"latitude\":21.0333,\"longitude\":105.7937}";
+        mvc.perform(post("/api/v1/shipping/reverse-geocode").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+        User buyer=buyer();
+        when(geocoding.reverse(new java.math.BigDecimal("21.0333"),new java.math.BigDecimal("105.7937")))
+                .thenReturn(new com.secondlife.secondlife.dto.shipping.GeocodedAddressResponse("123 Cầu Giấy, Hà Nội, Việt Nam",
+                        new java.math.BigDecimal("21.0333"),new java.math.BigDecimal("105.7937"),
+                        com.secondlife.secondlife.config.ShippingCatalogProperties.City.HANOI,"VN","place-test"));
+        mvc.perform(post("/api/v1/shipping/reverse-geocode").header("Authorization",bearer(buyer))
+                .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.address").value("123 Cầu Giấy, Hà Nội, Việt Nam"))
+                .andExpect(jsonPath("$.data.city").value("HANOI"));
+        mvc.perform(post("/api/v1/shipping/reverse-geocode").header("Authorization",bearer(buyer))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"latitude\":91,\"longitude\":105.7937}"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test void informationAndEmailAreRequiredForBothEkycEntryPoints() throws Exception {
@@ -99,8 +139,8 @@ class SellerOnboardingIntegrationTest {
         User buyer = buyer();
         save(buyer, "Shop A", "shop@example.test");
         String otp = sendCode(buyer);
-        assertEquals(1000001, onboarding.findById(buyer.getId()).orElseThrow().getPickupProvinceId());
-        assertEquals(1003646, onboarding.findById(buyer.getId()).orElseThrow().getPickupWardId());
+        assertNull(onboarding.findById(buyer.getId()).orElseThrow().getPickupProvinceId());
+        assertNull(onboarding.findById(buyer.getId()).orElseThrow().getPickupWardId());
         assertTrue(passwords.matches(otp, onboarding.findById(buyer.getId()).orElseThrow().getEmailOtpHash()));
         mvc.perform(verifyRequest(buyer, otp)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.emailVerified").value(true))
@@ -108,7 +148,8 @@ class SellerOnboardingIntegrationTest {
                 .andExpect(jsonPath("$.data.nextStep").value("EKYC"))
                 .andExpect(jsonPath("$.data.emailOtpHash").doesNotExist());
         assertNull(onboarding.findById(buyer.getId()).orElseThrow().getEmailOtpHash());
-        assertEquals("Phường Ngã Năm", shipping.pickup(buyer.getId()).wardName());
+        assertEquals(new java.math.BigDecimal("10.7756"), shipping.pickup(buyer.getId()).latitude());
+        assertEquals(new java.math.BigDecimal("106.7019"), shipping.pickup(buyer.getId()).longitude());
         assertEquals("+84976404178", shipping.pickup(buyer.getId()).phone());
         when(directEkyc.verify(any(), any(), any(), anyString(), anyString(), anyInt()))
                 .thenReturn(new VnptResults.Verification(UUID.randomUUID(), true, "PASSED", null, null, null, null, null));
@@ -191,26 +232,16 @@ class SellerOnboardingIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
-    @Test void rejectsWrongWardAndDoesNotSaveInformationWhenGhnIsUnavailable() throws Exception {
-        User buyer = buyer();
-        mvc.perform(put("/api/v1/seller-onboarding/me").header("Authorization", bearer(buyer))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(profile("Shop A", "shop@example.test").replace("1003646", "9999999")))
-                .andExpect(status().isBadRequest());
+    @Test void missingCoordinatesCannotBeSavedAndOldCarrierRoutesAreRemoved() throws Exception {
+        User buyer=buyer();
+        mvc.perform(put("/api/v1/seller-onboarding/me").header("Authorization",bearer(buyer))
+            .contentType(MediaType.APPLICATION_JSON).content(profile("Shop A","shop@example.test").replace("\"latitude\":10.7756,\"longitude\":106.7019","\"provinceId\":1000001,\"wardId\":1003646")))
+            .andExpect(status().isBadRequest());
         assertTrue(onboarding.findById(buyer.getId()).isEmpty());
-        when(carrier.provinces()).thenThrow(new ShippingProviderException("GHN is unavailable"));
-        mvc.perform(put("/api/v1/seller-onboarding/me").header("Authorization", bearer(buyer))
-                .contentType(MediaType.APPLICATION_JSON).content(profile("Shop A", "shop@example.test")))
-                .andExpect(status().isBadGateway());
-        assertTrue(onboarding.findById(buyer.getId()).isEmpty());
-    }
-
-    @Test void buyerCanLoadGhnCatalogueBeforeBecomingSeller() throws Exception {
-        User buyer = buyer();
-        mvc.perform(get("/api/v1/shipping/provinces").header("Authorization", bearer(buyer)))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data[0]._id").value(1000001));
-        mvc.perform(get("/api/v1/shipping/wards").param("provinceId", "1000001").header("Authorization", bearer(buyer)))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].parent_id").value(1000001));
+        for(String path: new String[]{"/api/v1/shipping/wards","/api/v1/shipping/legacy/provinces","/api/v1/shipping/services"})
+            mvc.perform(get(path).header("Authorization",bearer(buyer))).andExpect(status().isNotFound());
+        mvc.perform(post("/api/v1/shipping/callback").header("Authorization",bearer(buyer))
+            .contentType(MediaType.APPLICATION_JSON).content("{}")) .andExpect(status().isNotFound());
     }
 
     @Test void buyerQuoteUsesOnboardingPickupWithoutSavingItAgain() throws Exception {
@@ -225,19 +256,20 @@ class SellerOnboardingIntegrationTest {
         post.setPrice(new java.math.BigDecimal("1000000"));
         post.setShippingWeight(5000); post.setShippingLength(50); post.setShippingWidth(40); post.setShippingHeight(35);
         post = posts.saveAndFlush(post);
-        when(carrier.preview(anyMap())).thenReturn(mapper.readTree("{\"total_fee\":27000}"));
+        when(carrier.preview(anyMap())).thenReturn(mapper.valueToTree(java.util.Map.of("total_fee",27000,"expires_at",java.time.Instant.now().plusSeconds(300).toString(),"provider_quote",java.util.Map.of("quotationId","Q-ONBOARD","serviceType","MOTORCYCLE"))));
         User buyer = buyer();
         mvc.perform(post("/api/v1/shipping/quotes").header("Authorization", bearer(buyer))
                 .contentType(MediaType.APPLICATION_JSON).content("""
                         {"postId":"%s","deliveryAddress":{"name":"Buyer","phone":"0912345678",
-                         "address":"456 Street","provinceName":"Hồ Chí Minh","wardName":"Phường Sài Gòn","newAddress":true}}
+                         "address":"456 Street","latitude":10.78,"longitude":106.71}}
                         """.formatted(post.getId())))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.shippingFee").value(27000));
         var payload = ArgumentCaptor.forClass(java.util.Map.class);
         verify(carrier).preview(payload.capture());
-        assertEquals("Cần Thơ", payload.getValue().get("from_province_name"));
-        assertEquals("Phường Ngã Năm", payload.getValue().get("from_ward_name"));
-        assertEquals("123, Ấp Vĩnh Thành", payload.getValue().get("from_address"));
+        assertEquals(new java.math.BigDecimal("10.7756"), payload.getValue().get("from_latitude"));
+        assertEquals(new java.math.BigDecimal("106.7019"), payload.getValue().get("from_longitude"));
+        assertEquals("123 Nguyễn Huệ, Thành phố Hồ Chí Minh", payload.getValue().get("from_address"));
+        assertEquals("123 Nguyễn Huệ, Thành phố Hồ Chí Minh", payload.getValue().get("to_address"));
     }
 
     private void assertEkycBlocked(User buyer) throws Exception {
@@ -277,8 +309,8 @@ class SellerOnboardingIntegrationTest {
     private String profile(String name, String email) {
         return """
                 {"shopName":"%s","email":"%s","phone":"+84976404178",
-                 "pickupAddress":{"name":"Nguyễn A","phone":"+84976404178","address":"123, Ấp Vĩnh Thành",
-                 "provinceId":1000001,"wardId":1003646}}
+                 "pickupAddress":{"name":"Nguyễn A","phone":"+84976404178",
+                 "latitude":10.7756,"longitude":106.7019}}
                 """.formatted(name, email);
     }
     private User buyer() { return user("BUYER"); }

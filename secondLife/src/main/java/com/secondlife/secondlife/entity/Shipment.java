@@ -7,6 +7,10 @@ import java.math.BigDecimal;
 @Entity @Table(name="shipments") @Getter @Setter @NoArgsConstructor
 public class Shipment {
     @Id private UUID id;
+    @Column(nullable=false) private String provider="LALAMOVE";
+    private String driverId;
+    @Column(columnDefinition="TEXT") private String shareLink;
+    private Instant lastReconciledAt;
     private UUID orderId;
     private UUID inspectionOrderId;
     @Column(nullable=false) private UUID sellerId;

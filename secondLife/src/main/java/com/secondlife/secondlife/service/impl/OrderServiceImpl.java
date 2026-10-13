@@ -161,7 +161,7 @@ public class OrderServiceImpl implements OrderService {
             throw new BadRequestException("Order is not in PROCESSING state");
         }
 
-        throw new ConflictException("Shipment status is updated from GHN; create a shipment and wait for carrier pickup");
+        throw new ConflictException("Shipment status is updated from Carrier; create a shipment and wait for carrier pickup");
     }
 
     @Override
@@ -176,7 +176,7 @@ public class OrderServiceImpl implements OrderService {
 
         if (order.getStatus()==OrderStatus.COMPLETED && order.getEscrowStatus()==EscrowStatus.RELEASED) return mapToDTO(order);
         if (order.getStatus()!=OrderStatus.DELIVERED || order.getShippingDeliveredAt()==null)
-            throw new ConflictException("GHN must confirm delivery before the buyer can release escrow");
+            throw new ConflictException("Carrier must confirm delivery before the buyer can release escrow");
 
         if (order.getEscrowStatus() != EscrowStatus.HELD) {
             throw new ConflictException("Escrow funds are not currently HELD; resolve the shipping issue or return decision first");
@@ -215,7 +215,7 @@ public class OrderServiceImpl implements OrderService {
         // Refund buyer
         // Carrier-created shipments may incur pickup/cancellation charges; don't silently refund a consumed shipping fee.
         BigDecimal refund=order.getFinalPrice();
-        if (shipping.isEmpty()) refund=refund.add(order.getShippingFee());
+        if (shipping.stream().allMatch(s -> s.getOrderCode()==null)) refund=refund.add(order.getShippingFee());
         walletService.processRefund(order.getBuyer().getId(), refund, order.getId());
 
         order.setStatus(OrderStatus.CANCELLED);

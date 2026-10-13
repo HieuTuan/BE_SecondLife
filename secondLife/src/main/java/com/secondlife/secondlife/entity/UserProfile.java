@@ -30,6 +30,10 @@ public class UserProfile {
     @Column(length = 50)
     private String phone;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name="gender",length=20)
+    private com.secondlife.secondlife.enums.Gender gender;
+
     @Column(name = "avatar_url", length = 1024)
     private String avatarUrl;
 
