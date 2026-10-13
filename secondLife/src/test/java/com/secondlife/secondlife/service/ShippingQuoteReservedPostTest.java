@@ -1,8 +1,9 @@
 package com.secondlife.secondlife.service;
 
 import tools.jackson.databind.ObjectMapper;
-import com.secondlife.secondlife.config.GhnProperties;
+import com.secondlife.secondlife.service.shipping.ReverseGeocodingService;
 import com.secondlife.secondlife.dto.shipping.ShippingAddress;
+import com.secondlife.secondlife.dto.shipping.ShippingAddressRequest;
 import com.secondlife.secondlife.dto.shipping.ShippingQuoteRequest;
 import com.secondlife.secondlife.entity.Negotiation;
 import com.secondlife.secondlife.entity.Post;
@@ -33,7 +34,7 @@ class ShippingQuoteReservedPostTest {
     private InspectionOrderRepository inspections;
     private ShipmentRepository shipments;
     private ShippingProvider provider;
-    private GhnProperties properties;
+    private ReverseGeocodingService geocoding;
     private ObjectMapper mapper;
     private ShippingQuoteService service;
 
@@ -46,10 +47,10 @@ class ShippingQuoteReservedPostTest {
         inspections = mock(InspectionOrderRepository.class);
         shipments = mock(ShipmentRepository.class);
         provider = mock(ShippingProvider.class);
-        properties = mock(GhnProperties.class);
+        geocoding = mock(ReverseGeocodingService.class);
         mapper = mock(ObjectMapper.class);
         service = new ShippingQuoteService(posts, negotiations, addresses, quotes,
-                inspections, shipments, provider, properties, mapper);
+                inspections, shipments, provider, mapper, geocoding);
     }
 
     @Test
@@ -65,7 +66,7 @@ class ShippingQuoteReservedPostTest {
 
         when(posts.findById(post.getId())).thenReturn(Optional.of(post));
 
-        ShippingAddress deliveryAddress = new ShippingAddress("Buyer", "0912345678", "123 Street", "Hanoi", null, "Ward", null, null, true);
+        ShippingAddressRequest deliveryAddress = new ShippingAddressRequest("Buyer", "0912345678", BigDecimal.valueOf(21.0333), BigDecimal.valueOf(105.7937));
         ShippingQuoteRequest request = new ShippingQuoteRequest(post.getId(), null, deliveryAddress);
 
         var ex = assertThrows(ConflictException.class, () -> service.quote(buyerId, request));
@@ -85,7 +86,7 @@ class ShippingQuoteReservedPostTest {
 
         when(posts.findById(post.getId())).thenReturn(Optional.of(post));
 
-        ShippingAddress deliveryAddress = new ShippingAddress("Buyer", "0912345678", "123 Street", "Hanoi", null, "Ward", null, null, true);
+        ShippingAddressRequest deliveryAddress = new ShippingAddressRequest("Buyer", "0912345678", BigDecimal.valueOf(21.0333), BigDecimal.valueOf(105.7937));
         ShippingQuoteRequest request = new ShippingQuoteRequest(post.getId(), null, deliveryAddress);
 
         var ex = assertThrows(ConflictException.class, () -> service.quote(buyerId, request));
