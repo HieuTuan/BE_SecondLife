@@ -8,7 +8,9 @@ import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.WalletService;
 import com.secondlife.secondlife.service.SystemWalletService;
 import com.secondlife.secondlife.service.ListingFingerprint;
-import lombok.RequiredArgsConstructor;
+import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.notification.NotificationType;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -21,7 +23,7 @@ import java.time.Instant;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 
-@Service @RequiredArgsConstructor
+@Service
 public class ShipmentService {
     private final ShipmentRepository shipments;
     private final ShipmentEventRepository events;
@@ -36,6 +38,38 @@ public class ShipmentService {
     private final WalletService wallets;
     private final PlatformTransactionManager transactions;
     private final SystemWalletService systemWallet;
+    private final NotificationService notificationService;
+
+    public ShipmentService(ShipmentRepository shipments, ShipmentEventRepository events, OrderRepository orders,
+                           InspectionOrderRepository inspections, ShippingQuoteRepository quotes, ShippingQuoteService quoteService,
+                           ReverseGeocodingService geocoding, ShippingProvider provider, ObjectMapper mapper,
+                           EntityManager entityManager, WalletService wallets, PlatformTransactionManager transactions,
+                           SystemWalletService systemWallet) {
+        this(shipments, events, orders, inspections, quotes, quoteService, geocoding, provider, mapper, entityManager, wallets, transactions, systemWallet, null);
+    }
+
+    @Autowired
+    public ShipmentService(ShipmentRepository shipments, ShipmentEventRepository events, OrderRepository orders,
+                           InspectionOrderRepository inspections, ShippingQuoteRepository quotes, ShippingQuoteService quoteService,
+                           ReverseGeocodingService geocoding, ShippingProvider provider, ObjectMapper mapper,
+                           EntityManager entityManager, WalletService wallets, PlatformTransactionManager transactions,
+                           SystemWalletService systemWallet,
+                           @Autowired(required = false) NotificationService notificationService) {
+        this.shipments = shipments;
+        this.events = events;
+        this.orders = orders;
+        this.inspections = inspections;
+        this.quotes = quotes;
+        this.quoteService = quoteService;
+        this.geocoding = geocoding;
+        this.provider = provider;
+        this.mapper = mapper;
+        this.entityManager = entityManager;
+        this.wallets = wallets;
+        this.transactions = transactions;
+        this.systemWallet = systemWallet;
+        this.notificationService = notificationService;
+    }
 
     private record Prepared(UUID id, boolean submit) {}
 
@@ -349,8 +383,50 @@ public class ShipmentService {
         var order=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();
         if (Set.of(OrderStatus.COMPLETED,OrderStatus.CANCELLED).contains(order.getStatus())) return;
         boolean toBuyer=Set.of("SELLER_TO_BUYER","CENTER_TO_BUYER").contains(shipment.getLeg());
-        if (toBuyer && "PICKED_UP".equals(status) && order.getShippingDeliveredAt()==null) order.setStatus(OrderStatus.SHIPPED);
-        if (toBuyer && "COMPLETED".equals(status)) { order.setStatus(OrderStatus.DELIVERED); if (order.getShippingDeliveredAt()==null) order.setShippingDeliveredAt(shipment.getDeliveredAt()); }
+        if (toBuyer && "PICKED_UP".equals(status) && order.getShippingDeliveredAt()==null) {
+            order.setStatus(OrderStatus.SHIPPED);
+            if (notificationService != null && order.getBuyer() != null) {
+                String code = order.getId().toString();
+                notificationService.notify(
+                    order.getBuyer().getId(),
+                    "Đơn hàng đang được giao #" + code,
+                    "Đơn hàng #" + code + " đã được tài xế lấy và đang trên đường giao tới bạn.",
+                    NotificationType.SHIPPING,
+                    order.getId(),
+                    "ORDER",
+                    "/buyer/orders/" + order.getId()
+                );
+            }
+        }
+        if (toBuyer && "COMPLETED".equals(status)) {
+            order.setStatus(OrderStatus.DELIVERED);
+            if (order.getShippingDeliveredAt()==null) order.setShippingDeliveredAt(shipment.getDeliveredAt());
+            if (notificationService != null) {
+                String code = order.getId().toString();
+                if (order.getBuyer() != null) {
+                    notificationService.notify(
+                        order.getBuyer().getId(),
+                        "Đơn hàng đã giao thành công #" + code,
+                        "Đơn hàng #" + code + " đã được giao thành công. Vui lòng kiểm tra sản phẩm và xác nhận trong 48h.",
+                        NotificationType.SHIPPING,
+                        order.getId(),
+                        "ORDER",
+                        "/buyer/orders/" + order.getId()
+                    );
+                }
+                if (order.getSeller() != null) {
+                    notificationService.notify(
+                        order.getSeller().getId(),
+                        "Đơn hàng đã giao thành công #" + code,
+                        "Đơn hàng #" + code + " đã được giao tới người mua.",
+                        NotificationType.SHIPPING,
+                        order.getId(),
+                        "ORDER",
+                        "/seller/orders/" + order.getId()
+                    );
+                }
+            }
+        }
         orders.save(order);
     }
     private void freeze(Shipment shipment) {

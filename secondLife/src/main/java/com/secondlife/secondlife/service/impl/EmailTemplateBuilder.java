@@ -502,4 +502,69 @@ public class EmailTemplateBuilder {
             </html>
             """.formatted(greetingName, email != null ? email : "", temporaryPassword != null ? temporaryPassword : "");
     }
+
+    public String buildGenericNoticeEmail(String fullName, String tag, String title, String message, String actionText, String actionUrl) {
+        String greetingName = (fullName != null && !fullName.isBlank()) ? fullName : "Quý khách";
+        String displayTag = (tag != null && !tag.isBlank()) ? tag : "THÔNG BÁO TỪ SECONDLIFE";
+        String buttonHtml = (actionUrl != null && !actionUrl.isBlank())
+                ? """
+                <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="margin: 28px 0;">
+                    <tr>
+                        <td align="center" style="border-radius: 8px; background-color: #ffffff;">
+                            <a href="%s" target="_blank" style="display: inline-block; padding: 14px 28px; font-family: sans-serif; font-size: 14px; color: #000000; text-decoration: none; font-weight: 700; border-radius: 8px; letter-spacing: 0.5px;">%s</a>
+                        </td>
+                    </tr>
+                </table>
+                """.formatted(actionUrl, (actionText != null && !actionText.isBlank()) ? actionText : "Xem chi tiết trên SecondLife")
+                : "";
+
+        return """
+            <!DOCTYPE html>
+            <html lang="vi">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>%s</title>
+            </head>
+            <body style="margin: 0; padding: 0; background-color: #09090b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; -webkit-font-smoothing: antialiased; color: #f4f4f5;">
+                <table role="presentation" width="100%%" border="0" cellspacing="0" cellpadding="0" style="background-color: #09090b; padding: 48px 16px;">
+                    <tr>
+                        <td align="center">
+                            <table role="presentation" width="100%%" border="0" cellspacing="0" cellpadding="0" style="max-width: 580px; background-color: #121214; border-radius: 16px; overflow: hidden; border: 1px solid #27272a; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);">
+                                <tr>
+                                    <td height="2" style="background: linear-gradient(90deg, rgba(255,255,255,0) 0%%, rgba(255,255,255,0.75) 50%%, rgba(255,255,255,0) 100%%); font-size: 0; line-height: 0;">&nbsp;</td>
+                                </tr>
+                                <tr>
+                                    <td style="background-color: #09090b; padding: 36px 40px 30px; text-align: center; border-bottom: 1px solid #1f1f23;">
+                                        <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: 6px; text-transform: uppercase;">SECOND LIFE</h1>
+                                        <p style="margin: 8px 0 0 0; color: #a1a1aa; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; font-weight: 500;">PREMIUM RECOMMERCE &amp; AUTHENTICATION</p>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 40px 40px 36px;">
+                                        <div style="display: inline-block; padding: 4px 12px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15); border-radius: 20px; color: #e4e4e7; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 600; margin-bottom: 20px;">
+                                            %s
+                                        </div>
+                                        <h2 style="margin: 0 0 16px 0; color: #ffffff; font-size: 20px; font-weight: 700; letter-spacing: -0.3px;">%s</h2>
+                                        <p style="margin: 0 0 16px 0; color: #d4d4d8; font-size: 15px; line-height: 1.6;">Kính chào <strong>%s</strong>,</p>
+                                        <div style="margin: 0 0 24px 0; color: #a1a1aa; font-size: 14px; line-height: 1.7; white-space: pre-line;">%s</div>
+                                        %s
+                                        <p style="margin: 28px 0 0 0; color: #71717a; font-size: 13px; line-height: 1.6;">Trân trọng,<br><strong style="color: #d4d4d8;">Đội ngũ Quản trị SecondLife</strong></p>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="background-color: #09090b; padding: 28px 40px; border-top: 1px solid #1f1f23; text-align: center;">
+                                        <p style="margin: 0 0 6px 0; color: #d4d4d8; font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;">SecondLife Customer Support</p>
+                                        <p style="margin: 0; color: #71717a; font-size: 12px;">Email: support@secondlife.com &bull; Hotline: 1900 xxxx</p>
+                                        <p style="margin: 12px 0 0 0; color: #52525b; font-size: 11px; letter-spacing: 0.5px;">&copy; 2026 SecondLife Inc. All rights reserved.</p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+            </body>
+            </html>
+            """.formatted(title != null ? title : "Thông báo SecondLife", displayTag, title != null ? title : "", greetingName, message != null ? message : "", buttonHtml);
+    }
 }

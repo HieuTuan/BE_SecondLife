@@ -9,8 +9,10 @@ import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.repository.UserWalletRepository;
 import com.secondlife.secondlife.repository.WalletTransactionRepository;
+import com.secondlife.secondlife.notification.NotificationType;
+import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.WalletService;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,12 +20,29 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class WalletServiceImpl implements WalletService {
 
     private final UserWalletRepository userWalletRepository;
     private final WalletTransactionRepository walletTransactionRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
+
+    public WalletServiceImpl(UserWalletRepository userWalletRepository,
+                             WalletTransactionRepository walletTransactionRepository,
+                             UserRepository userRepository) {
+        this(userWalletRepository, walletTransactionRepository, userRepository, null);
+    }
+
+    @Autowired
+    public WalletServiceImpl(UserWalletRepository userWalletRepository,
+                             WalletTransactionRepository walletTransactionRepository,
+                             UserRepository userRepository,
+                             @Autowired(required = false) NotificationService notificationService) {
+        this.userWalletRepository = userWalletRepository;
+        this.walletTransactionRepository = walletTransactionRepository;
+        this.userRepository = userRepository;
+        this.notificationService = notificationService;
+    }
 
     @Override
     public UserWallet getWalletByUserId(UUID userId) {
@@ -60,6 +79,18 @@ public class WalletServiceImpl implements WalletService {
         userWalletRepository.save(wallet);
 
         createTransaction(wallet, amount, WalletTransactionType.DEPOSIT, referenceId);
+
+        if (notificationService != null) {
+            notificationService.notifyWithEmail(
+                userId,
+                "Nạp tiền vào ví thành công: +" + amount + " VND",
+                "Bạn đã nạp thành công " + amount + " VND vào ví SecondLife.",
+                NotificationType.WALLET,
+                referenceId,
+                "WALLET_TRANSACTION",
+                "/wallet"
+            );
+        }
     }
 
     @Override
@@ -94,6 +125,18 @@ public class WalletServiceImpl implements WalletService {
         userWalletRepository.save(wallet);
 
         createTransaction(wallet, amount, WalletTransactionType.EARNING, orderId);
+
+        if (notificationService != null) {
+            notificationService.notifyWithEmail(
+                userId,
+                "Giải ngân tiền bán hàng: +" + amount + " VND",
+                "Bạn đã nhận được " + amount + " VND doanh thu bán hàng vào ví SecondLife.",
+                NotificationType.WALLET,
+                orderId,
+                "ORDER",
+                "/wallet"
+            );
+        }
     }
 
     @Override
@@ -108,6 +151,18 @@ public class WalletServiceImpl implements WalletService {
         userWalletRepository.save(wallet);
 
         createTransaction(wallet, amount, WalletTransactionType.REFUND, orderId);
+
+        if (notificationService != null) {
+            notificationService.notifyWithEmail(
+                userId,
+                "Hoàn tiền vào ví: +" + amount + " VND",
+                "Bạn đã nhận được khoản hoàn tiền " + amount + " VND vào ví SecondLife cho đơn hàng.",
+                NotificationType.WALLET,
+                orderId,
+                "ORDER",
+                "/wallet"
+            );
+        }
     }
 
     private UserWallet getWalletWithLock(UUID userId) {

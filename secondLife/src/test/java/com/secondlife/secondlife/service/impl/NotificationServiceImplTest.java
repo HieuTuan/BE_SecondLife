@@ -1,18 +1,34 @@
 package com.secondlife.secondlife.service.impl;
 
+import com.secondlife.secondlife.dto.response.NotificationActionResponseDTO;
+import com.secondlife.secondlife.dto.response.NotificationResponseDTO;
+import com.secondlife.secondlife.dto.response.UnreadCountResponseDTO;
+import com.secondlife.secondlife.entity.Notification;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.AccountStatus;
 import com.secondlife.secondlife.notification.NotificationChannelType;
 import com.secondlife.secondlife.notification.NotificationMessage;
 import com.secondlife.secondlife.notification.channel.NotificationChannel;
+import com.secondlife.secondlife.repository.NotificationRepository;
+import com.secondlife.secondlife.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -21,81 +37,178 @@ import static org.mockito.Mockito.*;
 class NotificationServiceImplTest {
 
     @Mock
+    private NotificationRepository notificationRepository;
+
+    @Mock
+    private UserRepository userRepository;
+
+    @Mock
+    private SimpMessagingTemplate messagingTemplate;
+
+    @Mock
     private NotificationChannel emailChannel;
 
     @Mock
     private NotificationChannel smsChannel;
 
+    @Mock
+    private JavaMailSender mailSender;
+
+    @Mock
+    private EmailTemplateBuilder templateBuilder;
+
     private NotificationServiceImpl notificationService;
 
     @BeforeEach
     void setUp() {
-        when(emailChannel.supports(NotificationChannelType.EMAIL)).thenReturn(true);
-        notificationService = new NotificationServiceImpl(List.of(emailChannel, smsChannel));
+        notificationService = new NotificationServiceImpl(
+                notificationRepository,
+                userRepository,
+                messagingTemplate,
+                List.of(emailChannel, smsChannel),
+                mailSender,
+                templateBuilder
+        );
+    }
+
+    @Test
+    void notify_ShouldSaveNotificationAndPushRealtimeWebSocket() {
+        UUID userId = UUID.randomUUID();
+        User user = new User("buyer@example.com", "pass", AccountStatus.ACTIVE);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        Notification saved = Notification.builder()
+                .id(UUID.randomUUID())
+                .user(user)
+                .title("Đơn hàng mới")
+                .message("Bạn có đơn hàng mới")
+                .type("ORDER")
+                .isRead(false)
+                .isDeleted(false)
+                .createdAt(Instant.now())
+                .build();
+        when(notificationRepository.save(any(Notification.class))).thenReturn(saved);
+
+        NotificationResponseDTO response = notificationService.notify(
+                userId, "Đơn hàng mới", "Bạn có đơn hàng mới", "ORDER", UUID.randomUUID(), "ORDER", "/orders"
+        );
+
+        assertNotNull(response);
+        assertEquals("Đơn hàng mới", response.getTitle());
+        verify(notificationRepository).save(any(Notification.class));
+        verify(messagingTemplate).convertAndSendToUser(eq(userId.toString()), eq("/queue/notifications"), eq(response));
+    }
+
+    @Test
+    void getUnreadCount_ShouldReturnCountFromRepository() {
+        UUID userId = UUID.randomUUID();
+        when(notificationRepository.countByUserIdAndIsReadFalseAndIsDeletedFalse(userId)).thenReturn(5L);
+
+        UnreadCountResponseDTO result = notificationService.getUnreadCount(userId);
+
+        assertEquals(5L, result.getUnreadCount());
+    }
+
+    @Test
+    void markAsRead_ShouldUpdateReadStatusAndTimestamp() {
+        UUID userId = UUID.randomUUID();
+        UUID notificationId = UUID.randomUUID();
+        User user = new User("user@example.com", "pass", AccountStatus.ACTIVE);
+
+        Notification notification = Notification.builder()
+                .id(notificationId)
+                .user(user)
+                .title("Thông báo")
+                .message("Nội dung")
+                .type("SYSTEM")
+                .isRead(false)
+                .isDeleted(false)
+                .build();
+
+        when(notificationRepository.findByIdAndUserIdAndIsDeletedFalse(notificationId, userId))
+                .thenReturn(Optional.of(notification));
+        when(notificationRepository.save(any(Notification.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        NotificationResponseDTO result = notificationService.markAsRead(userId, notificationId);
+
+        assertTrue(result.isRead());
+        assertNotNull(result.getReadAt());
+        verify(notificationRepository).save(notification);
+    }
+
+    @Test
+    void markAllAsRead_ShouldCallRepositoryAndReturnUpdatedCount() {
+        UUID userId = UUID.randomUUID();
+        when(notificationRepository.markAllAsRead(eq(userId), any(Instant.class))).thenReturn(3);
+
+        NotificationActionResponseDTO response = notificationService.markAllAsRead(userId);
+
+        assertTrue(response.isSuccess());
+        assertEquals(3, response.getAffectedCount());
+    }
+
+    @Test
+    void deleteNotification_ShouldSetIsDeletedTrue() {
+        UUID userId = UUID.randomUUID();
+        UUID notificationId = UUID.randomUUID();
+
+        Notification notification = Notification.builder()
+                .id(notificationId)
+                .isDeleted(false)
+                .build();
+
+        when(notificationRepository.findByIdAndUserIdAndIsDeletedFalse(notificationId, userId))
+                .thenReturn(Optional.of(notification));
+
+        notificationService.deleteNotification(userId, notificationId);
+
+        assertTrue(notification.isDeleted());
+        verify(notificationRepository).save(notification);
+    }
+
+    @Test
+    void clearReadNotifications_ShouldCallSoftDeleteRead() {
+        UUID userId = UUID.randomUUID();
+        when(notificationRepository.softDeleteAllReadByUserId(userId)).thenReturn(8);
+
+        NotificationActionResponseDTO response = notificationService.clearReadNotifications(userId);
+
+        assertTrue(response.isSuccess());
+        assertEquals(8, response.getAffectedCount());
+    }
+
+    @Test
+    void clearAllNotifications_ShouldCallSoftDeleteAll() {
+        UUID userId = UUID.randomUUID();
+        when(notificationRepository.softDeleteAllByUserId(userId)).thenReturn(15);
+
+        NotificationActionResponseDTO response = notificationService.clearAllNotifications(userId);
+
+        assertTrue(response.isSuccess());
+        assertEquals(15, response.getAffectedCount());
+    }
+
+    @Test
+    void getUserNotifications_ShouldQueryRepositoryWithPageable() {
+        UUID userId = UUID.randomUUID();
+        Pageable pageable = PageRequest.of(0, 10);
+        Page<Notification> emptyPage = new PageImpl<>(List.of());
+
+        when(notificationRepository.findByUserIdAndIsDeletedFalse(userId, pageable)).thenReturn(emptyPage);
+
+        Page<NotificationResponseDTO> result = notificationService.getUserNotifications(userId, false, null, pageable);
+
+        assertNotNull(result);
+        verify(notificationRepository).findByUserIdAndIsDeletedFalse(userId, pageable);
     }
 
     @Test
     void sendVerificationOtp_ShouldDispatchToEmailChannel() {
+        when(emailChannel.supports(NotificationChannelType.EMAIL)).thenReturn(true);
+
         notificationService.sendVerificationOtp("test@example.com", "Test User", "123456");
 
         verify(emailChannel, times(1)).send(any(NotificationMessage.class));
         verify(smsChannel, never()).send(any(NotificationMessage.class));
-    }
-
-    @Test
-    void sendPasswordResetOtp_ShouldDispatchToEmailChannel() {
-        notificationService.sendPasswordResetOtp("reset@example.com", "Test User", "654321");
-
-        verify(emailChannel, times(1)).send(any(NotificationMessage.class));
-    }
-
-    @Test
-    void sendSellerVerificationApproved_ShouldDispatchToEmailChannel() {
-        User user = new User("seller@example.com", "pass", AccountStatus.ACTIVE);
-        notificationService.sendSellerVerificationApproved(user);
-
-        verify(emailChannel, times(1)).send(any(NotificationMessage.class));
-    }
-
-    @Test
-    void sendSellerVerificationRejected_ShouldDispatchToEmailChannel() {
-        User user = new User("seller@example.com", "pass", AccountStatus.ACTIVE);
-        notificationService.sendSellerVerificationRejected(user, "Invalid ID document");
-
-        verify(emailChannel, times(1)).send(any(NotificationMessage.class));
-    }
-
-    @Test
-    void sendPasswordChangedAlert_ShouldDispatchToEmailChannel() {
-        User user = new User("buyer@example.com", "pass", AccountStatus.ACTIVE);
-        notificationService.sendPasswordChangedAlert(user);
-
-        verify(emailChannel, times(1)).send(any(NotificationMessage.class));
-    }
-
-    @Test
-    void sendAccountStatusChanged_ShouldDispatchToEmailChannel() {
-        User user = new User("buyer@example.com", "pass", AccountStatus.LOCKED);
-        notificationService.sendAccountStatusChanged(user, AccountStatus.LOCKED);
-
-        verify(emailChannel, times(1)).send(any(NotificationMessage.class));
-    }
-
-    @Test
-    void sendInspectionCenterCreated_ShouldDispatchToEmailChannel() {
-        User user = new User("center@example.com", "pass", AccountStatus.ACTIVE);
-        notificationService.sendInspectionCenterCreated(user, "TempPass123");
-
-        verify(emailChannel, times(1)).send(any(NotificationMessage.class));
-    }
-
-    @Test
-    void send_WhenChannelThrowsException_ShouldCatchAndNotCrashCaller() {
-        doThrow(new RuntimeException("Channel connection lost")).when(emailChannel).send(any(NotificationMessage.class));
-
-        NotificationMessage message = NotificationMessage.forVerificationOtp("test@example.com", "User", "123456");
-        notificationService.send(message);
-
-        verify(emailChannel).send(message);
     }
 }

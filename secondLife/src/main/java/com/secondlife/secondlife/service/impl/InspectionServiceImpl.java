@@ -30,6 +30,8 @@ import com.secondlife.secondlife.service.InspectionPricingService;
 import com.secondlife.secondlife.service.InspectionService;
 import com.secondlife.secondlife.service.ListingPublicationService;
 import com.secondlife.secondlife.service.WalletService;
+import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.notification.NotificationType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -67,6 +69,7 @@ public class InspectionServiceImpl implements InspectionService {
     private final InspectionPricingService inspectionPricingService;
     private final WalletService walletService;
     private final ObjectMapper objectMapper;
+    private final NotificationService notificationService;
 
     @Qualifier("googleGenAiChatModel")
     private final org.springframework.ai.chat.model.ChatModel googleChatModel;
@@ -171,6 +174,30 @@ public class InspectionServiceImpl implements InspectionService {
 
         InspectionOrder saved = inspectionOrderRepository.save(order);
         log.info("Created inspection order {} for post {} by buyer {}", saved.getId(), post.getId(), buyerId);
+
+        if (notificationService != null) {
+            notificationService.notify(
+                buyerId,
+                "Yêu cầu kiểm định đã gửi",
+                "Yêu cầu kiểm định cho sản phẩm \"" + post.getTitle() + "\" đã được gửi tới người bán.",
+                NotificationType.INSPECTION,
+                saved.getId(),
+                "INSPECTION_ORDER",
+                "/buyer/inspections/" + saved.getId()
+            );
+            if (seller != null) {
+                notificationService.notify(
+                    seller.getId(),
+                    "Yêu cầu kiểm định mới",
+                    "Có người mua yêu cầu kiểm định cho sản phẩm \"" + post.getTitle() + "\". Vui lòng kiểm tra và phản hồi.",
+                    NotificationType.INSPECTION,
+                    saved.getId(),
+                    "INSPECTION_ORDER",
+                    "/seller/inspections/" + saved.getId()
+                );
+            }
+        }
+
         return InspectionOrderResponse.from(saved);
     }
 
@@ -199,7 +226,19 @@ public class InspectionServiceImpl implements InspectionService {
                 post.setStatus("ACTIVE");
                 postRepository.save(post);
             }
-            return InspectionOrderResponse.from(inspectionOrderRepository.save(order));
+            InspectionOrder saved = inspectionOrderRepository.save(order);
+            if (notificationService != null && order.getBuyer() != null) {
+                notificationService.notify(
+                    order.getBuyer().getId(),
+                    "Người bán từ chối kiểm định",
+                    "Người bán đã từ chối yêu cầu kiểm định cho sản phẩm \"" + (post != null ? post.getTitle() : "") + "\". Lý do: " + (request.getRejectReason() != null ? request.getRejectReason() : "Không nêu lý do"),
+                    NotificationType.INSPECTION,
+                    order.getId(),
+                    "INSPECTION_ORDER",
+                    "/buyer/inspections/" + order.getId()
+                );
+            }
+            return InspectionOrderResponse.from(saved);
         }
 
         if ("COUNTER".equals(action)) {
@@ -228,7 +267,19 @@ public class InspectionServiceImpl implements InspectionService {
             }
             order.setStatus(InspectionOrderStatus.WAITING_BUYER_APPROVAL.name());
             order.setNote("Người bán đề xuất lại phương án chia phí: " + request.getCounterFeePayer());
-            return InspectionOrderResponse.from(inspectionOrderRepository.save(order));
+            InspectionOrder saved = inspectionOrderRepository.save(order);
+            if (notificationService != null && order.getBuyer() != null) {
+                notificationService.notify(
+                    order.getBuyer().getId(),
+                    "Người bán đề xuất lại phí kiểm định",
+                    "Người bán đã đề xuất lại phương án chia phí kiểm định cho sản phẩm \"" + (order.getPost() != null ? order.getPost().getTitle() : "") + "\".",
+                    NotificationType.INSPECTION,
+                    order.getId(),
+                    "INSPECTION_ORDER",
+                    "/buyer/inspections/" + order.getId()
+                );
+            }
+            return InspectionOrderResponse.from(saved);
         }
 
         if ("ACCEPT".equals(action)) {
@@ -252,7 +303,19 @@ public class InspectionServiceImpl implements InspectionService {
                 order.setStatus(InspectionOrderStatus.CONFIRMED_PENDING_DISPATCH.name());
             }
 
-            return InspectionOrderResponse.from(inspectionOrderRepository.save(order));
+            InspectionOrder saved = inspectionOrderRepository.save(order);
+            if (notificationService != null && order.getBuyer() != null) {
+                notificationService.notify(
+                    order.getBuyer().getId(),
+                    "Người bán đồng ý kiểm định",
+                    "Người bán đã đồng ý kiểm định cho sản phẩm \"" + (order.getPost() != null ? order.getPost().getTitle() : "") + "\". Vui lòng hoàn tất thanh toán phí kiểm định.",
+                    NotificationType.INSPECTION,
+                    order.getId(),
+                    "INSPECTION_ORDER",
+                    "/buyer/inspections/" + order.getId()
+                );
+            }
+            return InspectionOrderResponse.from(saved);
         }
 
         throw new BadRequestException("Hành động phản hồi phải là ACCEPT, REJECT hoặc COUNTER");
@@ -285,7 +348,33 @@ public class InspectionServiceImpl implements InspectionService {
             order.setNote((order.getNote() != null ? order.getNote() + " | " : "") + "Lịch hẹn: " + request.getNote());
         }
 
-        return InspectionOrderResponse.from(inspectionOrderRepository.save(order));
+        InspectionOrder saved = inspectionOrderRepository.save(order);
+        if (notificationService != null) {
+            String title = order.getPost() != null ? order.getPost().getTitle() : "";
+            if (order.getBuyer() != null) {
+                notificationService.notify(
+                    order.getBuyer().getId(),
+                    "Lịch hẹn kiểm định tại nhà",
+                    "Đã ấn định lịch hẹn kiểm định tại nhà cho sản phẩm \"" + title + "\" vào lúc " + request.getAppointmentTime() + ".",
+                    NotificationType.INSPECTION,
+                    order.getId(),
+                    "INSPECTION_ORDER",
+                    "/buyer/inspections/" + order.getId()
+                );
+            }
+            if (order.getSeller() != null) {
+                notificationService.notify(
+                    order.getSeller().getId(),
+                    "Lịch hẹn kiểm định tại nhà",
+                    "Đã ấn định lịch hẹn KTV tới kiểm định sản phẩm \"" + title + "\" vào lúc " + request.getAppointmentTime() + ".",
+                    NotificationType.INSPECTION,
+                    order.getId(),
+                    "INSPECTION_ORDER",
+                    "/seller/inspections/" + order.getId()
+                );
+            }
+        }
+        return InspectionOrderResponse.from(saved);
     }
 
     @Override
@@ -363,7 +452,33 @@ public class InspectionServiceImpl implements InspectionService {
             postRepository.save(post);
         }
 
-        return InspectionOrderResponse.from(inspectionOrderRepository.save(order));
+        InspectionOrder savedOrder = inspectionOrderRepository.save(order);
+
+        if (notificationService != null) {
+            String title = post != null ? post.getTitle() : "";
+            notificationService.notifyWithEmail(
+                buyerId,
+                "Thanh toán mua hàng thành công",
+                "Bạn đã hoàn tất thanh toán mua sản phẩm \"" + title + "\" sau kiểm định. Đơn hàng đang được chuẩn bị giao.",
+                NotificationType.ORDER,
+                order.getId(),
+                "INSPECTION_ORDER",
+                "/buyer/orders/" + order.getId()
+            );
+            if (order.getSeller() != null) {
+                notificationService.notifyWithEmail(
+                    order.getSeller().getId(),
+                    "Khách hàng đã thanh toán mua sản phẩm",
+                    "Người mua đã hoàn tất thanh toán cho sản phẩm \"" + title + "\". Vui lòng chuẩn bị giao hàng.",
+                    NotificationType.ORDER,
+                    order.getId(),
+                    "INSPECTION_ORDER",
+                    "/seller/orders/" + order.getId()
+                );
+            }
+        }
+
+        return InspectionOrderResponse.from(savedOrder);
     }
 
     @Override
@@ -415,7 +530,20 @@ public class InspectionServiceImpl implements InspectionService {
 
         order.setInspector(inspector);
         order.setStatus(InspectionOrderStatus.DISPATCHED.name());
-        return InspectionOrderResponse.from(inspectionOrderRepository.save(order));
+        InspectionOrder saved = inspectionOrderRepository.save(order);
+        if (notificationService != null) {
+            String title = order.getPost() != null ? order.getPost().getTitle() : "";
+            notificationService.notify(
+                inspector.getId(),
+                "Phân công kiểm định mới",
+                "Bạn được phân công kiểm định đơn cho sản phẩm \"" + title + "\".",
+                NotificationType.INSPECTION,
+                order.getId(),
+                "INSPECTION_ORDER",
+                "/inspector/inspections/" + order.getId()
+            );
+        }
+        return InspectionOrderResponse.from(saved);
     }
 
     @Override
@@ -470,6 +598,32 @@ public class InspectionServiceImpl implements InspectionService {
             order.setStatus(InspectionOrderStatus.FAILED.name());
             post.setStatus("ACTIVE"); // Mở lại bài đăng
             postRepository.save(post);
+
+            if (notificationService != null) {
+                String title = post.getTitle();
+                if (order.getBuyer() != null) {
+                    notificationService.notifyWithEmail(
+                        order.getBuyer().getId(),
+                        "[Biên bản] Kết quả kiểm định KHÔNG ĐẠT - " + title,
+                        "Sản phẩm \"" + title + "\" KHÔNG ĐẠT chuẩn kiểm định. Đơn kiểm định đã kết thúc.",
+                        NotificationType.INSPECTION,
+                        order.getId(),
+                        "INSPECTION_ORDER",
+                        "/buyer/inspections/" + order.getId()
+                    );
+                }
+                if (order.getSeller() != null) {
+                    notificationService.notifyWithEmail(
+                        order.getSeller().getId(),
+                        "[Biên bản] Kết quả kiểm định KHÔNG ĐẠT - " + title,
+                        "Sản phẩm \"" + title + "\" KHÔNG ĐẠT chuẩn kiểm định. Bài đăng đã được hoàn về trạng thái ACTIVE.",
+                        NotificationType.INSPECTION,
+                        order.getId(),
+                        "INSPECTION_ORDER",
+                        "/seller/inspections/" + order.getId()
+                    );
+                }
+            }
         } else if ("PASSED".equals(request.getStatus())) {
             order.setStatus(InspectionOrderStatus.PASSED.name());
             order.setFinalPaymentDeadline(Instant.now().plus(Duration.ofHours(6)));
@@ -486,6 +640,32 @@ public class InspectionServiceImpl implements InspectionService {
                     post.setRejectionReason("Post failed final AI scan after inspection: " + reason);
                 }
                 postRepository.save(post);
+            }
+
+            if (notificationService != null) {
+                String title = post.getTitle();
+                if (order.getBuyer() != null) {
+                    notificationService.notifyWithEmail(
+                        order.getBuyer().getId(),
+                        "[Biên bản] Kết quả kiểm định ĐẠT - " + title,
+                        "Sản phẩm \"" + title + "\" đã được kiểm định ĐẠT CHUẨN. Bạn có 6 giờ để xác nhận thanh toán mua hàng.",
+                        NotificationType.INSPECTION,
+                        order.getId(),
+                        "INSPECTION_ORDER",
+                        "/buyer/inspections/" + order.getId()
+                    );
+                }
+                if (order.getSeller() != null) {
+                    notificationService.notifyWithEmail(
+                        order.getSeller().getId(),
+                        "[Biên bản] Kết quả kiểm định ĐẠT - " + title,
+                        "Sản phẩm \"" + title + "\" đã được kiểm định ĐẠT CHUẨN. Đang chờ người mua thanh toán tiền hàng trong 6 giờ.",
+                        NotificationType.INSPECTION,
+                        order.getId(),
+                        "INSPECTION_ORDER",
+                        "/seller/inspections/" + order.getId()
+                    );
+                }
             }
         } else {
             throw new BadRequestException("Trạng thái kết quả không hợp lệ. Phải là PASSED hoặc FAILED");
