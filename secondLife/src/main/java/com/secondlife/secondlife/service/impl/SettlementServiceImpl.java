@@ -20,6 +20,7 @@ public class SettlementServiceImpl implements SettlementService {
     private final CommissionCalculator calculator;
     private final WalletService wallets;
     private final SystemWalletService systemWallet;
+    private final SellerReputationService reputation;
 
     @Override @Transactional(propagation = Propagation.MANDATORY)
     public SettlementResponse settle(Order requestedOrder) {
@@ -44,7 +45,8 @@ public class SettlementServiceImpl implements SettlementService {
         if (amounts.sellerPayout().signum() > 0) wallets.processEarning(order.getSeller().getId(), amounts.sellerPayout(), order.getId());
         order.setStatus(OrderStatus.COMPLETED);
         order.setEscrowStatus(EscrowStatus.RELEASED);
-        orders.save(order);
+        orders.saveAndFlush(order);
+        reputation.recordCompletedSale(order);
         return SettlementResponse.from(settlement);
     }
     @Override @Transactional(readOnly = true)

@@ -36,6 +36,7 @@ public class ShipmentService {
     private final WalletService wallets;
     private final PlatformTransactionManager transactions;
     private final SystemWalletService systemWallet;
+    private final com.secondlife.secondlife.service.SellerReputationService reputation;
 
     private record Prepared(UUID id, boolean submit) {}
 
@@ -217,6 +218,10 @@ public class ShipmentService {
         shipments.save(shipment); return ShipmentResponse.from(shipment);
     }
     @Transactional public ShipmentResponse refundReturned(UUID actor,boolean staff,UUID id,String reason) {
+        return refundReturned(actor,staff,id,reason,null);
+    }
+    @Transactional public ShipmentResponse refundReturned(UUID actor,boolean staff,UUID id,String reason,
+            com.secondlife.secondlife.dto.reputation.ReportRequests.ResponsibleParty responsibleParty) {
         if (!staff) throw new ForbiddenException("STAFF/ADMIN must approve the refund");
         var shipment=lock(id);
         if (shipment.getOrderId()==null) throw new ConflictException("Inspection shipping cannot refund a product order");
@@ -225,11 +230,17 @@ public class ShipmentService {
                 && !(!buyerReturn && "RETURNED".equals(shipment.getStatus())))
             throw new ConflictException("Product must be physically returned before refund");
         var order=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();
-        if (order.getEscrowStatus()==EscrowStatus.REFUNDED) return ShipmentResponse.from(shipment);
+        String party=responsibleParty==null?"NONE":responsibleParty.name();
+        if(order.getEscrowStatus()==EscrowStatus.REFUNDED) {
+            if(order.getReturnResponsibleParty()!=null && !order.getReturnResponsibleParty().equals(party))
+                throw new ConflictException("Refund responsibility was already finalized; use the report review flow for a later finding");
+            return ShipmentResponse.from(shipment);
+        }
         if (order.getEscrowStatus()!=EscrowStatus.FROZEN) throw new ConflictException("Return refund requires frozen funds");
         systemWallet.refund(order, order.getFinalPrice());
         wallets.processRefund(order.getBuyer().getId(),order.getFinalPrice(),order.getId());
-        order.setStatus(OrderStatus.CANCELLED); order.setEscrowStatus(EscrowStatus.REFUNDED); orders.save(order);
+        order.setStatus(OrderStatus.CANCELLED); order.setEscrowStatus(EscrowStatus.REFUNDED); order.setReturnResponsibleParty(party); orders.saveAndFlush(order);
+        reputation.recordClosedOrder(order,actor,reason,"SELLER".equals(party));
         shipment.setReason(reason); shipment.setRequestedBy(actor); shipments.save(shipment);
         // Do not re-publish returned/disputed goods automatically; the seller must resolve their condition.
         return ShipmentResponse.from(shipment);
@@ -257,6 +268,9 @@ public class ShipmentService {
         if (!status.isBlank() && !LALAMOVE_STATUSES.contains(status)) throw new BadRequestException("Unknown Lalamove status");
         var event=new ShipmentEvent(); event.setShipmentId(shipment.getId()); event.setEventKey(key); event.setType(type);
         event.setStatus(status); event.setOccurredAt(time); event.setPayload(mapper.writeValueAsString(body)); events.save(event);
+        // A delayed authenticated pickup event can fill the actual pickup time without regressing
+        // current shipment status. Sync/booking observation timestamps are never pickup evidence.
+        if("ORDER_STATUS_CHANGED".equals(type) && "PICKED_UP".equals(status)) recordVerifiedPickup(shipment,time);
         if (shipment.getLastReconciledAt()!=null && !time.isAfter(shipment.getLastReconciledAt())) return;
         if (body.hasNonNull("replacement_order_code")) {
             String replacement=body.path("replacement_order_code").asText();
@@ -349,9 +363,19 @@ public class ShipmentService {
         var order=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();
         if (Set.of(OrderStatus.COMPLETED,OrderStatus.CANCELLED).contains(order.getStatus())) return;
         boolean toBuyer=Set.of("SELLER_TO_BUYER","CENTER_TO_BUYER").contains(shipment.getLeg());
-        if (toBuyer && "PICKED_UP".equals(status) && order.getShippingDeliveredAt()==null) order.setStatus(OrderStatus.SHIPPED);
+        if (toBuyer && "PICKED_UP".equals(status) && order.getShippingDeliveredAt()==null) {
+            order.setStatus(OrderStatus.SHIPPED);
+        }
         if (toBuyer && "COMPLETED".equals(status)) { order.setStatus(OrderStatus.DELIVERED); if (order.getShippingDeliveredAt()==null) order.setShippingDeliveredAt(shipment.getDeliveredAt()); }
         orders.save(order);
+    }
+    private void recordVerifiedPickup(Shipment shipment,Instant actualTime) {
+        if(shipment.getOrderId()==null || !"SELLER_TO_BUYER".equals(shipment.getLeg())) return;
+        var order=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();
+        Instant pickup=actualTime.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        if(order.getCarrierPickedUpAt()==null || pickup.isBefore(order.getCarrierPickedUpAt())) {
+            order.setCarrierPickedUpAt(pickup); orders.save(order);
+        }
     }
     private void freeze(Shipment shipment) {
         if (shipment.getOrderId()!=null) {

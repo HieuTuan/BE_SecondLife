@@ -56,6 +56,7 @@ public class OrderServiceImpl implements OrderService {
     private final CommissionService commissions;
     private final SettlementService settlements;
     private final SystemWalletService systemWallet;
+    private final com.secondlife.secondlife.service.SellerReputationService reputation;
 
     @Override
     @Transactional
@@ -73,6 +74,8 @@ public class OrderServiceImpl implements OrderService {
                 throw new ConflictException("requestId was already used with different order details");
             return mapToDTO(previous);
         }
+
+        reputation.requireSellingAllowed(post.getUser().getId());
 
         if (!"ACTIVE".equals(post.getStatus()) && !"RESERVED".equals(post.getStatus())) {
             throw new ConflictException("Post is not available for purchase");
@@ -136,6 +139,8 @@ public class OrderServiceImpl implements OrderService {
         // Deduct money from buyer. This will throw an exception if insufficient balance
         systemWallet.hold(order);
         walletService.processPayment(buyerId, finalPrice.add(order.getShippingFee()), order.getId());
+        reputation.initializePaidOrder(order);
+        orderRepository.save(order);
 
         // Update post status so it can't be bought again
         post.setStatus("SOLD");
@@ -193,7 +198,10 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
-    public OrderResponseDTO cancelOrder(UUID userId, UUID orderId) {
+    public OrderResponseDTO cancelOrder(UUID userId, UUID orderId) { return cancelOrder(userId,orderId,null); }
+
+    @Override @Transactional
+    public OrderResponseDTO cancelOrder(UUID userId,UUID orderId,com.secondlife.secondlife.dto.reputation.CancelOrderRequest request) {
         Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new NotFoundException("Order not found"));
 
@@ -201,7 +209,16 @@ public class OrderServiceImpl implements OrderService {
             throw new BadRequestException("You are not authorized to cancel this order");
         }
 
-        if (order.getStatus()==OrderStatus.CANCELLED && order.getEscrowStatus()==EscrowStatus.REFUNDED) return mapToDTO(order);
+        boolean sellerCancel=order.getSeller().getId().equals(userId);
+        if(sellerCancel && request==null) throw new BadRequestException("Seller cancellation requires reasonCode and reason");
+        var code=request==null?com.secondlife.secondlife.dto.reputation.CancelOrderRequest.ReasonCode.BUYER_REQUESTED:request.reasonCode();
+        if(sellerCancel == (code==com.secondlife.secondlife.dto.reputation.CancelOrderRequest.ReasonCode.BUYER_REQUESTED))
+            throw new BadRequestException("Cancellation reason must match the authenticated buyer or seller");
+        if(order.getStatus()==OrderStatus.CANCELLED && order.getEscrowStatus()==EscrowStatus.REFUNDED) {
+            if(order.getCancelledBy()!=null && (!order.getCancelledBy().equals(userId) || !code.name().equals(order.getCancellationReasonCode())))
+                throw new ConflictException("Order cancellation was already finalized by another actor or reason");
+            return mapToDTO(order);
+        }
         if (order.getStatus() == OrderStatus.COMPLETED || order.getStatus() == OrderStatus.CANCELLED) {
             throw new BadRequestException("Order cannot be cancelled in current status");
         }
@@ -222,6 +239,10 @@ public class OrderServiceImpl implements OrderService {
 
         order.setStatus(OrderStatus.CANCELLED);
         order.setEscrowStatus(EscrowStatus.REFUNDED);
+        order.setCancelledBy(userId); order.setCancellationReasonCode(code.name());
+        orderRepository.saveAndFlush(order);
+        if(sellerCancel) reputation.recordSellerCancellation(order,userId,request.reason().trim());
+        else reputation.recordClosedOrder(order,userId,"Buyer cancellation",false);
 
         // Revert post status to ACTIVE
         Post post = postRepository.findByIdForUpdate(order.getPost().getId()).orElseThrow();
@@ -257,6 +278,9 @@ public class OrderServiceImpl implements OrderService {
         dto.setStatus(order.getStatus());
         dto.setEscrowStatus(order.getEscrowStatus());
         dto.setCreatedAt(order.getCreatedAt());
+        dto.setPaidAt(order.getPaidAt()); dto.setHandoverDeadline(order.getHandoverDeadline());
+        dto.setSellerReadyAt(order.getSellerReadyAt()); dto.setCarrierPickedUpAt(order.getCarrierPickedUpAt());
+        dto.setCancellationReasonCode(order.getCancellationReasonCode());
         return dto;
     }
 }

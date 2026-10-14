@@ -22,6 +22,13 @@ public class Order {
     @Column(columnDefinition="TEXT") private String deliveryAddress;
     private Instant shippingDeliveredAt;
     private UUID requestId;
+    private Instant paidAt;
+    private Instant handoverDeadline;
+    private Instant sellerReadyAt;
+    private Instant carrierPickedUpAt;
+    private String cancellationReasonCode;
+    private UUID cancelledBy;
+    private String returnResponsibleParty;
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)

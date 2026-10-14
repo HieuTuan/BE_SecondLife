@@ -26,4 +26,9 @@ public class OrderResponseDTO {
     private OrderStatus status;
     private EscrowStatus escrowStatus;
     private Instant createdAt;
+    private Instant paidAt;
+    private Instant handoverDeadline;
+    private Instant sellerReadyAt;
+    private Instant carrierPickedUpAt;
+    private String cancellationReasonCode;
 }
