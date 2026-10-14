@@ -93,7 +93,7 @@ public class DepositServiceImpl implements DepositService {
             return;
         }
 
-        Optional<DepositRequest> optionalDeposit = depositRequestRepository.findByCode(code);
+        Optional<DepositRequest> optionalDeposit = depositRequestRepository.findByCodeForUpdate(code);
         if (optionalDeposit.isEmpty()) {
             log.info("Deposit request with code {} not found", code);
             return;

@@ -62,7 +62,7 @@ public class AdminUserController {
 
     @GetMapping
     @Operation(summary = "Get users with filtering and pagination")
-    @PreAuthorize("hasAuthority('USER_READ_ANY')")
+    @PreAuthorize("hasAuthority('USER_READ_ANY') or hasAnyRole('ADMIN', 'STAFF')")
     public ResponseEntity<ApiResponse<PageResponse<UserAdminResponse>>> getUsers(
             @RequestParam(required = false) String email,
             @RequestParam(required = false) AccountStatus status,
@@ -75,7 +75,7 @@ public class AdminUserController {
 
     @GetMapping("/{userId}")
     @Operation(summary = "Get user details by ID")
-    @PreAuthorize("hasAuthority('USER_READ_ANY')")
+    @PreAuthorize("hasAuthority('USER_READ_ANY') or hasAnyRole('ADMIN', 'STAFF')")
     public ResponseEntity<ApiResponse<UserAdminResponse>> getUserById(@PathVariable UUID userId) {
         UserAdminResponse response = userService.getAdminUserById(userId);
         return ResponseEntity.ok(ApiResponse.success("Get user details successfully", response));
@@ -83,7 +83,7 @@ public class AdminUserController {
 
     @PatchMapping("/{userId}/status")
     @Operation(summary = "Update user account status (ACTIVE, LOCKED, DISABLED)")
-    @PreAuthorize("hasAuthority('USER_STATUS_UPDATE')")
+    @PreAuthorize("hasAuthority('USER_STATUS_UPDATE') or hasAnyRole('ADMIN', 'STAFF')")
     public ResponseEntity<ApiResponse<UserAdminResponse>> updateUserStatus(
             @AuthenticationPrincipal CustomUserDetails currentAdmin,
             @PathVariable UUID userId,

@@ -97,6 +97,36 @@ public class NotificationServiceImpl implements NotificationService {
             log.warn("Failed to push realtime WebSocket notification to user {}: {}", userId, e.getMessage());
         }
 
+        // Dispatch to push notification channels (FCM)
+        if (channels != null && !channels.isEmpty()) {
+            com.secondlife.secondlife.notification.NotificationType parsedType = com.secondlife.secondlife.notification.NotificationType.SYSTEM;
+            try {
+                if (type != null) parsedType = com.secondlife.secondlife.notification.NotificationType.valueOf(type.trim().toUpperCase());
+            } catch (Exception ignored) {}
+
+            com.secondlife.secondlife.notification.NotificationRecipient recipient = com.secondlife.secondlife.notification.NotificationRecipient.from(user);
+            java.util.Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("body", message);
+            if (referenceId != null) payload.put("referenceId", referenceId.toString());
+            if (referenceType != null) payload.put("referenceType", referenceType);
+            if (actionUrl != null) payload.put("deepLink", actionUrl);
+
+            NotificationMessage notifMsg = new NotificationMessage(
+                    parsedType,
+                    recipient,
+                    title,
+                    java.util.Set.of(NotificationChannelType.PUSH),
+                    payload
+            );
+            for (NotificationChannel channel : channels) {
+                try {
+                    channel.send(notifMsg);
+                } catch (Exception ex) {
+                    log.warn("Channel {} failed to dispatch: {}", channel.getChannelType(), ex.getMessage());
+                }
+            }
+        }
+
         return dto;
     }
 

@@ -36,6 +36,8 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
 
     Optional<InspectionOrder> findByOrderId(UUID orderId);
 
+    Optional<InspectionOrder> findByTamperSealId(String tamperSealId);
+
     Page<InspectionOrder> findByBuyerIdOrderByCreatedAtDesc(UUID buyerId, Pageable pageable);
 
     Page<InspectionOrder> findBySellerIdOrderByCreatedAtDesc(UUID sellerId, Pageable pageable);
@@ -45,4 +47,9 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
 
     @Query("SELECT o FROM InspectionOrder o WHERE o.status = 'PASSED' AND o.finalPaymentDeadline IS NOT NULL AND o.finalPaymentDeadline < :now AND o.finalPaymentPaidAt IS NULL")
     List<InspectionOrder> findExpiredFinalPaymentOrders(@Param("now") Instant now);
+
+    @Query("SELECT o FROM InspectionOrder o WHERE o.videoCleanupStatus = 'ACTIVE' " +
+           "AND o.videoRetentionUntil IS NOT NULL AND o.videoRetentionUntil <= :now " +
+           "AND (o.videoProofUrl IS NOT NULL OR o.unboxingVideoUrl IS NOT NULL)")
+    List<InspectionOrder> findDueForVideoCleanup(@Param("now") Instant now);
 }

@@ -6,6 +6,7 @@ import com.secondlife.secondlife.dto.response.MediaUploadResponse;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.service.MediaService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -20,22 +21,37 @@ import java.util.Set;
 @Service
 public class MediaServiceImpl implements MediaService {
 
-    private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of(
+    private static final Set<String> ALLOWED_IMAGE_CONTENT_TYPES = Set.of(
             "image/jpeg",
             "image/jpg",
             "image/png",
             "image/webp"
     );
+    private static final Set<String> ALLOWED_VIDEO_CONTENT_TYPES = Set.of(
+            "video/mp4",
+            "video/quicktime",
+            "video/webm"
+    );
     private final Cloudinary cloudinary;
     private final long maxFileSizeBytes;
     private final String defaultFolder;
+    private final long maxVideoSizeBytes;
 
+    @Autowired
     public MediaServiceImpl(Cloudinary cloudinary,
             @Value("${app.media.max-file-size-bytes}") long maxFileSizeBytes,
-            @Value("${app.media.default-folder}") String defaultFolder) {
+            @Value("${app.media.default-folder}") String defaultFolder,
+            @Value("${app.media.max-video-size-bytes:104857600}") long maxVideoSizeBytes) {
         this.cloudinary = cloudinary;
         this.maxFileSizeBytes = maxFileSizeBytes;
         this.defaultFolder = defaultFolder;
+        this.maxVideoSizeBytes = maxVideoSizeBytes;
+    }
+
+    public MediaServiceImpl(Cloudinary cloudinary,
+            long maxFileSizeBytes,
+            String defaultFolder) {
+        this(cloudinary, maxFileSizeBytes, defaultFolder, 104857600L);
     }
 
     @Override
@@ -86,6 +102,41 @@ public class MediaServiceImpl implements MediaService {
         return responses;
     }
 
+    @Override
+    public MediaUploadResponse uploadVideo(MultipartFile file, String folder) {
+        validateVideoFile(file);
+
+        String targetFolder = (folder != null && !folder.isBlank()) ? folder.trim() : "secondlife/inspections/videos";
+
+        try {
+            log.info("Uploading video [{}] of size {} bytes to Cloudinary folder [{}]",
+                    file.getOriginalFilename(), file.getSize(), targetFolder);
+
+            Map<?, ?> uploadResult = cloudinary.uploader().upload(file.getBytes(), ObjectUtils.asMap(
+                    "folder", targetFolder,
+                    "resource_type", "video"
+            ));
+
+            String secureUrl = (String) uploadResult.get("secure_url");
+            String publicId = (String) uploadResult.get("public_id");
+            String format = (String) uploadResult.get("format");
+            long bytes = uploadResult.get("bytes") instanceof Number n ? n.longValue() : file.getSize();
+
+            log.info("Successfully uploaded video to Cloudinary: publicId={}, url={}", publicId, secureUrl);
+
+            return new MediaUploadResponse(
+                    secureUrl,
+                    publicId,
+                    format,
+                    bytes,
+                    file.getOriginalFilename()
+            );
+        } catch (IOException e) {
+            log.error("Failed to upload video [{}] to Cloudinary: {}", file.getOriginalFilename(), e.getMessage(), e);
+            throw new IllegalStateException("Lỗi khi tải video lên dịch vụ lưu trữ: " + e.getMessage(), e);
+        }
+    }
+
     private void validateImageFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new BadRequestException("File tải lên không được để trống");
@@ -96,8 +147,23 @@ public class MediaServiceImpl implements MediaService {
         }
 
         String contentType = file.getContentType();
-        if (contentType == null || !ALLOWED_CONTENT_TYPES.contains(contentType.toLowerCase())) {
+        if (contentType == null || !ALLOWED_IMAGE_CONTENT_TYPES.contains(contentType.toLowerCase())) {
             throw new BadRequestException("Định dạng file không hợp lệ. Chỉ chấp nhận các định dạng ảnh: JPEG, PNG, WEBP");
+        }
+    }
+
+    private void validateVideoFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BadRequestException("File video tải lên không được để trống");
+        }
+
+        if (file.getSize() > maxVideoSizeBytes) {
+            throw new BadRequestException("Dung lượng video vượt quá giới hạn tối đa cho phép (" + (maxVideoSizeBytes / (1024 * 1024)) + " MB)");
+        }
+
+        String contentType = file.getContentType();
+        if (contentType == null || !ALLOWED_VIDEO_CONTENT_TYPES.contains(contentType.toLowerCase())) {
+            throw new BadRequestException("Định dạng video không hợp lệ. Chỉ chấp nhận các định dạng video: MP4, MOV (quicktime), WEBM");
         }
     }
 }

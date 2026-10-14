@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/v1/admin/system-wallet")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ADMIN') and hasAuthority('ADMIN_COMMISSION_MANAGE')")
+@PreAuthorize("hasAnyRole('ADMIN', 'STAFF') or hasAuthority('ADMIN_COMMISSION_MANAGE')")
 @Tag(name = "Admin - System Wallet", description = "Order escrow, collected shipping fees and earned commission in VND")
 public class AdminSystemWalletController {
     private final SystemWalletService wallets;

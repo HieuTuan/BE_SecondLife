@@ -185,4 +185,24 @@ class InspectorControllerTest {
                 .andExpect(jsonPath("$.tamperSealId").value("SL-SEAL-8829102"))
                 .andExpect(jsonPath("$.barcode").value("SL-BC-998877"));
     }
+
+    @Test
+    @DisplayName("POST /api/v1/inspector/orders/{orderId}/start: KTV bắt đầu kiểm định chuyển trạng thái sang INSPECTING")
+    void testStartInspection() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        UUID inspectorId = UUID.randomUUID();
+
+        when(currentUserProvider.resolveUserId(any())).thenReturn(inspectorId);
+
+        InspectionOrderResponse response = InspectionOrderResponse.builder()
+                .id(orderId)
+                .status("INSPECTING")
+                .build();
+
+        when(inspectionService.startInspection(eq(inspectorId), eq(orderId))).thenReturn(response);
+
+        mockMvc.perform(post("/api/v1/inspector/orders/" + orderId + "/start"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("INSPECTING"));
+    }
 }

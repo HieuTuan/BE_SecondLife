@@ -70,6 +70,7 @@ public class InspectionServiceImpl implements InspectionService {
     private final WalletService walletService;
     private final ObjectMapper objectMapper;
     private final NotificationService notificationService;
+    private final com.secondlife.secondlife.repository.InspectionSealLogRepository inspectionSealLogRepository;
 
     @Qualifier("googleGenAiChatModel")
     private final org.springframework.ai.chat.model.ChatModel googleChatModel;
@@ -548,6 +549,60 @@ public class InspectionServiceImpl implements InspectionService {
 
     @Override
     @Transactional
+    public InspectionOrderResponse startInspection(UUID actorId, UUID orderId) {
+        InspectionOrder order = inspectionOrderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
+
+        if (order.getInspector() == null || !order.getInspector().getId().equals(actorId)) {
+            throw new ForbiddenException("Bạn không phải Kỹ thuật viên được phân công cho đơn kiểm định này");
+        }
+
+        List<String> allowedStartStatuses = List.of(
+                "PENDING",
+                "DISPATCHED",
+                "SCHEDULED",
+                "CONFIRMED_PENDING_DISPATCH",
+                "SHIPPING_TO_CENTER",
+                "INSPECTING"
+        );
+        if (!allowedStartStatuses.contains(order.getStatus())) {
+            throw new ConflictException("Đơn kiểm định không ở trạng thái hợp lệ để bắt đầu kiểm tra");
+        }
+
+        order.setStatus(InspectionOrderStatus.INSPECTING.name());
+        InspectionOrder saved = inspectionOrderRepository.save(order);
+
+        if (notificationService != null) {
+            String title = order.getPost() != null ? order.getPost().getTitle() : "";
+            if (order.getBuyer() != null) {
+                notificationService.notify(
+                    order.getBuyer().getId(),
+                    "Kỹ thuật viên đã bắt đầu kiểm định",
+                    "Sản phẩm \"" + title + "\" đang được kỹ thuật viên mở máy và kiểm tra tính năng.",
+                    NotificationType.INSPECTION,
+                    order.getId(),
+                    "INSPECTION_ORDER",
+                    "/buyer/inspections/" + order.getId()
+                );
+            }
+            if (order.getSeller() != null) {
+                notificationService.notify(
+                    order.getSeller().getId(),
+                    "Kỹ thuật viên đã bắt đầu kiểm định",
+                    "Sản phẩm \"" + title + "\" của bạn đang được kỹ thuật viên tiến hành kiểm tra.",
+                    NotificationType.INSPECTION,
+                    order.getId(),
+                    "INSPECTION_ORDER",
+                    "/seller/inspections/" + order.getId()
+                );
+            }
+        }
+
+        return InspectionOrderResponse.from(saved);
+    }
+
+    @Override
+    @Transactional
     public InspectionOrderResponse submitResult(UUID orderId, UUID inspectorId, InspectionResultRequest request) {
         InspectionOrder order = inspectionOrderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
@@ -569,15 +624,41 @@ public class InspectionServiceImpl implements InspectionService {
 
         order.setNote(request.getNote());
         order.setVideoProofUrl(request.getVideoProofUrl());
+        order.setVideoProofPublicId(request.getVideoProofPublicId());
         order.setUnboxingVideoUrl(request.getUnboxingVideoUrl());
+        order.setUnboxingVideoPublicId(request.getUnboxingVideoPublicId());
+
+        boolean isExternalVideo = (request.getVideoProofUrl() != null && (request.getVideoProofUrl().contains("youtube.com") || request.getVideoProofUrl().contains("youtu.be") || request.getVideoProofUrl().contains("drive.google.com")))
+                || (request.getUnboxingVideoUrl() != null && (request.getUnboxingVideoUrl().contains("youtube.com") || request.getUnboxingVideoUrl().contains("youtu.be") || request.getUnboxingVideoUrl().contains("drive.google.com")));
+
+        if (isExternalVideo) {
+            order.setVideoCleanupStatus("EXEMPTED");
+        } else {
+            order.setVideoCleanupStatus("ACTIVE");
+        }
+
         if (request.getConditionScore() != null) {
             order.setConditionScore(request.getConditionScore());
         }
         if (request.getConditionGrade() != null) {
             order.setConditionGrade(request.getConditionGrade());
         }
-        if (request.getTamperSealId() != null) {
-            order.setTamperSealId(request.getTamperSealId());
+        if (request.getTamperSealId() != null && !request.getTamperSealId().isBlank()) {
+            String sealId = request.getTamperSealId().trim();
+            order.setTamperSealId(sealId);
+            if (inspectionSealLogRepository != null && !inspectionSealLogRepository.existsByTamperSealIdAndScanStage(sealId, "INITIAL_SEAL")) {
+                User inspector = userRepository.findById(inspectorId).orElse(null);
+                com.secondlife.secondlife.entity.InspectionSealLog sealLog = new com.secondlife.secondlife.entity.InspectionSealLog(
+                        order,
+                        sealId,
+                        inspector,
+                        "INITIAL_SEAL",
+                        "INTACT",
+                        "Trung tâm kiểm định SecondLife",
+                        "Tem niêm phong QR dán trên thân máy sau khi KTV hoàn tất kiểm định"
+                );
+                inspectionSealLogRepository.save(sealLog);
+            }
         }
         if (request.getBarcode() != null) {
             order.setBarcode(request.getBarcode());
@@ -596,6 +677,9 @@ public class InspectionServiceImpl implements InspectionService {
 
         if ("FAILED".equals(request.getStatus())) {
             order.setStatus(InspectionOrderStatus.FAILED.name());
+            if (!isExternalVideo) {
+                order.setVideoRetentionUntil(Instant.now().plus(48, java.time.temporal.ChronoUnit.HOURS));
+            }
             post.setStatus("ACTIVE"); // Mở lại bài đăng
             postRepository.save(post);
 
@@ -765,5 +849,100 @@ public class InspectionServiceImpl implements InspectionService {
             throw new AiProviderException("AI moderation returned an invalid result");
         }
         return result;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public com.secondlife.secondlife.dto.response.InspectionSealVerificationResponse getSealVerification(String tamperSealId) {
+        if (tamperSealId == null || tamperSealId.isBlank()) {
+            throw new BadRequestException("Mã tem niêm phong không được để trống");
+        }
+        InspectionOrder order = inspectionOrderRepository.findByTamperSealId(tamperSealId.trim())
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy tem niêm phong hợp lệ với mã: " + tamperSealId));
+
+        List<com.secondlife.secondlife.entity.InspectionSealLog> logs = inspectionSealLogRepository != null
+                ? inspectionSealLogRepository.findByInspectionOrderIdOrderByScannedAtAsc(order.getId())
+                : List.of();
+
+        String currentStatus = "INTACT";
+        for (com.secondlife.secondlife.entity.InspectionSealLog l : logs) {
+            if ("TAMPERED".equalsIgnoreCase(l.getSealCondition())) {
+                currentStatus = "TAMPERED";
+                break;
+            }
+        }
+
+        List<com.secondlife.secondlife.dto.response.InspectionSealLogResponse> logResponses = logs.stream()
+                .map(com.secondlife.secondlife.dto.response.InspectionSealLogResponse::from)
+                .toList();
+
+        Post post = order.getPost();
+        String inspectorName = "KTV SecondLife";
+        if (order.getInspector() != null) {
+            if (order.getInspector().getProfile() != null && order.getInspector().getProfile().getFullName() != null) {
+                inspectorName = order.getInspector().getProfile().getFullName();
+            } else {
+                inspectorName = order.getInspector().getEmail();
+            }
+        }
+
+        return com.secondlife.secondlife.dto.response.InspectionSealVerificationResponse.builder()
+                .tamperSealId(tamperSealId.trim())
+                .inspectionOrderId(order.getId())
+                .postId(post != null ? post.getId() : null)
+                .productTitle(post != null ? post.getTitle() : null)
+                .productModel(null)
+                .productBrand(null)
+                .conditionScore(order.getConditionScore())
+                .conditionGrade(order.getConditionGrade())
+                .inspectionStatus(order.getStatus())
+                .inspectionCenterName("Trung tâm kiểm định SecondLife")
+                .inspectorName(inspectorName)
+                .inspectedAt(order.getUpdatedAt())
+                .currentSealStatus(currentStatus)
+                .isOfficialSecondLifeSeal(true)
+                .scanHistory(logResponses)
+                .build();
+    }
+
+    @Override
+    @Transactional
+    public com.secondlife.secondlife.dto.response.InspectionSealLogResponse recordSealScan(UUID actorId, com.secondlife.secondlife.dto.request.InspectionSealScanRequest request) {
+        if (request.getTamperSealId() == null || request.getTamperSealId().isBlank()) {
+            throw new BadRequestException("Mã tem niêm phong không được để trống");
+        }
+
+        InspectionOrder order = inspectionOrderRepository.findByTamperSealId(request.getTamperSealId().trim())
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy thông tin tem niêm phong: " + request.getTamperSealId()));
+
+        User actor = actorId != null ? userRepository.findById(actorId).orElse(null) : null;
+
+        com.secondlife.secondlife.entity.InspectionSealLog sealLog = new com.secondlife.secondlife.entity.InspectionSealLog(
+                order,
+                request.getTamperSealId().trim(),
+                actor,
+                request.getScanStage().trim().toUpperCase(),
+                request.getSealCondition().trim().toUpperCase(),
+                request.getLocationText(),
+                request.getNote()
+        );
+
+        sealLog = inspectionSealLogRepository.save(sealLog);
+
+        if (notificationService != null && "TAMPERED".equalsIgnoreCase(request.getSealCondition())) {
+            if (order.getBuyer() != null) {
+                notificationService.notify(
+                        order.getBuyer().getId(),
+                        "Cảnh báo tem niêm phong bị rách/bóc!",
+                        "Tem niêm phong " + request.getTamperSealId() + " được ghi nhận có dấu hiệu bị bóc ở giai đoạn " + request.getScanStage() + ".",
+                        NotificationType.INSPECTION,
+                        order.getId(),
+                        "INSPECTION",
+                        "/orders/" + order.getId()
+                );
+            }
+        }
+
+        return com.secondlife.secondlife.dto.response.InspectionSealLogResponse.from(sealLog);
     }
 }

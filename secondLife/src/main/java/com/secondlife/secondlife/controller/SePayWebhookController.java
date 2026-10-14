@@ -23,6 +23,8 @@ public class SePayWebhookController {
     @PostMapping
     public ResponseEntity<Map<String, Boolean>> handleWebhook(
             @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestHeader(value = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = "X-SePay-Signature", required = false) String signature,
             @RequestBody SePayWebhookDTO webhookDTO) {
             
         // Check API Token robustly

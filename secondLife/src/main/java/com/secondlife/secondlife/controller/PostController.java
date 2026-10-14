@@ -48,6 +48,11 @@ public class PostController {
                 PageRequest.of(safePage, safeSize, Sort.by("publishedAt").descending())));
     }
 
+    @GetMapping("/{postId}")
+    public ApiResponse<MarketplaceListingResponse> getPostDetail(@PathVariable UUID postId) {
+        return ApiResponse.success(marketplaceListingService.get(postId));
+    }
+
     @PostMapping(value = "/init", consumes = "multipart/form-data")
     @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
     public ResponseEntity<PostInitResponse> initPost(

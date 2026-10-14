@@ -64,6 +64,11 @@ public interface InspectionService {
     InspectionOrderResponse assignInspector(UUID orderId, UUID inspectorId, UUID managerId);
 
     /**
+     * Inspector bắt đầu tiến hành kiểm định (chuyển trạng thái sang INSPECTING)
+     */
+    InspectionOrderResponse startInspection(UUID actorId, UUID orderId);
+
+    /**
      * Inspector nộp kết quả kiểm định kèm video bằng chứng và checklist
      */
     InspectionOrderResponse submitResult(UUID orderId, UUID inspectorId, InspectionResultRequest request);
@@ -77,4 +82,14 @@ public interface InspectionService {
      * Manager xem danh sách nhân viên của mình
      */
     List<?> getStaffList(UUID managerId);
+
+    /**
+     * Tra cứu và xác thực thông tin tem niêm phong QR
+     */
+    com.secondlife.secondlife.dto.response.InspectionSealVerificationResponse getSealVerification(String tamperSealId);
+
+    /**
+     * Ghi nhận lịch sử các lần quét mã QR tem niêm phong (KTV, Shipper, Buyer)
+     */
+    com.secondlife.secondlife.dto.response.InspectionSealLogResponse recordSealScan(UUID actorId, com.secondlife.secondlife.dto.request.InspectionSealScanRequest request);
 }

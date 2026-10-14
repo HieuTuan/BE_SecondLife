@@ -52,7 +52,9 @@ class PostRouteMergeTest {
         mvc.perform(get("/api/v1/posts").param("page", "0").param("size", "10"))
                 .andExpect(status().isOk());
         mvc.perform(get("/api/v1/posts/" + postId)).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/posts/" + postId + "/draft")).andExpect(status().isOk());
         verify(listings).list(isNull(), isNull(), any());
+        verify(listings).get(postId);
         verify(drafts).get(sellerId, postId);
         verifyNoInteractions(posts);
     }

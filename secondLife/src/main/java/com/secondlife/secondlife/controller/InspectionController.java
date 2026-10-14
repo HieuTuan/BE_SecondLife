@@ -24,14 +24,22 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/inspection")
-@RequiredArgsConstructor
-@Tag(name = "Product Inspection - Buyer & Seller Flow", description = "APIs dành cho Người mua và Người bán trong quy trình kiểm định sản phẩm")
 public class InspectionController {
 
     private final InspectionService inspectionService;
     private final InspectionPricingService pricingService;
     private final InspectionEscrowService escrowService;
     private final CurrentUserProvider currentUserProvider;
+
+    public InspectionController(InspectionService inspectionService,
+                                InspectionPricingService pricingService,
+                                InspectionEscrowService escrowService,
+                                CurrentUserProvider currentUserProvider) {
+        this.inspectionService = inspectionService;
+        this.pricingService = pricingService;
+        this.escrowService = escrowService;
+        this.currentUserProvider = currentUserProvider;
+    }
 
     @PostMapping("/quote")
     @Operation(summary = "Tính toán báo giá chi tiết kiểm định cho bài đăng (cả 2 gói Tại nhà và Tại trung tâm)")
@@ -104,5 +112,23 @@ public class InspectionController {
             @PathVariable UUID orderId) {
         UUID buyerId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(inspectionService.confirmFinalPurchase(buyerId, orderId));
+    }
+
+    @GetMapping("/seal/{tamperSealId}")
+    @Operation(summary = "Quét mã QR tra cứu và xác thực thông tin tem niêm phong")
+    public ResponseEntity<com.secondlife.secondlife.common.ApiResponse<com.secondlife.secondlife.dto.response.InspectionSealVerificationResponse>> getSealVerification(
+            @PathVariable String tamperSealId) {
+        return ResponseEntity.ok(com.secondlife.secondlife.common.ApiResponse.success(
+                "Xác thực tem niêm phong thành công", inspectionService.getSealVerification(tamperSealId)));
+    }
+
+    @PostMapping("/seal/scan")
+    @Operation(summary = "Ghi nhận lịch sử các lần quét mã QR tem niêm phong (KTV, Shipper, Buyer)")
+    public ResponseEntity<com.secondlife.secondlife.common.ApiResponse<com.secondlife.secondlife.dto.response.InspectionSealLogResponse>> recordSealScan(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @jakarta.validation.Valid @RequestBody com.secondlife.secondlife.dto.request.InspectionSealScanRequest request) {
+        UUID actorId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(com.secondlife.secondlife.common.ApiResponse.success(
+                "Ghi nhận lần quét tem thành công", inspectionService.recordSealScan(actorId, request)));
     }
 }

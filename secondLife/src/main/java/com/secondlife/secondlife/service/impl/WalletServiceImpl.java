@@ -16,7 +16,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.secondlife.secondlife.dto.request.WalletWithdrawalRequest;
+import com.secondlife.secondlife.dto.request.WalletWithdrawalReviewRequest;
+import com.secondlife.secondlife.dto.response.WalletWithdrawalResponse;
+import com.secondlife.secondlife.entity.WalletWithdrawal;
+import com.secondlife.secondlife.repository.WalletWithdrawalRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 
 @Service
@@ -26,22 +35,32 @@ public class WalletServiceImpl implements WalletService {
     private final WalletTransactionRepository walletTransactionRepository;
     private final UserRepository userRepository;
     private final NotificationService notificationService;
+    private final WalletWithdrawalRepository walletWithdrawalRepository;
 
     public WalletServiceImpl(UserWalletRepository userWalletRepository,
                              WalletTransactionRepository walletTransactionRepository,
                              UserRepository userRepository) {
-        this(userWalletRepository, walletTransactionRepository, userRepository, null);
+        this(userWalletRepository, walletTransactionRepository, userRepository, null, null);
+    }
+
+    public WalletServiceImpl(UserWalletRepository userWalletRepository,
+                             WalletTransactionRepository walletTransactionRepository,
+                             UserRepository userRepository,
+                             NotificationService notificationService) {
+        this(userWalletRepository, walletTransactionRepository, userRepository, notificationService, null);
     }
 
     @Autowired
     public WalletServiceImpl(UserWalletRepository userWalletRepository,
                              WalletTransactionRepository walletTransactionRepository,
                              UserRepository userRepository,
-                             @Autowired(required = false) NotificationService notificationService) {
+                             @Autowired(required = false) NotificationService notificationService,
+                             @Autowired(required = false) WalletWithdrawalRepository walletWithdrawalRepository) {
         this.userWalletRepository = userWalletRepository;
         this.walletTransactionRepository = walletTransactionRepository;
         this.userRepository = userRepository;
         this.notificationService = notificationService;
+        this.walletWithdrawalRepository = walletWithdrawalRepository;
     }
 
     @Override
@@ -188,5 +207,145 @@ public class WalletServiceImpl implements WalletService {
     public org.springframework.data.domain.Page<WalletTransaction> getTransactions(UUID userId, org.springframework.data.domain.Pageable pageable) {
         UserWallet wallet = getWalletByUserId(userId);
         return walletTransactionRepository.findByWalletId(wallet.getId(), pageable);
+    }
+
+    @Override
+    @Transactional
+    public WalletWithdrawalResponse requestWithdrawal(UUID userId, WalletWithdrawalRequest request) {
+        if (walletWithdrawalRepository == null) {
+            throw new IllegalStateException("WalletWithdrawalRepository is not available");
+        }
+        if (request.getAmount() == null || request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("Số tiền rút phải lớn hơn 0");
+        }
+
+        UserWallet wallet = getWalletWithLock(userId);
+        if (wallet.getBalance().compareTo(request.getAmount()) < 0) {
+            throw new BadRequestException("Số dư khả dụng không đủ để thực hiện rút tiền");
+        }
+
+        // Deduct balance from wallet
+        wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
+        userWalletRepository.save(wallet);
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+
+        WalletWithdrawal withdrawal = new WalletWithdrawal(
+                user,
+                request.getAmount(),
+                request.getBankCode().trim().toUpperCase(),
+                request.getAccountNumber().trim(),
+                request.getAccountHolderName().trim().toUpperCase()
+        );
+        withdrawal = walletWithdrawalRepository.save(withdrawal);
+
+        createTransaction(wallet, request.getAmount().negate(), WalletTransactionType.WITHDRAW, withdrawal.getId());
+
+        if (notificationService != null) {
+            notificationService.notifyWithEmail(
+                userId,
+                "Yêu cầu rút tiền đang chờ xử lý",
+                "Yêu cầu rút " + request.getAmount() + " VND về tài khoản " + request.getBankCode() + " - " + request.getAccountNumber() + " đã được tiếp nhận và đang chờ duyệt.",
+                NotificationType.WALLET,
+                withdrawal.getId(),
+                "WALLET_WITHDRAWAL",
+                "/wallet"
+            );
+        }
+
+        return WalletWithdrawalResponse.from(withdrawal);
+    }
+
+    @Override
+    @Transactional
+    public WalletWithdrawalResponse reviewWithdrawal(UUID adminId, UUID withdrawalId, WalletWithdrawalReviewRequest request) {
+        if (walletWithdrawalRepository == null) {
+            throw new IllegalStateException("WalletWithdrawalRepository is not available");
+        }
+
+        WalletWithdrawal withdrawal = walletWithdrawalRepository.findByIdForUpdate(withdrawalId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy yêu cầu rút tiền với mã: " + withdrawalId));
+
+        if (!"PENDING_REVIEW".equalsIgnoreCase(withdrawal.getStatus())) {
+            throw new BadRequestException("Yêu cầu rút tiền đã được xử lý trước đó với trạng thái: " + withdrawal.getStatus());
+        }
+
+        User admin = userRepository.findById(adminId)
+                .orElseThrow(() -> new NotFoundException("Admin user not found"));
+
+        withdrawal.setReviewedBy(admin);
+        withdrawal.setReviewedAt(Instant.now());
+        withdrawal.setUpdatedAt(Instant.now());
+        withdrawal.setAdminNote(request.getAdminNote());
+
+        if ("APPROVE".equalsIgnoreCase(request.getAction())) {
+            withdrawal.setStatus("APPROVED");
+            withdrawal = walletWithdrawalRepository.save(withdrawal);
+
+            if (notificationService != null) {
+                notificationService.notifyWithEmail(
+                    withdrawal.getUser().getId(),
+                    "Yêu cầu rút tiền đã được phê duyệt",
+                    "Yêu cầu rút " + withdrawal.getAmount() + " VND của bạn đã được duyệt và chuyển khoản thành công.",
+                    NotificationType.WALLET,
+                    withdrawal.getId(),
+                    "WALLET_WITHDRAWAL",
+                    "/wallet"
+                );
+            }
+        } else if ("REJECT".equalsIgnoreCase(request.getAction())) {
+            withdrawal.setStatus("REJECTED");
+
+            // Refund amount back to user's wallet
+            UserWallet wallet = getWalletWithLock(withdrawal.getUser().getId());
+            wallet.setBalance(wallet.getBalance().add(withdrawal.getAmount()));
+            userWalletRepository.save(wallet);
+
+            createTransaction(wallet, withdrawal.getAmount(), WalletTransactionType.REFUND, withdrawal.getId());
+            withdrawal = walletWithdrawalRepository.save(withdrawal);
+
+            if (notificationService != null) {
+                String note = (request.getAdminNote() != null && !request.getAdminNote().isBlank())
+                        ? request.getAdminNote() : "Không có lý do cụ thể";
+                notificationService.notifyWithEmail(
+                    withdrawal.getUser().getId(),
+                    "Yêu cầu rút tiền đã bị từ chối",
+                    "Yêu cầu rút " + withdrawal.getAmount() + " VND của bạn đã bị từ chối. Lý do: " + note + ". Số tiền đã được hoàn lại vào ví.",
+                    NotificationType.WALLET,
+                    withdrawal.getId(),
+                    "WALLET_WITHDRAWAL",
+                    "/wallet"
+                );
+            }
+        } else {
+            throw new BadRequestException("Hành động không hợp lệ: " + request.getAction());
+        }
+
+        return WalletWithdrawalResponse.from(withdrawal);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<WalletWithdrawalResponse> getMyWithdrawals(UUID userId, Pageable pageable) {
+        if (walletWithdrawalRepository == null) {
+            throw new IllegalStateException("WalletWithdrawalRepository is not available");
+        }
+        return walletWithdrawalRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable)
+                .map(WalletWithdrawalResponse::from);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<WalletWithdrawalResponse> getAllWithdrawals(String status, Pageable pageable) {
+        if (walletWithdrawalRepository == null) {
+            throw new IllegalStateException("WalletWithdrawalRepository is not available");
+        }
+        if (status != null && !status.isBlank()) {
+            return walletWithdrawalRepository.findByStatusOrderByCreatedAtDesc(status.trim().toUpperCase(), pageable)
+                    .map(WalletWithdrawalResponse::from);
+        }
+        return walletWithdrawalRepository.findAllByOrderByCreatedAtDesc(pageable)
+                .map(WalletWithdrawalResponse::from);
     }
 }
