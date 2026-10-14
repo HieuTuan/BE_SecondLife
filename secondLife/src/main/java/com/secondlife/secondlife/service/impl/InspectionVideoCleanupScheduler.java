@@ -26,16 +26,16 @@ public class InspectionVideoCleanupScheduler {
 
     @Autowired
     public InspectionVideoCleanupScheduler(InspectionOrderRepository inspectionOrderRepository,
-                                           Cloudinary cloudinary,
-                                           @Autowired(required = false) Clock clock) {
-        this.inspectionOrderRepository = inspectionOrderRepository;
-        this.cloudinary = cloudinary;
-        this.clock = clock != null ? clock : Clock.systemUTC();
+                                           Cloudinary cloudinary) {
+        this(inspectionOrderRepository, cloudinary, Clock.systemUTC());
     }
 
     public InspectionVideoCleanupScheduler(InspectionOrderRepository inspectionOrderRepository,
-                                           Cloudinary cloudinary) {
-        this(inspectionOrderRepository, cloudinary, Clock.systemUTC());
+                                           Cloudinary cloudinary,
+                                           Clock clock) {
+        this.inspectionOrderRepository = inspectionOrderRepository;
+        this.cloudinary = cloudinary;
+        this.clock = clock != null ? clock : Clock.systemUTC();
     }
 
     @Scheduled(fixedDelayString = "${app.media.cleanup.interval-ms:3600000}")
