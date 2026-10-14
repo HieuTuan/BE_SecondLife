@@ -76,11 +76,12 @@ public class OrderController {
     }
 
     @PutMapping("/{id}/cancel")
+    @Operation(summary="Cancel unshipped order; SELLER must supply SELLER_OUT_OF_STOCK or SELLER_CANNOT_FULFILL reason, BUYER may omit body")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<OrderResponseDTO> cancelOrder(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @PathVariable UUID id) {
+            @PathVariable UUID id,@Valid @RequestBody(required=false) com.secondlife.secondlife.dto.reputation.CancelOrderRequest request) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        return ResponseEntity.ok(orderService.cancelOrder(userId, id));
+        return ResponseEntity.ok(orderService.cancelOrder(userId,id,request));
     }
 }

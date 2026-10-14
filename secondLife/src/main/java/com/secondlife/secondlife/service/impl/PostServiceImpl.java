@@ -1001,6 +1001,8 @@ public class PostServiceImpl implements PostService {
 
 
 
+        listingAccess.requireVerifiedSeller(post.getUser().getId());
+
         post.setStatus("ACTIVE");
 
         postRepository.save(post);

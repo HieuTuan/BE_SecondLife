@@ -52,5 +52,11 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
     long countActiveAdmins();
 
     java.util.List<User> findByManagerId(UUID managerId);
+    @Query("""
+        SELECT DISTINCT u.id FROM User u JOIN u.userRoles ur JOIN ur.role r
+        JOIN r.rolePermissions rp JOIN rp.permission p
+        WHERE r.code='STAFF' AND p.code='STAFF_DISPUTE_REVIEW' AND u.accountStatus='ACTIVE'
+        """)
+    java.util.List<UUID> findActiveOrderReviewStaffIds();
 }
 

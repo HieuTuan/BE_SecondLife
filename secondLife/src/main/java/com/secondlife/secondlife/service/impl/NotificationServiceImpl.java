@@ -41,7 +41,7 @@ public class NotificationServiceImpl implements NotificationService {
     private final JavaMailSender mailSender;
     private final EmailTemplateBuilder templateBuilder;
 
-    @Value("${app.mail.from:no-reply@secondlife.com}")
+    @Value("${MAIL_FROM}")
     private String fromEmail;
 
     public NotificationServiceImpl(
@@ -89,13 +89,15 @@ public class NotificationServiceImpl implements NotificationService {
         notification = notificationRepository.save(notification);
         NotificationResponseDTO dto = NotificationResponseDTO.from(notification);
 
-        // Real-time WebSocket push to recipient's private destination /user/queue/notifications
-        try {
-            messagingTemplate.convertAndSendToUser(userId.toString(), "/queue/notifications", dto);
-            log.debug("Dispatched realtime notification [{}] to user {}", type, userId);
-        } catch (Exception e) {
-            log.warn("Failed to push realtime WebSocket notification to user {}: {}", userId, e.getMessage());
-        }
+        // A rollback must not publish a notification for money or penalty changes that never committed.
+        afterCommit(() -> {
+            try {
+                messagingTemplate.convertAndSendToUser(userId.toString(), "/queue/notifications", dto);
+                log.debug("Dispatched realtime notification [{}] to user {}", type, userId);
+            } catch (Exception e) {
+                log.warn("Failed to push realtime WebSocket notification to user {}: {}", userId, e.getMessage());
+            }
+        });
 
         return dto;
     }
@@ -126,7 +128,8 @@ public class NotificationServiceImpl implements NotificationService {
         NotificationResponseDTO dto = notify(user.getId(), title, message, type, referenceId, referenceType, actionUrl);
 
         // Send high-priority financial/legal/certificate email asynchronously or protected with try-catch
-        sendEmailSafely(user, emailSubject != null ? emailSubject : title, type, emailBody != null ? emailBody : message, actionUrl);
+        afterCommit(() -> sendEmailSafely(user, emailSubject != null ? emailSubject : title, type,
+                emailBody != null ? emailBody : message, actionUrl));
 
         return dto;
     }
@@ -218,6 +221,20 @@ public class NotificationServiceImpl implements NotificationService {
                 .affectedCount(count)
                 .message("Đã dọn sạch toàn bộ thông báo.")
                 .build();
+    }
+
+    private void afterCommit(Runnable delivery) {
+        Runnable safe=()-> {
+            try { delivery.run(); }
+            catch(RuntimeException error) { log.warn("Notification delivery failed after commit ({})",error.getClass().getSimpleName()); }
+        };
+        if(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+                && org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override public void afterCommit() { safe.run(); }
+                });
+        } else safe.run();
     }
 
     private void sendEmailSafely(User user, String subject, String type, String body, String actionUrl) {

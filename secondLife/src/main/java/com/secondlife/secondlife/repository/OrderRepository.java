@@ -38,5 +38,32 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     java.util.Optional<Order> findByIdForUpdate(@org.springframework.data.repository.query.Param("id") UUID id);
     java.util.Optional<Order> findByBuyerIdAndRequestId(UUID buyerId, UUID requestId);
     Page<Order> findByBuyerId(UUID buyerId, Pageable pageable);
+    Page<Order> findByConfirmationDeadlineIsNotNull(Pageable pageable);
+    Page<Order> findByConfirmationDeadlineIsNotNullAndStatus(com.secondlife.secondlife.enums.OrderStatus status, Pageable pageable);
+
+    @org.springframework.data.jpa.repository.Query("""
+        select o.id as id, o.confirmationDeadline as deadline from Order o
+        where o.status=:status and o.escrowStatus=:escrow and o.sellerConfirmedAt is null
+          and o.confirmationDeadline <= :cutoff and o.confirmationCancelAt is not null
+        order by o.confirmationDeadline,o.id
+        """)
+    java.util.List<DueConfirmationOrder> findDueConfirmations(
+        @org.springframework.data.repository.query.Param("status") com.secondlife.secondlife.enums.OrderStatus status,
+        @org.springframework.data.repository.query.Param("escrow") com.secondlife.secondlife.enums.EscrowStatus escrow,
+        @org.springframework.data.repository.query.Param("cutoff") java.time.Instant cutoff, Pageable page);
+
+    @org.springframework.data.jpa.repository.Query("""
+        select o.id as id, o.confirmationDeadline as deadline from Order o
+        where o.status=:status and o.escrowStatus=:escrow and o.sellerConfirmedAt is null
+          and o.confirmationDeadline <= :cutoff and o.confirmationCancelAt is not null
+          and (o.confirmationDeadline > :afterDeadline or (o.confirmationDeadline=:afterDeadline and o.id > :afterId))
+        order by o.confirmationDeadline,o.id
+        """)
+    java.util.List<DueConfirmationOrder> findDueConfirmationsAfter(
+        @org.springframework.data.repository.query.Param("status") com.secondlife.secondlife.enums.OrderStatus status,
+        @org.springframework.data.repository.query.Param("escrow") com.secondlife.secondlife.enums.EscrowStatus escrow,
+        @org.springframework.data.repository.query.Param("cutoff") java.time.Instant cutoff,
+        @org.springframework.data.repository.query.Param("afterDeadline") java.time.Instant afterDeadline,
+        @org.springframework.data.repository.query.Param("afterId") UUID afterId, Pageable page);
     Page<Order> findBySellerId(UUID sellerId, Pageable pageable);
 }

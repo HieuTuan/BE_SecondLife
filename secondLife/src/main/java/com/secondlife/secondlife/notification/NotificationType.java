@@ -9,6 +9,7 @@ public enum NotificationType {
     ACCOUNT_STATUS_CHANGED,
     INSPECTION_CENTER_CREATED,
     ORDER,
+    REPUTATION,
     INSPECTION,
     SHIPPING,
     LISTING,

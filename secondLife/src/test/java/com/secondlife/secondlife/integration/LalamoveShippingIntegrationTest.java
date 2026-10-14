@@ -144,6 +144,7 @@ class LalamoveShippingIntegrationTest {
         Instant pickedAt = Instant.now().minusSeconds(15);
         callback(event(code, "PICKED_UP", pickedAt, UUID.randomUUID().toString(), FEE)).andExpect(status().isOk());
         assertOrder(orderId, "SHIPPED", "HELD");
+        assertEquals(pickedAt.truncatedTo(java.time.temporal.ChronoUnit.MICROS),orderRepository.findById(orderId).orElseThrow().getCarrierPickedUpAt());
         callback(event(code, "COMPLETED", pickedAt.plusSeconds(5), UUID.randomUUID().toString(), FEE)).andExpect(status().isOk());
         assertOrder(orderId, "DELIVERED", "HELD");
         assertEquals(0, transactions(orderId, "EARNING"));
@@ -165,6 +166,7 @@ class LalamoveShippingIntegrationTest {
         assertMoney(before.path("shippingBalance").decimalValue().add(FEE), after.path("shippingBalance").decimalValue());
         assertMoney(before.path("revenueBalance").decimalValue().add(new BigDecimal("50000")), after.path("revenueBalance").decimalValue());
         assertEquals(1, systemTransactions(orderId, "SETTLEMENT"));
+        assertReputationOnce(f.seller(), orderId);
     }
 
     @Test void systemWalletHoldsOrderPaymentAndReturnsBothProductAndUnusedShippingOnCancellation() throws Exception {
@@ -186,6 +188,43 @@ class LalamoveShippingIntegrationTest {
             assertMoney(before.path(field).decimalValue(), refunded.path(field).decimalValue());
         assertMoney(FUNDS, balance(f.buyer()));
         assertEquals(1, transactions(orderId, "REFUND"));
+    }
+
+    private void assertReputationOnce(User seller,UUID orderId) {
+        assertEquals(1L,jdbc.queryForObject("SELECT good_transactions FROM seller_reputations WHERE seller_id=?",Long.class,seller.getId()));
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM seller_reputation_events WHERE order_id=? AND event_type='ORDER_COMPLETED'",Integer.class,orderId));
+    }
+
+    @Test void paidOrderSnapshotsDeadlineAndSellerCancellationCountsOnceWhileBuyerCancellationIsExcluded() throws Exception {
+        Fixture f=fixture(); UUID id=checkout(f,quoteId(quote(f)));
+        var before=orderRepository.findById(id).orElseThrow(); assertNotNull(before.getPaidAt());
+        assertEquals(Duration.ofHours(48),Duration.between(before.getPaidAt(),before.getHandoverDeadline()));
+        String url="/api/v1/orders/"+id+"/cancel";
+        mvc.perform(put(url).header("Authorization",bearer(f.seller()))).andExpect(status().isBadRequest());
+        for(int i=0;i<2;i++) mvc.perform(put(url).header("Authorization",bearer(f.seller())).contentType(MediaType.APPLICATION_JSON)
+            .content(body(Map.of("reasonCode","SELLER_OUT_OF_STOCK","reason","Item unavailable")))).andExpect(status().isOk());
+        assertMoney(FUNDS,balance(f.buyer())); assertEquals(1,transactions(id,"REFUND"));
+        mvc.perform(get("/api/v1/sellers/"+f.seller().getId()+"/reputation")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.score").value(0)).andExpect(jsonPath("$.data.evaluatedOrders").value(1))
+            .andExpect(jsonPath("$.data.sellerCancellationOrders").value(1));
+        jdbc.update("UPDATE commission_rules SET active=false WHERE active");
+        Fixture other=fixture(); UUID buyerCancelled=checkout(other,quoteId(quote(other)));
+        mvc.perform(put("/api/v1/orders/"+buyerCancelled+"/cancel").header("Authorization",bearer(other.buyer()))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/sellers/"+other.seller().getId()+"/reputation")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.score").value(org.hamcrest.Matchers.nullValue())).andExpect(jsonPath("$.data.evaluatedOrders").value(0));
+    }
+
+    @Test void syncObservationDoesNotInventPickupTimeAndOlderVerifiedPickupStillSuppliesActualTimestamp() throws Exception {
+        Fixture f=fixture(); UUID id=checkout(f,quoteId(quote(f)));
+        JsonNode shipment=create(f.seller(),id,UUID.randomUUID()); String code=shipment.path("orderCode").asText();
+        when(carrier.detail(code)).thenReturn(json(Map.of("order_code",code,"status","PICKED_UP")));
+        mvc.perform(post("/api/v1/shipments/"+shipment.path("shipmentId").asText()+"/sync").header("Authorization",bearer(f.buyer())))
+            .andExpect(status().isOk());
+        assertNull(orderRepository.findById(id).orElseThrow().getCarrierPickedUpAt());
+        Instant actual=Instant.now().minusSeconds(60).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        callback(event(code,"PICKED_UP",actual,UUID.randomUUID().toString(),FEE)).andExpect(status().isOk());
+        assertEquals(actual,orderRepository.findById(id).orElseThrow().getCarrierPickedUpAt());
+        assertOrder(id,"SHIPPED","HELD");
     }
 
     private JsonNode systemWallet(User admin) throws Exception {
@@ -221,6 +260,7 @@ class LalamoveShippingIntegrationTest {
         assertMoney(new BigDecimal("950000"), balance(f.seller()));
         assertEquals(1, transactions(id, "EARNING"));
         assertEquals(1, systemTransactions(id, "SETTLEMENT"));
+        assertReputationOnce(f.seller(), id);
         JsonNode after = systemWallet(admin);
         assertMoney(before.path("heldBalance").decimalValue(), after.path("heldBalance").decimalValue());
         assertMoney(before.path("revenueBalance").decimalValue().add(new BigDecimal("50000")), after.path("revenueBalance").decimalValue());
@@ -245,6 +285,7 @@ class LalamoveShippingIntegrationTest {
             assertMoney(new BigDecimal("950000"), balance(f.seller()));
             assertEquals(1, transactions(id, "EARNING"));
             assertEquals(1, systemTransactions(id, "SETTLEMENT"));
+        assertReputationOnce(f.seller(), id);
         } finally { executor.shutdownNow(); }
     }
 
@@ -279,7 +320,8 @@ class LalamoveShippingIntegrationTest {
         assertMoney(new BigDecimal("950000"), balance(f.seller()));
     }
 
-    @Test void approvedReturnFreezesEscrowAndRefundsProductWithoutPayingSellerOrCommission() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"SELLER","BUYER","CARRIER","NONE"})
+    void approvedReturnFreezesEscrowAndRefundsProductWithoutPayingSellerOrCommission(String responsibleParty) throws Exception {
         Fixture f = fixture(); User admin = user("ADMIN", BigDecimal.ZERO);
         JsonNode before = systemWallet(admin); UUID id = deliveredOrder(f);
         JsonNode returned = tree(mvc.perform(post("/api/v1/orders/" + id + "/shipments")
@@ -296,11 +338,14 @@ class LalamoveShippingIntegrationTest {
         for (int retry = 0; retry < 2; retry++)
             mvc.perform(post("/api/v1/shipments/" + returned.path("shipmentId").asText() + "/refund")
                     .header("Authorization", bearer(admin)).contentType(MediaType.APPLICATION_JSON)
-                    .content(body(Map.of("reason", "Product physically returned")))).andExpect(status().isOk());
+                    .content(body(Map.of("reason", "Product physically returned","responsibleParty",responsibleParty)))).andExpect(status().isOk());
         assertOrder(id, "CANCELLED", "REFUNDED");
         assertMoney(FUNDS.subtract(FEE), balance(f.buyer())); assertMoney(BigDecimal.ZERO, balance(f.seller()));
         assertEquals(0, transactions(id, "EARNING")); assertEquals(1, transactions(id, "REFUND"));
         assertEquals(1, systemTransactions(id, "REFUND"));
+        mvc.perform(get("/api/v1/sellers/"+f.seller().getId()+"/reputation")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.evaluatedOrders").value("SELLER".equals(responsibleParty)?1:0))
+            .andExpect(jsonPath("$.data.sellerReturnFaultOrders").value("SELLER".equals(responsibleParty)?1:0));
         JsonNode after = systemWallet(admin);
         assertMoney(before.path("heldBalance").decimalValue(), after.path("heldBalance").decimalValue());
         assertMoney(before.path("shippingBalance").decimalValue().add(FEE), after.path("shippingBalance").decimalValue());
@@ -332,7 +377,7 @@ class LalamoveShippingIntegrationTest {
         ObjectNode tampered = signed.deepCopy();
         ((ObjectNode) tampered.path("data").path("order")).put("status", "COMPLETED");
         callback(tampered).andExpect(status().isForbidden());
-        assertOrder(orderId, "PROCESSING", "HELD");
+        assertOrder(orderId, "CONFIRMED", "HELD");
         assertEquals(0, eventCount(shipmentId));
         mvc.perform(post(LalamoveWebhookVerifier.CALLBACK_PATH)).andExpect(status().isOk());
         assertEquals(0, eventCount(shipmentId));
@@ -392,7 +437,7 @@ class LalamoveShippingIntegrationTest {
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM shipments WHERE order_id = ?", Integer.class, orderId));
         assertMoney(FUNDS.subtract(PRICE).subtract(FEE), balance(f.buyer()));
         assertEquals(1, transactions(orderId, "PAYMENT"));
-        assertOrder(orderId, "PROCESSING", "HELD");
+        assertOrder(orderId, "CONFIRMED", "HELD");
     }
 
     @Test void duplicateAndOutOfOrderSignedEventsCannotRegressDeliveryOrOverwriteNewerFee() throws Exception {
@@ -428,7 +473,47 @@ class LalamoveShippingIntegrationTest {
         mvc.perform(post("/api/v1/orders/" + orderId + "/shipments").header("Authorization", bearer(f.seller()))
                 .contentType(MediaType.APPLICATION_JSON).content(body(request(UUID.randomUUID())))).andExpect(status().isConflict());
         assertMoney(FUNDS.subtract(PRICE).subtract(FEE), balance(f.buyer()));
-        assertOrder(orderId, "PROCESSING", "HELD");
+        assertOrder(orderId, "CONFIRMED", "HELD");
+    }
+
+    @Test void checkoutSnapshotsConfirmationPolicyNotifiesStaffOnceAndRequiresSellerConfirmationBeforeBooking() throws Exception {
+        var f=fixture();var staff=user("STAFF",BigDecimal.ZERO);UUID requestId=UUID.randomUUID();
+        var q=quote(f);var checkout=Map.of("postId",f.post().getId(),"shippingQuoteId",quoteId(q),"requestId",requestId);
+        var response=tree(mvc.perform(post("/api/v1/orders").header("Authorization",bearer(f.buyer()))
+            .contentType(MediaType.APPLICATION_JSON).content(body(checkout))).andExpect(status().isOk()).andReturn());
+        UUID id=UUID.fromString(response.path("id").asText());assertEquals("PROCESSING",response.path("status").asText());
+        assertEquals("PENDING",response.path("confirmationStatus").asText());
+        Instant paid=Instant.parse(response.path("paidAt").asText());
+        assertEquals(Duration.ofHours(24),Duration.between(paid,Instant.parse(response.path("confirmationDeadline").asText())));
+        assertEquals(Duration.ofHours(48),Duration.between(paid,Instant.parse(response.path("confirmationCancelAt").asText())));
+        mvc.perform(post("/api/v1/orders").header("Authorization",bearer(f.buyer())).contentType(MediaType.APPLICATION_JSON).content(body(checkout)))
+            .andExpect(status().isOk());
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM notifications WHERE user_id=? AND reference_id=? AND type='ORDER'",Integer.class,staff.getId(),id));
+        mvc.perform(get("/api/v1/notifications?type=ORDER&size=100").header("Authorization",bearer(staff)))
+            .andDo(result->assertNull(result.getResolvedException(),()->"Notification query failed: "+result.getResolvedException()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items[*].referenceId").value(org.hamcrest.Matchers.hasItem(id.toString())));
+        for(String filter:List.of("", "&unreadOnly=true", "&type=ORDER&unreadOnly=true")) {
+            mvc.perform(get("/api/v1/notifications?size=100"+filter).header("Authorization",bearer(staff)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[*].referenceId").value(org.hamcrest.Matchers.hasItem(id.toString())));
+        }
+        mvc.perform(get("/api/v1/notifications/unread-count").header("Authorization",bearer(staff)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.unreadCount").value(1));
+        UUID notificationId=jdbc.queryForObject("SELECT id FROM notifications WHERE user_id=? AND reference_id=?",UUID.class,staff.getId(),id);
+        mvc.perform(patch("/api/v1/notifications/"+notificationId+"/read").header("Authorization",bearer(f.buyer())))
+            .andExpect(status().isNotFound());
+        mvc.perform(patch("/api/v1/notifications/"+notificationId+"/read").header("Authorization",bearer(staff)))
+            .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/notifications?type=ORDER&unreadOnly=true").header("Authorization",bearer(staff)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty());
+        mvc.perform(delete("/api/v1/notifications/"+notificationId).header("Authorization",bearer(staff))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/notifications?type=ORDER").header("Authorization",bearer(staff)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty());
+        mvc.perform(post("/api/v1/orders/"+id+"/shipments").header("Authorization",bearer(f.seller()))
+            .contentType(MediaType.APPLICATION_JSON).content(body(request(UUID.randomUUID())))).andExpect(status().isConflict());
+        verify(carrier,never()).create(anyMap());
+        mvc.perform(put("/api/v1/orders/"+id+"/confirm").header("Authorization",bearer(f.seller())))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("CONFIRMED"));
+        create(f.seller(),id,UUID.randomUUID());verify(carrier,times(1)).create(anyMap());
     }
 
     private record Fixture(User seller, User buyer, Post post) { }
@@ -474,9 +559,12 @@ class LalamoveShippingIntegrationTest {
     private UUID quoteId(JsonNode quote) { return UUID.fromString(quote.path("quoteId").asText()); }
 
     private UUID checkout(Fixture f, UUID quoteId) throws Exception {
-        return UUID.fromString(tree(mvc.perform(post("/api/v1/orders").header("Authorization", bearer(f.buyer()))
+        UUID id=UUID.fromString(tree(mvc.perform(post("/api/v1/orders").header("Authorization", bearer(f.buyer()))
                 .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("postId", f.post().getId(), "shippingQuoteId", quoteId,
                         "requestId", UUID.randomUUID())))).andExpect(status().isOk()).andReturn()).path("id").asText());
+        mvc.perform(put("/api/v1/orders/"+id+"/confirm").header("Authorization",bearer(f.seller())))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("CONFIRMED"));
+        return id;
     }
 
     private JsonNode create(User seller, UUID orderId, UUID requestId) throws Exception {
