@@ -1,5 +1,5 @@
 -- ==============================================================================
--- V41: INSPECTION MANAGER ISOLATION & PRODUCT CONDITION REPORT FIELDS
+-- V45: INSPECTION MANAGER ISOLATION & PRODUCT CONDITION REPORT FIELDS
 -- ==============================================================================
 
 -- 1. Bo sung quan he Trung tam quan ly (Manager) vao bang users

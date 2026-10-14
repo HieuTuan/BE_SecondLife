@@ -12,10 +12,12 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ListingAccessService {
     private final UserRepository users;
+    private final SellerReputationService reputation;
     private final PostRepository posts;
     private final com.secondlife.secondlife.repository.SellerVerificationRepository verifications;
 
     public void requireVerifiedSeller(UUID userId) {
+        reputation.requireSellingAllowed(userId);
         if (verifications.existsByUserIdAndStatus(userId, com.secondlife.secondlife.enums.SellerVerificationStatus.APPROVED)) {
             return;
         }

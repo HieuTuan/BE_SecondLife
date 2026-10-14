@@ -20,6 +20,7 @@ public class SettlementServiceImpl implements SettlementService {
     private final CommissionCalculator calculator;
     private final WalletService wallets;
     private final SystemWalletService systemWallet;
+    private final SellerReputationService reputation;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private InspectionOrderRepository inspectionOrders;
 
@@ -46,7 +47,8 @@ public class SettlementServiceImpl implements SettlementService {
         if (amounts.sellerPayout().signum() > 0) wallets.processEarning(order.getSeller().getId(), amounts.sellerPayout(), order.getId());
         order.setStatus(OrderStatus.COMPLETED);
         order.setEscrowStatus(EscrowStatus.RELEASED);
-        orders.save(order);
+        orders.saveAndFlush(order);
+        reputation.recordCompletedSale(order);
 
         if (inspectionOrders != null) {
             inspectionOrders.findByOrderId(order.getId()).ifPresent(io -> {
@@ -56,7 +58,6 @@ public class SettlementServiceImpl implements SettlementService {
                 }
             });
         }
-
         return SettlementResponse.from(settlement);
     }
     @Override @Transactional(readOnly = true)

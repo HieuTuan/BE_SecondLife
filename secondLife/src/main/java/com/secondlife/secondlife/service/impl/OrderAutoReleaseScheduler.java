@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
 
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "app.orders.auto-release.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "app.orders.auto-release.enabled", havingValue = "true", matchIfMissing = false)
 public class OrderAutoReleaseScheduler {
     private final OrderRepository orders;
     private final OrderAutoReleaseService release;

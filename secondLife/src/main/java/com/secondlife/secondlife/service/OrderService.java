@@ -11,7 +11,8 @@ public interface OrderService {
     OrderResponseDTO createOrder(UUID buyerId, OrderRequestDTO requestDTO);
     OrderResponseDTO markAsShipped(UUID sellerId, UUID orderId);
     OrderResponseDTO confirmDelivery(UUID buyerId, UUID orderId); // this releases the escrow
-    OrderResponseDTO cancelOrder(UUID userId, UUID orderId); // cancels and refunds
+    OrderResponseDTO cancelOrder(UUID userId, UUID orderId);
+    OrderResponseDTO cancelOrder(UUID userId, UUID orderId, com.secondlife.secondlife.dto.reputation.CancelOrderRequest request); // cancels and refunds
     Page<OrderResponseDTO> getBuyerOrders(UUID buyerId, Pageable pageable);
     Page<OrderResponseDTO> getSellerOrders(UUID sellerId, Pageable pageable);
 }
