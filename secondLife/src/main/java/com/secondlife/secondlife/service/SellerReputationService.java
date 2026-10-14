@@ -24,14 +24,15 @@ public class SellerReputationService {
     private final com.secondlife.secondlife.repository.OrderRepository orders;
     private final ReputationProperties properties;
     private final ReputationCalculator calculator;
+    private final com.secondlife.secondlife.config.OrderConfirmationProperties confirmations;
 
-    public static final String FORMULA_VERSION="TRANSACTION_SUCCESS_RATE_V2";
+    public static final String FORMULA_VERSION="TRANSACTION_SUCCESS_RATE_V3";
 
-    private record State(long good, long bad, long incidents, long serious, boolean restricted, Instant updated) { }
+    private record State(long good, long bad, long incidents, long serious, boolean restricted, Instant updated, java.math.BigDecimal penalty) { }
 
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public ReputationResponse get(UUID sellerId) {
-        var state = state(sellerId, false).orElse(new State(0,0,0,0,false,null));
+        var state = state(sellerId, false).orElse(new State(0,0,0,0,false,null,java.math.BigDecimal.ZERO));
         var user = users.findByIdWithAuthorities(sellerId).orElseThrow(() -> new NotFoundException("Seller not found"));
         if (!user.hasRole("SELLER") && state.updated() == null) throw new NotFoundException("Seller not found");
         long evaluated = state.good() + state.bad();
@@ -45,23 +46,26 @@ public class SellerReputationService {
             """,sellerId);
         long cancellations=((Number)metrics.get("cancellations")).longValue(),returns=((Number)metrics.get("returns")).longValue();
         long nfr=((Number)metrics.get("nfr")).longValue(),handovers=((Number)metrics.get("handovers")).longValue(),late=((Number)metrics.get("late")).longValue();
-        return new ReputationResponse(sellerId,calculator.score(state.good(),state.bad()),state.good(),state.bad(),
+        return new ReputationResponse(sellerId,calculator.score(state.good(),state.bad(),state.penalty()),state.good(),state.bad(),
                 evaluated,properties.minEvaluatedOrders(),evaluated==0 ? "NO_TRANSACTIONS" : evaluated<properties.minEvaluatedOrders()
                 ? "INSUFFICIENT_EVIDENCE" : "EVALUATED",state.incidents(),state.serious(),state.restricted(),
-                state.restricted()?"SELLING_RESTRICTED":state.serious()>0?"SERIOUS_VIOLATION_HISTORY":null,state.updated(),FORMULA_VERSION,
-                cancellations,returns,nfr,percentage(nfr,evaluated),handovers,late,percentage(late,handovers));
+                state.restricted()?"SELLING_RESTRICTED":state.serious()>0?"SERIOUS_VIOLATION_HISTORY":
+                state.penalty().signum()>0?"ORDER_CONFIRMATION_VIOLATION":state.incidents()>0?"CONFIRMED_VIOLATION_HISTORY":null,state.updated(),FORMULA_VERSION,
+                cancellations,returns,nfr,percentage(nfr,evaluated),handovers,late,percentage(late,handovers),
+                calculator.score(state.good(),state.bad()),state.penalty());
     }
 
     @Transactional(readOnly=true)
     public PageResponse<ReputationHistoryResponse> history(UUID sellerId, Pageable page) {
         get(sellerId);
         long count = jdbc.queryForObject("SELECT COUNT(*) FROM seller_reputation_events WHERE seller_id=?",Long.class,sellerId);
-        var rows = jdbc.query("SELECT * FROM seller_reputation_events WHERE seller_id=? ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?",
+        var rows = jdbc.query("SELECT * FROM seller_reputation_events WHERE seller_id=? ORDER BY event_sequence DESC NULLS LAST,created_at DESC,id DESC LIMIT ? OFFSET ?",
                 (rs,n) -> new ReputationHistoryResponse(rs.getObject("id",UUID.class),rs.getString("event_type"),
                         rs.getObject("order_id",UUID.class),rs.getObject("report_id",UUID.class),
                         rs.getLong("good_before"),rs.getLong("bad_before"),rs.getLong("good_after"),rs.getLong("bad_after"),
                         rs.getBigDecimal("score_before"),rs.getBigDecimal("score_after"),
-                        rs.getObject("prior_good",Long.class),rs.getObject("prior_total",Long.class),instant(rs,"created_at"),rs.getString("formula_version")),
+                        rs.getObject("prior_good",Long.class),rs.getObject("prior_total",Long.class),instant(rs,"created_at"),rs.getString("formula_version"),
+                        rs.getBigDecimal("penalty_before"),rs.getBigDecimal("penalty_after"),rs.getObject("event_sequence",Long.class)),
                 sellerId,page.getPageSize(),page.getOffset());
         return PageResponse.from(new PageImpl<>(rows,page,count));
     }
@@ -125,6 +129,10 @@ public class SellerReputationService {
     @Transactional(propagation=Propagation.MANDATORY)
     public void initializePaidOrder(Order order) {
         order.setPaidAt(Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS));
+        order.setConfirmationDeadline(order.getPaidAt().plus(java.time.Duration.ofHours(confirmations.lateAfterHours())));
+        order.setConfirmationCancelAt(order.getPaidAt().plus(java.time.Duration.ofHours(confirmations.cancelAfterHours())));
+        order.setConfirmationLatePenalty(confirmations.latePenaltyPoints());
+        order.setConfirmationTimeoutPenalty(confirmations.timeoutPenaltyPoints());
         // Inspection-center shipping is not a seller pickup and must not penalize seller readiness.
         String leg=jdbc.queryForObject("SELECT leg FROM shipping_quotes WHERE id=?",String.class,order.getShippingQuoteId());
         if("SELLER_TO_BUYER".equals(leg)) order.setHandoverDeadline(order.getPaidAt().plus(java.time.Duration.ofHours(properties.handoverDeadlineHours())));
@@ -134,7 +142,9 @@ public class SellerReputationService {
         var order=orders.findByIdForUpdate(orderId).orElseThrow(()->new NotFoundException("Order not found"));
         if(!order.getSeller().getId().equals(sellerId)) throw new ForbiddenException("Only this seller can declare goods ready");
         if(order.getSellerReadyAt()!=null) return fulfillment(order);
-        if(order.getStatus()!=OrderStatus.PROCESSING || order.getEscrowStatus()!=EscrowStatus.HELD || order.getPaidAt()==null
+        if(order.getConfirmationDeadline()!=null && order.getSellerConfirmedAt()==null)
+            throw new ConflictException("Confirm the order before declaring goods ready");
+        if((order.getStatus()!=OrderStatus.PROCESSING && order.getStatus()!=OrderStatus.CONFIRMED) || order.getEscrowStatus()!=EscrowStatus.HELD || order.getPaidAt()==null
                 || order.getHandoverDeadline()==null || order.getCarrierPickedUpAt()!=null)
             throw new ConflictException("Readiness requires a paid seller-pickup order before carrier pickup");
         order.setSellerReadyAt(Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS)); orders.save(order); return fulfillment(order);
@@ -161,7 +171,8 @@ public class SellerReputationService {
     private OrderFulfillmentResponse fulfillment(Order order) {
         return new OrderFulfillmentResponse(order.getId(),order.getPaidAt(),order.getHandoverDeadline(),order.getSellerReadyAt(),order.getCarrierPickedUpAt(),
                 order.getHandoverDeadline()!=null && order.getCarrierPickedUpAt()!=null && order.getCarrierPickedUpAt().isAfter(order.getHandoverDeadline()),
-                order.getCancellationReasonCode(),order.getCancelledBy(),order.getReturnResponsibleParty());
+                order.getCancellationReasonCode(),order.getCancelledBy(),order.getReturnResponsibleParty(),
+                order.getSellerConfirmedAt(),order.getConfirmationDeadline(),order.getConfirmationCancelAt());
     }
     private boolean isReturn(Order order) {
         return order.getReturnResponsibleParty()!=null || Boolean.TRUE.equals(jdbc.queryForObject(
@@ -197,6 +208,22 @@ public class SellerReputationService {
                 ("GOOD".equals(next)?1:0)-("GOOD".equals(old)?1:0),("BAD".equals(next)?1:0)-("BAD".equals(old)?1:0),order.getSeller().getId());
         return true;
     }
+    @Transactional(propagation=Propagation.MANDATORY)
+    public boolean recordConfirmationPenalty(Order order,String milestone,java.math.BigDecimal points) {
+        if(!Set.of("LATE","TIMEOUT").contains(milestone) || points==null || points.signum()<=0)
+            throw new IllegalArgumentException("Invalid confirmation penalty");
+        UUID sellerId=order.getSeller().getId(); State before=lock(sellerId);
+        int inserted=jdbc.update("""
+            INSERT INTO order_confirmation_penalties(order_id,milestone,seller_id,points)
+            VALUES (?,?,?,?) ON CONFLICT(order_id,milestone) DO NOTHING
+            """,order.getId(),milestone,sellerId,points);
+        if(inserted==0) return false;
+        jdbc.update("UPDATE seller_reputations SET confirmation_penalty_points=confirmation_penalty_points+?,updated_at=CURRENT_TIMESTAMP WHERE seller_id=?",points,sellerId);
+        event(sellerId,"ORDER_CONFIRMATION_"+milestone,order.getId(),null,null,
+            "Seller missed confirmation deadline; deducted "+points.toPlainString()+" points",before,state(sellerId,false).orElseThrow());
+        return true;
+    }
+
     private java.math.BigDecimal percentage(long count,long total) {
         return total==0?null:java.math.BigDecimal.valueOf(count).multiply(java.math.BigDecimal.valueOf(100)).divide(java.math.BigDecimal.valueOf(total),2,java.math.RoundingMode.HALF_UP);
     }
@@ -221,15 +248,16 @@ public class SellerReputationService {
     private Optional<State> state(UUID sellerId, boolean lock) {
         return jdbc.query("SELECT * FROM seller_reputations WHERE seller_id=?"+(lock?" FOR UPDATE":""),
                 (rs,n)->new State(rs.getLong("good_transactions"),rs.getLong("bad_transactions"),rs.getLong("confirmed_incidents"),
-                        rs.getLong("serious_incidents"),rs.getBoolean("selling_restricted"),instant(rs,"updated_at")),sellerId).stream().findFirst();
+                        rs.getLong("serious_incidents"),rs.getBoolean("selling_restricted"),instant(rs,"updated_at"),rs.getBigDecimal("confirmation_penalty_points")),sellerId).stream().findFirst();
     }
     private void event(UUID sellerId,String type,UUID orderId,UUID reportId,UUID actorId,String reason,State before,State after) {
         jdbc.update("""
             INSERT INTO seller_reputation_events(id,seller_id,event_type,order_id,report_id,actor_id,reason,
-                good_before,bad_before,good_after,bad_after,score_before,score_after,formula_version,created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                good_before,bad_before,good_after,bad_after,score_before,score_after,formula_version,penalty_before,penalty_after,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
             """,UUID.randomUUID(),sellerId,type,orderId,reportId,actorId,reason,before.good(),before.bad(),after.good(),after.bad(),
-                calculator.score(before.good(),before.bad()),calculator.score(after.good(),after.bad()),FORMULA_VERSION);
+                calculator.score(before.good(),before.bad(),before.penalty()),calculator.score(after.good(),after.bad(),after.penalty()),
+                FORMULA_VERSION,before.penalty(),after.penalty());
     }
     private static Instant instant(ResultSet rs,String column) throws SQLException {
         var timestamp=rs.getTimestamp(column); return timestamp==null?null:timestamp.toInstant();

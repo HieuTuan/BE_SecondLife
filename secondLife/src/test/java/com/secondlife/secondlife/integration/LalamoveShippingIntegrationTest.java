@@ -377,7 +377,7 @@ class LalamoveShippingIntegrationTest {
         ObjectNode tampered = signed.deepCopy();
         ((ObjectNode) tampered.path("data").path("order")).put("status", "COMPLETED");
         callback(tampered).andExpect(status().isForbidden());
-        assertOrder(orderId, "PROCESSING", "HELD");
+        assertOrder(orderId, "CONFIRMED", "HELD");
         assertEquals(0, eventCount(shipmentId));
         mvc.perform(post(LalamoveWebhookVerifier.CALLBACK_PATH)).andExpect(status().isOk());
         assertEquals(0, eventCount(shipmentId));
@@ -437,7 +437,7 @@ class LalamoveShippingIntegrationTest {
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM shipments WHERE order_id = ?", Integer.class, orderId));
         assertMoney(FUNDS.subtract(PRICE).subtract(FEE), balance(f.buyer()));
         assertEquals(1, transactions(orderId, "PAYMENT"));
-        assertOrder(orderId, "PROCESSING", "HELD");
+        assertOrder(orderId, "CONFIRMED", "HELD");
     }
 
     @Test void duplicateAndOutOfOrderSignedEventsCannotRegressDeliveryOrOverwriteNewerFee() throws Exception {
@@ -473,7 +473,47 @@ class LalamoveShippingIntegrationTest {
         mvc.perform(post("/api/v1/orders/" + orderId + "/shipments").header("Authorization", bearer(f.seller()))
                 .contentType(MediaType.APPLICATION_JSON).content(body(request(UUID.randomUUID())))).andExpect(status().isConflict());
         assertMoney(FUNDS.subtract(PRICE).subtract(FEE), balance(f.buyer()));
-        assertOrder(orderId, "PROCESSING", "HELD");
+        assertOrder(orderId, "CONFIRMED", "HELD");
+    }
+
+    @Test void checkoutSnapshotsConfirmationPolicyNotifiesStaffOnceAndRequiresSellerConfirmationBeforeBooking() throws Exception {
+        var f=fixture();var staff=user("STAFF",BigDecimal.ZERO);UUID requestId=UUID.randomUUID();
+        var q=quote(f);var checkout=Map.of("postId",f.post().getId(),"shippingQuoteId",quoteId(q),"requestId",requestId);
+        var response=tree(mvc.perform(post("/api/v1/orders").header("Authorization",bearer(f.buyer()))
+            .contentType(MediaType.APPLICATION_JSON).content(body(checkout))).andExpect(status().isOk()).andReturn());
+        UUID id=UUID.fromString(response.path("id").asText());assertEquals("PROCESSING",response.path("status").asText());
+        assertEquals("PENDING",response.path("confirmationStatus").asText());
+        Instant paid=Instant.parse(response.path("paidAt").asText());
+        assertEquals(Duration.ofHours(24),Duration.between(paid,Instant.parse(response.path("confirmationDeadline").asText())));
+        assertEquals(Duration.ofHours(48),Duration.between(paid,Instant.parse(response.path("confirmationCancelAt").asText())));
+        mvc.perform(post("/api/v1/orders").header("Authorization",bearer(f.buyer())).contentType(MediaType.APPLICATION_JSON).content(body(checkout)))
+            .andExpect(status().isOk());
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM notifications WHERE user_id=? AND reference_id=? AND type='ORDER'",Integer.class,staff.getId(),id));
+        mvc.perform(get("/api/v1/notifications?type=ORDER&size=100").header("Authorization",bearer(staff)))
+            .andDo(result->assertNull(result.getResolvedException(),()->"Notification query failed: "+result.getResolvedException()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items[*].referenceId").value(org.hamcrest.Matchers.hasItem(id.toString())));
+        for(String filter:List.of("", "&unreadOnly=true", "&type=ORDER&unreadOnly=true")) {
+            mvc.perform(get("/api/v1/notifications?size=100"+filter).header("Authorization",bearer(staff)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[*].referenceId").value(org.hamcrest.Matchers.hasItem(id.toString())));
+        }
+        mvc.perform(get("/api/v1/notifications/unread-count").header("Authorization",bearer(staff)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.unreadCount").value(1));
+        UUID notificationId=jdbc.queryForObject("SELECT id FROM notifications WHERE user_id=? AND reference_id=?",UUID.class,staff.getId(),id);
+        mvc.perform(patch("/api/v1/notifications/"+notificationId+"/read").header("Authorization",bearer(f.buyer())))
+            .andExpect(status().isNotFound());
+        mvc.perform(patch("/api/v1/notifications/"+notificationId+"/read").header("Authorization",bearer(staff)))
+            .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/notifications?type=ORDER&unreadOnly=true").header("Authorization",bearer(staff)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty());
+        mvc.perform(delete("/api/v1/notifications/"+notificationId).header("Authorization",bearer(staff))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/notifications?type=ORDER").header("Authorization",bearer(staff)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty());
+        mvc.perform(post("/api/v1/orders/"+id+"/shipments").header("Authorization",bearer(f.seller()))
+            .contentType(MediaType.APPLICATION_JSON).content(body(request(UUID.randomUUID())))).andExpect(status().isConflict());
+        verify(carrier,never()).create(anyMap());
+        mvc.perform(put("/api/v1/orders/"+id+"/confirm").header("Authorization",bearer(f.seller())))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("CONFIRMED"));
+        create(f.seller(),id,UUID.randomUUID());verify(carrier,times(1)).create(anyMap());
     }
 
     private record Fixture(User seller, User buyer, Post post) { }
@@ -519,9 +559,12 @@ class LalamoveShippingIntegrationTest {
     private UUID quoteId(JsonNode quote) { return UUID.fromString(quote.path("quoteId").asText()); }
 
     private UUID checkout(Fixture f, UUID quoteId) throws Exception {
-        return UUID.fromString(tree(mvc.perform(post("/api/v1/orders").header("Authorization", bearer(f.buyer()))
+        UUID id=UUID.fromString(tree(mvc.perform(post("/api/v1/orders").header("Authorization", bearer(f.buyer()))
                 .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("postId", f.post().getId(), "shippingQuoteId", quoteId,
                         "requestId", UUID.randomUUID())))).andExpect(status().isOk()).andReturn()).path("id").asText());
+        mvc.perform(put("/api/v1/orders/"+id+"/confirm").header("Authorization",bearer(f.seller())))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("CONFIRMED"));
+        return id;
     }
 
     private JsonNode create(User seller, UUID orderId, UUID requestId) throws Exception {

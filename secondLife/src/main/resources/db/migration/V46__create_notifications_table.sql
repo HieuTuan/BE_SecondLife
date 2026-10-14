@@ -1,5 +1,5 @@
 -- ==============================================================================
--- V42: CREATE NOTIFICATIONS TABLE AND INDEXES FOR IN-APP & REAL-TIME SYSTEM
+-- V46: CREATE NOTIFICATIONS TABLE AND INDEXES FOR IN-APP & REAL-TIME SYSTEM
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS notifications (

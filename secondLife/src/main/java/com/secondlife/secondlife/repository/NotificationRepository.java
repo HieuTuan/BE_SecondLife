@@ -16,17 +16,23 @@ import java.util.UUID;
 @Repository
 public interface NotificationRepository extends JpaRepository<Notification, UUID> {
 
-    Page<Notification> findByUserIdAndIsDeletedFalse(UUID userId, Pageable pageable);
+    @Query("SELECT n FROM Notification n WHERE n.user.id = :userId AND n.isDeleted = false")
+    Page<Notification> findByUserIdAndIsDeletedFalse(@Param("userId") UUID userId, Pageable pageable);
 
-    Page<Notification> findByUserIdAndIsReadFalseAndIsDeletedFalse(UUID userId, Pageable pageable);
+    @Query("SELECT n FROM Notification n WHERE n.user.id = :userId AND n.isRead = false AND n.isDeleted = false")
+    Page<Notification> findByUserIdAndIsReadFalseAndIsDeletedFalse(@Param("userId") UUID userId, Pageable pageable);
 
-    Page<Notification> findByUserIdAndTypeAndIsDeletedFalse(UUID userId, String type, Pageable pageable);
+    @Query("SELECT n FROM Notification n WHERE n.user.id = :userId AND n.type = :type AND n.isDeleted = false")
+    Page<Notification> findByUserIdAndTypeAndIsDeletedFalse(@Param("userId") UUID userId, @Param("type") String type, Pageable pageable);
 
-    Page<Notification> findByUserIdAndTypeAndIsReadFalseAndIsDeletedFalse(UUID userId, String type, Pageable pageable);
+    @Query("SELECT n FROM Notification n WHERE n.user.id = :userId AND n.type = :type AND n.isRead = false AND n.isDeleted = false")
+    Page<Notification> findByUserIdAndTypeAndIsReadFalseAndIsDeletedFalse(@Param("userId") UUID userId, @Param("type") String type, Pageable pageable);
 
-    long countByUserIdAndIsReadFalseAndIsDeletedFalse(UUID userId);
+    @Query("SELECT COUNT(n) FROM Notification n WHERE n.user.id = :userId AND n.isRead = false AND n.isDeleted = false")
+    long countByUserIdAndIsReadFalseAndIsDeletedFalse(@Param("userId") UUID userId);
 
-    Optional<Notification> findByIdAndUserIdAndIsDeletedFalse(UUID id, UUID userId);
+    @Query("SELECT n FROM Notification n WHERE n.id = :id AND n.user.id = :userId AND n.isDeleted = false")
+    Optional<Notification> findByIdAndUserIdAndIsDeletedFalse(@Param("id") UUID id, @Param("userId") UUID userId);
 
     @Modifying
     @Query("UPDATE Notification n SET n.isRead = true, n.readAt = :readAt WHERE n.user.id = :userId AND n.isRead = false AND n.isDeleted = false")

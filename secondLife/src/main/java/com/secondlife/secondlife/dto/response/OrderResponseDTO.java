@@ -27,6 +27,10 @@ public class OrderResponseDTO {
     private EscrowStatus escrowStatus;
     private Instant createdAt;
     private Instant paidAt;
+    private Instant sellerConfirmedAt;
+    private Instant confirmationDeadline;
+    private Instant confirmationCancelAt;
+    private String confirmationStatus;
     private Instant handoverDeadline;
     private Instant sellerReadyAt;
     private Instant carrierPickedUpAt;

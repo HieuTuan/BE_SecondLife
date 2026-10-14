@@ -57,6 +57,16 @@ public class OrderServiceImpl implements OrderService {
     private final SystemWalletService systemWallet;
     private final com.secondlife.secondlife.service.SellerReputationService reputation;
     private final com.secondlife.secondlife.service.NotificationService notificationService;
+    private final com.secondlife.secondlife.service.OrderConfirmationService confirmations;
+
+    public OrderServiceImpl(OrderRepository orderRepository,PostRepository postRepository,UserRepository userRepository,
+            NegotiationRepository negotiationRepository,WalletService walletService,ShippingQuoteService shippingQuotes,
+            ShipmentRepository shipments,CommissionService commissions,SettlementService settlements,SystemWalletService systemWallet,
+            com.secondlife.secondlife.service.SellerReputationService reputation,
+            com.secondlife.secondlife.service.NotificationService notificationService) {
+        this(orderRepository,postRepository,userRepository,negotiationRepository,walletService,shippingQuotes,shipments,
+                commissions,settlements,systemWallet,reputation,notificationService,null);
+    }
 
     @org.springframework.beans.factory.annotation.Autowired
     public OrderServiceImpl(
@@ -71,7 +81,8 @@ public class OrderServiceImpl implements OrderService {
             SettlementService settlements,
             SystemWalletService systemWallet,
             com.secondlife.secondlife.service.SellerReputationService reputation,
-            com.secondlife.secondlife.service.NotificationService notificationService
+            com.secondlife.secondlife.service.NotificationService notificationService,
+            com.secondlife.secondlife.service.OrderConfirmationService confirmations
     ) {
         this.orderRepository = orderRepository;
         this.postRepository = postRepository;
@@ -85,6 +96,7 @@ public class OrderServiceImpl implements OrderService {
         this.systemWallet = systemWallet;
         this.reputation = java.util.Objects.requireNonNull(reputation, "SellerReputationService is required");
         this.notificationService = notificationService;
+        this.confirmations = confirmations;
     }
 
     public OrderServiceImpl(
@@ -212,7 +224,7 @@ public class OrderServiceImpl implements OrderService {
             notificationService.notifyWithEmail(
                     post.getUser(),
                     "Bạn có đơn hàng mới!",
-                    "Khách hàng vừa đặt đơn hàng #" + order.getId() + " cho sản phẩm '" + post.getTitle() + "'. Vui lòng chuẩn bị và đóng gói sản phẩm.",
+                    "Khách hàng vừa đặt đơn hàng #" + order.getId() + " cho sản phẩm '" + post.getTitle() + "'. Vui lòng xác nhận trước " + order.getConfirmationDeadline() + ".",
                     "ORDER",
                     order.getId(),
                     "ORDER",
@@ -222,6 +234,13 @@ public class OrderServiceImpl implements OrderService {
             );
         }
 
+        if (notificationService != null) {
+            for (UUID staffId : userRepository.findActiveOrderReviewStaffIds()) {
+                notificationService.notify(staffId,"Đơn hàng mới chờ SELLER xác nhận",
+                    "Đơn hàng #"+order.getId()+" đã thanh toán, chờ người bán xác nhận trước "+order.getConfirmationDeadline(),
+                    "ORDER",order.getId(),"ORDER","/staff/orders/"+order.getId());
+            }
+        }
         return mapToDTO(order);
     }
 
@@ -235,7 +254,7 @@ public class OrderServiceImpl implements OrderService {
             throw new BadRequestException("Only the seller can mark the order as shipped");
         }
 
-        if (order.getStatus() != OrderStatus.PROCESSING) {
+        if (order.getStatus() != OrderStatus.PROCESSING && order.getStatus()!=OrderStatus.CONFIRMED) {
             throw new BadRequestException("Order is not in PROCESSING state");
         }
 
@@ -302,6 +321,11 @@ public class OrderServiceImpl implements OrderService {
             throw new BadRequestException("You are not authorized to cancel this order");
         }
 
+        var cancellationAt=confirmations==null?Instant.now():confirmations.now();
+        if(confirmations!=null && order.getSellerConfirmedAt()==null && order.getConfirmationCancelAt()!=null
+                && !cancellationAt.isBefore(order.getConfirmationCancelAt()) && confirmations.processIfDue(orderId)) {
+            return mapToDTO(order);
+        }
         boolean sellerCancel=order.getSeller().getId().equals(userId);
         if(sellerCancel && request==null) throw new BadRequestException("Seller cancellation requires reasonCode and reason");
         var code=request==null?com.secondlife.secondlife.dto.reputation.CancelOrderRequest.ReasonCode.BUYER_REQUESTED:request.reasonCode();
@@ -320,7 +344,7 @@ public class OrderServiceImpl implements OrderService {
             throw new BadRequestException("Escrow funds are not HELD. Cannot cancel and refund.");
         }
         var shipping=shipments.findByOrderIdOrderByCreatedAtAsc(orderId);
-        if (shipping.stream().anyMatch(s -> !"CANCELLED".equals(s.getStatus())) || order.getStatus()!=OrderStatus.PROCESSING)
+        if (shipping.stream().anyMatch(s -> !"CANCELLED".equals(s.getStatus())) || (order.getStatus()!=OrderStatus.PROCESSING && order.getStatus()!=OrderStatus.CONFIRMED))
             throw new ConflictException("Cancel the carrier shipment before cancelling the order; shipped/delivered goods require return review");
 
         // Refund buyer
@@ -329,6 +353,7 @@ public class OrderServiceImpl implements OrderService {
         if (shipping.stream().allMatch(s -> s.getOrderCode()==null)) refund=refund.add(order.getShippingFee());
         systemWallet.refund(order, refund);
         walletService.processRefund(order.getBuyer().getId(), refund, order.getId());
+        if(confirmations!=null) confirmations.recordLateCancellationIfDue(order,cancellationAt);
 
         order.setStatus(OrderStatus.CANCELLED);
         order.setEscrowStatus(EscrowStatus.REFUNDED);
@@ -399,6 +424,9 @@ public class OrderServiceImpl implements OrderService {
         dto.setPaidAt(order.getPaidAt()); dto.setHandoverDeadline(order.getHandoverDeadline());
         dto.setSellerReadyAt(order.getSellerReadyAt()); dto.setCarrierPickedUpAt(order.getCarrierPickedUpAt());
         dto.setCancellationReasonCode(order.getCancellationReasonCode());
+        dto.setSellerConfirmedAt(order.getSellerConfirmedAt()); dto.setConfirmationDeadline(order.getConfirmationDeadline());
+        dto.setConfirmationCancelAt(order.getConfirmationCancelAt());
+        dto.setConfirmationStatus(com.secondlife.secondlife.dto.reputation.OrderConfirmationResponse.confirmationStatus(order));
         return dto;
     }
 }

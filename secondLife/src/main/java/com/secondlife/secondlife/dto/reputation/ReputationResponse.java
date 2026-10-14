@@ -8,4 +8,5 @@ public record ReputationResponse(UUID sellerId,@JsonInclude(JsonInclude.Include.
         String assessmentStatus,long confirmedIncidents,long seriousIncidents,boolean sellingRestricted,String warningCode,
         Instant updatedAt,String formulaVersion,long sellerCancellationOrders,long sellerReturnFaultOrders,
         long nonFulfillmentOrders,BigDecimal nonFulfillmentRate,long handoverEvaluatedOrders,
-        long lateHandoverOrders,BigDecimal lateHandoverRate) { }
+        long lateHandoverOrders,BigDecimal lateHandoverRate,
+        @JsonInclude(JsonInclude.Include.ALWAYS) BigDecimal transactionScore,BigDecimal confirmationPenaltyPoints) { }

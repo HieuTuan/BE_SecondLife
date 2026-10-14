@@ -102,7 +102,7 @@ class SellerReputationIntegrationTest {
         mvc.perform(get("/api/v1/seller/reputation/me/history?page=0&size=2").header("Authorization",bearer(seller)))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(5))
             .andExpect(jsonPath("$.data.items.length()").value(2))
-            .andExpect(jsonPath("$.data.items[0].formulaVersion").value("TRANSACTION_SUCCESS_RATE_V2"))
+            .andExpect(jsonPath("$.data.items[0].formulaVersion").value("TRANSACTION_SUCCESS_RATE_V3"))
             .andExpect(jsonPath("$.data.items[0].actorId").doesNotExist());
     }
     @Test void confirmedSellerFaultConvertsGoodToBadOnceAndResolutionRetryCannotChangeDecision() throws Exception {

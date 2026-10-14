@@ -1,5 +1,5 @@
 -- ==============================================================================
--- V40: COMPREHENSIVE PRODUCT INSPECTION SYSTEM
+-- V44: COMPREHENSIVE PRODUCT INSPECTION SYSTEM
 -- SecondLife Marketplace
 -- ==============================================================================
 
@@ -17,13 +17,14 @@ CREATE TABLE IF NOT EXISTS inspection_travel_tiers (
 );
 
 -- Seed sẵn 6 bậc chuẩn do user cấu hình
-INSERT INTO inspection_travel_tiers (tier_number, name, from_km, to_km, price_per_km, status) VALUES
-(1, '0-5 km đầu', 0.0, 5.0, 2000.00, 'ACTIVE'),
-(2, 'Trên 5-10 km', 5.0, 10.0, 2500.00, 'ACTIVE'),
-(3, 'Trên 10-15 km', 10.0, 15.0, 3000.00, 'ACTIVE'),
-(4, 'Trên 15-20 km', 15.0, 20.0, 3500.00, 'ACTIVE'),
-(5, 'Trên 20-30 km', 20.0, 30.0, 4000.00, 'ACTIVE'),
-(6, 'Trên 30 km', 30.0, NULL, 4500.00, 'ACTIVE')
+INSERT INTO inspection_travel_tiers
+    (id, tier_number, name, from_km, to_km, price_per_km, status, created_at, updated_at) VALUES
+(gen_random_uuid(), 1, '0-5 km đầu', 0.0, 5.0, 2000.00, 'ACTIVE', NOW(), NOW()),
+(gen_random_uuid(), 2, 'Trên 5-10 km', 5.0, 10.0, 2500.00, 'ACTIVE', NOW(), NOW()),
+(gen_random_uuid(), 3, 'Trên 10-15 km', 10.0, 15.0, 3000.00, 'ACTIVE', NOW(), NOW()),
+(gen_random_uuid(), 4, 'Trên 15-20 km', 15.0, 20.0, 3500.00, 'ACTIVE', NOW(), NOW()),
+(gen_random_uuid(), 5, 'Trên 20-30 km', 20.0, 30.0, 4000.00, 'ACTIVE', NOW(), NOW()),
+(gen_random_uuid(), 6, 'Trên 30 km', 30.0, NULL, 4500.00, 'ACTIVE', NOW(), NOW())
 ON CONFLICT (tier_number) DO NOTHING;
 
 -- 2. Bảng đề xuất biểu phí & duyệt biểu phí giữa Trung tâm và Admin Sàn
@@ -102,8 +103,8 @@ INSERT INTO permissions (id, code, name, description) VALUES
 ON CONFLICT (code) DO NOTHING;
 
 -- Gán quyền vào role_permissions
-INSERT INTO role_permissions (id, role_id, permission_id)
-SELECT gen_random_uuid(), r.id, p.id 
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id 
 FROM roles r CROSS JOIN permissions p
 WHERE (r.code = 'INSPECTION_CENTER' AND p.code IN ('INSPECTION_CHECKLIST_MANAGE', 'INSPECTION_FEE_MANAGE'))
    OR (r.code = 'ADMIN' AND p.code IN ('INSPECTION_CHECKLIST_MANAGE', 'INSPECTION_FEE_MANAGE'))

@@ -100,6 +100,8 @@ public class ShipmentService {
             order.setEscrowStatus(EscrowStatus.FROZEN); orders.save(order);
         } else {
             if (!request.leg().equals(quote.getLeg())) throw new ConflictException("Shipment leg must match the paid shipping quote: "+quote.getLeg());
+            if (order.getConfirmationDeadline()!=null && order.getSellerConfirmedAt()==null)
+                throw new ConflictException("SELLER must confirm the order before creating an outbound shipment");
             if (order.getEscrowStatus()!=EscrowStatus.HELD || order.getShippingDeliveredAt()!=null) throw new ConflictException("Order is not eligible for outbound shipping");
             if ("CENTER_TO_BUYER".equals(request.leg())) {
                 if (!staff) throw new ForbiddenException("STAFF/ADMIN creates shipments from the inspection center");

@@ -20,7 +20,7 @@ public class SellerReputationController {
     private final SellerReputationService reputation;
     private final CurrentUserProvider currentUser;
     @GetMapping("/sellers/{sellerId}/reputation")
-    @Operation(summary="Actual transaction success score: 100 * good / evaluated", description="No score when evaluated=0; fewer than configured minimum orders is provisional. Only ended orders count. Confirmed seller faults count once, serious warnings remain separate. Pickup and non-fulfillment rates expose their denominators.")
+    @Operation(summary="Seller reputation: max(0, transactionScore - confirmationPenaltyPoints)", description="transactionScore = 100 * good / evaluated. No score when evaluated=0; fewer than configured minimum orders is provisional. Only ended orders count. Confirmation penalties apply once per order and deadline using the payment snapshot. Confirmed seller faults count once per ended order; listing reports record warnings without adding BAD orders. Serious warnings and selling restrictions remain separate.")
     public ApiResponse<ReputationResponse> publicReputation(@PathVariable UUID sellerId) {
         return ApiResponse.success(reputation.get(sellerId));
     }
