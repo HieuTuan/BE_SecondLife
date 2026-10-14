@@ -1,6 +1,9 @@
 package com.secondlife.secondlife.service;
 
+import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
+import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
+import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -9,6 +12,41 @@ import java.util.List;
 import java.util.UUID;
 
 public interface InspectionService {
+    /**
+     * Người mua tạo yêu cầu mua hàng kèm kiểm định sản phẩm
+     */
+    InspectionOrderResponse requestInspection(UUID buyerId, InspectionBuyRequest request);
+
+    /**
+     * Người bán phản hồi yêu cầu kiểm định (Đồng ý / Từ chối / Đề xuất lại)
+     */
+    InspectionOrderResponse respondInspection(UUID sellerId, UUID orderId, InspectionSellerRespondRequest request);
+
+    /**
+     * KTV hoặc Người bán chốt lịch hẹn đến nhà kiểm định (gói AT_HOME)
+     */
+    InspectionOrderResponse scheduleAppointment(UUID actorId, UUID orderId, InspectionAppointmentRequest request);
+
+    /**
+     * Xem chi tiết 1 đơn kiểm định theo ID
+     */
+    InspectionOrderResponse getOrderById(UUID actorId, UUID orderId);
+
+    /**
+     * Người mua xem danh sách đơn kiểm định của mình
+     */
+    Page<InspectionOrderResponse> getBuyerOrders(UUID buyerId, Pageable pageable);
+
+    /**
+     * Người bán xem danh sách đơn kiểm định của mình
+     */
+    Page<InspectionOrderResponse> getSellerOrders(UUID sellerId, Pageable pageable);
+
+    /**
+     * Người mua xác nhận mua hàng & thanh toán tiền hàng sau khi kiểm định PASSED
+     */
+    InspectionOrderResponse confirmFinalPurchase(UUID buyerId, UUID orderId);
+
     /**
      * Inspector xem danh sách đơn kiểm định được phân công cho mình
      */
@@ -23,11 +61,10 @@ public interface InspectionService {
      * Manager phân công nhân viên cho đơn kiểm định
      */
     InspectionOrderResponse assignInspector(UUID orderId, UUID inspectorId);
+    InspectionOrderResponse assignInspector(UUID orderId, UUID inspectorId, UUID managerId);
 
     /**
-     * Inspector nộp kết quả kiểm định.
-     * Nếu PASSED → AI scan lần 2 → ACTIVE
-     * Nếu FAILED → REJECTED
+     * Inspector nộp kết quả kiểm định kèm video bằng chứng và checklist
      */
     InspectionOrderResponse submitResult(UUID orderId, UUID inspectorId, InspectionResultRequest request);
 

@@ -4,19 +4,45 @@ import com.secondlife.secondlife.entity.InspectionOrder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface InspectionOrderRepository extends JpaRepository<InspectionOrder, UUID> {
-    @org.springframework.data.jpa.repository.Query("select o.post.user.id from InspectionOrder o where o.id = :id")
-    java.util.Optional<UUID> findOwnerId(@org.springframework.data.repository.query.Param("id") UUID id);
-    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
-    @org.springframework.data.jpa.repository.Query("select o from InspectionOrder o where o.id = :id")
-    java.util.Optional<InspectionOrder> findByIdForUpdate(@org.springframework.data.repository.query.Param("id") UUID id);
+
+    @Query("select o.post.user.id from InspectionOrder o where o.id = :id")
+    Optional<UUID> findOwnerId(@Param("id") UUID id);
+
+    @Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from InspectionOrder o where o.id = :id")
+    Optional<InspectionOrder> findByIdForUpdate(@Param("id") UUID id);
+
     List<InspectionOrder> findByInspectorId(UUID inspectorId);
+
+    List<InspectionOrder> findByInspectorIdOrderByCreatedAtDesc(UUID inspectorId);
+
     Page<InspectionOrder> findByStatus(String status, Pageable pageable);
+
     Page<InspectionOrder> findAll(Pageable pageable);
+
     Optional<InspectionOrder> findByPostId(UUID postId);
+
+    Optional<InspectionOrder> findByPostIdAndStatus(UUID postId, String status);
+
+    Optional<InspectionOrder> findByOrderId(UUID orderId);
+
+    Page<InspectionOrder> findByBuyerIdOrderByCreatedAtDesc(UUID buyerId, Pageable pageable);
+
+    Page<InspectionOrder> findBySellerIdOrderByCreatedAtDesc(UUID sellerId, Pageable pageable);
+
+    @Query("SELECT o FROM InspectionOrder o WHERE o.status = 'WAITING_FEE_PAYMENT' AND o.paymentDeadline IS NOT NULL AND o.paymentDeadline < :now")
+    List<InspectionOrder> findExpiredUnpaidOrders(@Param("now") Instant now);
+
+    @Query("SELECT o FROM InspectionOrder o WHERE o.status = 'PASSED' AND o.finalPaymentDeadline IS NOT NULL AND o.finalPaymentDeadline < :now AND o.finalPaymentPaidAt IS NULL")
+    List<InspectionOrder> findExpiredFinalPaymentOrders(@Param("now") Instant now);
 }

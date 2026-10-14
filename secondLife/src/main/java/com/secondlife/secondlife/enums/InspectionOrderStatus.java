@@ -1,0 +1,19 @@
+package com.secondlife.secondlife.enums;
+
+public enum InspectionOrderStatus {
+    WAITING_SELLER_APPROVAL,
+    WAITING_BUYER_APPROVAL,
+    WAITING_FEE_PAYMENT,
+    PAYMENT_EXPIRED,
+    CONFIRMED_PENDING_DISPATCH,
+    DISPATCHED,
+    SCHEDULED,
+    SHIPPING_TO_CENTER,
+    INSPECTING,
+    PASSED,
+    FAILED,
+    DELIVERING_TO_BUYER,
+    COMPLETED,
+    DISPUTED,
+    CANCELLED
+}

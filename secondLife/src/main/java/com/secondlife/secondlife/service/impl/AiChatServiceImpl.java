@@ -414,8 +414,11 @@ public class AiChatServiceImpl implements AiChatService {
             if (client != googleChatClient && googleChatClient != null) {
                 try {
                     log.warn("Ollama call failed in finalizeChat, falling back to Google Gemini: {}", ex.getMessage());
-                    return googleChatClient.prompt(prompt).call().content();
-                } catch (Exception ignored) {}
+                    Prompt fallbackPrompt = new Prompt(prompt.getInstructions());
+                    return googleChatClient.prompt(fallbackPrompt).call().content();
+                } catch (Exception geminiEx) {
+                    log.error("Google Gemini fallback also failed: {}", geminiEx.getMessage(), geminiEx);
+                }
             }
             throw new AiProviderException("AI chat unavailable; please retry", ex); 
         }

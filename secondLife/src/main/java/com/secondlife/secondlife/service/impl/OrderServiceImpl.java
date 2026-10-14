@@ -38,7 +38,6 @@ import java.util.Set;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class OrderServiceImpl implements OrderService {
 
     private static final Set<String> ALLOWED_ORDER_SORT_PROPERTIES = Set.of(
@@ -57,6 +56,52 @@ public class OrderServiceImpl implements OrderService {
     private final SettlementService settlements;
     private final SystemWalletService systemWallet;
     private final com.secondlife.secondlife.service.SellerReputationService reputation;
+    private final com.secondlife.secondlife.service.NotificationService notificationService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public OrderServiceImpl(
+            OrderRepository orderRepository,
+            PostRepository postRepository,
+            UserRepository userRepository,
+            NegotiationRepository negotiationRepository,
+            WalletService walletService,
+            ShippingQuoteService shippingQuotes,
+            ShipmentRepository shipments,
+            CommissionService commissions,
+            SettlementService settlements,
+            SystemWalletService systemWallet,
+            com.secondlife.secondlife.service.SellerReputationService reputation,
+            com.secondlife.secondlife.service.NotificationService notificationService
+    ) {
+        this.orderRepository = orderRepository;
+        this.postRepository = postRepository;
+        this.userRepository = userRepository;
+        this.negotiationRepository = negotiationRepository;
+        this.walletService = walletService;
+        this.shippingQuotes = shippingQuotes;
+        this.shipments = shipments;
+        this.commissions = commissions;
+        this.settlements = settlements;
+        this.systemWallet = systemWallet;
+        this.reputation = java.util.Objects.requireNonNull(reputation, "SellerReputationService is required");
+        this.notificationService = notificationService;
+    }
+
+    public OrderServiceImpl(
+            OrderRepository orderRepository,
+            PostRepository postRepository,
+            UserRepository userRepository,
+            NegotiationRepository negotiationRepository,
+            WalletService walletService,
+            ShippingQuoteService shippingQuotes,
+            ShipmentRepository shipments,
+            CommissionService commissions,
+            SettlementService settlements,
+            SystemWalletService systemWallet,
+            com.secondlife.secondlife.service.SellerReputationService reputation
+    ) {
+        this(orderRepository, postRepository, userRepository, negotiationRepository, walletService, shippingQuotes, shipments, commissions, settlements, systemWallet, reputation, null);
+    }
 
     @Override
     @Transactional
@@ -152,6 +197,31 @@ public class OrderServiceImpl implements OrderService {
             negotiationRepository.save(negotiation);
         }
 
+        if (notificationService != null) {
+            notificationService.notifyWithEmail(
+                    buyer,
+                    "Đặt hàng thành công",
+                    "Đơn hàng #" + order.getId() + " cho sản phẩm '" + post.getTitle() + "' đã được tạo thành công và giữ tiền ký quỹ an toàn.",
+                    "ORDER",
+                    order.getId(),
+                    "ORDER",
+                    "/buyer/orders/" + order.getId(),
+                    "Xác nhận đơn hàng #" + order.getId() + " - SecondLife",
+                    "Đơn hàng #" + order.getId() + " cho sản phẩm '" + post.getTitle() + "' đã được tạo thành công với tổng số tiền " + finalPrice.add(order.getShippingFee()) + " VND. Khoản tiền đang được giữ an toàn trong ví ký quỹ SecondLife."
+            );
+            notificationService.notifyWithEmail(
+                    post.getUser(),
+                    "Bạn có đơn hàng mới!",
+                    "Khách hàng vừa đặt đơn hàng #" + order.getId() + " cho sản phẩm '" + post.getTitle() + "'. Vui lòng chuẩn bị và đóng gói sản phẩm.",
+                    "ORDER",
+                    order.getId(),
+                    "ORDER",
+                    "/seller/orders/" + order.getId(),
+                    "Thông báo đơn hàng mới #" + order.getId() + " - SecondLife",
+                    "Bạn vừa nhận được đơn hàng mới #" + order.getId() + " cho sản phẩm '" + post.getTitle() + "'. Vui lòng truy cập hệ thống để chuẩn bị và xác nhận đơn hàng."
+            );
+        }
+
         return mapToDTO(order);
     }
 
@@ -192,6 +262,29 @@ public class OrderServiceImpl implements OrderService {
 
         // Persist settlement and release the net seller amount using the order's policy snapshot.
         settlements.settle(order);
+
+        if (notificationService != null) {
+            notificationService.notify(
+                    order.getBuyer().getId(),
+                    "Đơn hàng hoàn tất",
+                    "Cảm ơn bạn đã xác nhận đã nhận hàng thành công cho đơn hàng #" + order.getId() + ".",
+                    "ORDER",
+                    order.getId(),
+                    "ORDER",
+                    "/buyer/orders/" + order.getId()
+            );
+            notificationService.notifyWithEmail(
+                    order.getSeller(),
+                    "Tiền bán hàng đã về ví!",
+                    "Đơn hàng #" + order.getId() + " đã hoàn tất. Doanh thu bán hàng đã được giải ngân vào ví SecondLife của bạn.",
+                    "ORDER",
+                    order.getId(),
+                    "ORDER",
+                    "/wallet",
+                    "Giải ngân tiền bán hàng đơn #" + order.getId() + " - SecondLife",
+                    "Đơn hàng #" + order.getId() + " đã hoàn tất thành công. Doanh thu bán hàng đã được giải ngân vào ví SecondLife của bạn."
+            );
+        }
 
         return mapToDTO(orderRepository.save(order));
     }
@@ -248,6 +341,31 @@ public class OrderServiceImpl implements OrderService {
         Post post = postRepository.findByIdForUpdate(order.getPost().getId()).orElseThrow();
         post.setStatus("ACTIVE");
         postRepository.save(post);
+
+        if (notificationService != null) {
+            notificationService.notifyWithEmail(
+                    order.getBuyer(),
+                    "Đơn hàng đã bị hủy",
+                    "Đơn hàng #" + order.getId() + " đã bị hủy. Khoản thanh toán " + refund + " VND đã được hoàn lại vào ví của bạn.",
+                    "ORDER",
+                    order.getId(),
+                    "ORDER",
+                    "/wallet",
+                    "Thông báo hủy đơn hàng #" + order.getId() + " và hoàn tiền - SecondLife",
+                    "Đơn hàng #" + order.getId() + " đã bị hủy. Số tiền " + refund + " VND đã được hoàn trả về ví SecondLife của bạn."
+            );
+            notificationService.notifyWithEmail(
+                    order.getSeller(),
+                    "Đơn hàng đã bị hủy",
+                    "Đơn hàng #" + order.getId() + " của sản phẩm '" + order.getPost().getTitle() + "' đã bị hủy.",
+                    "ORDER",
+                    order.getId(),
+                    "ORDER",
+                    "/seller/orders/" + order.getId(),
+                    "Thông báo hủy đơn hàng #" + order.getId() + " - SecondLife",
+                    "Đơn hàng #" + order.getId() + " của sản phẩm '" + order.getPost().getTitle() + "' đã bị hủy."
+            );
+        }
 
         return mapToDTO(orderRepository.save(order));
     }

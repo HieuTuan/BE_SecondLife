@@ -32,8 +32,12 @@ public class MarketplaceListingService {
     }
 
     public MarketplaceListingResponse get(UUID postId) {
-        return response(posts.findByIdAndStatus(postId, "ACTIVE")
-                .orElseThrow(() -> new NotFoundException("Listing is not available for purchase")));
+        Post post = posts.findById(postId)
+                .orElseThrow(() -> new NotFoundException("Listing not found"));
+        if (!"ACTIVE".equals(post.getStatus()) && !"RESERVED".equals(post.getStatus())) {
+            throw new NotFoundException("Listing is not available for purchase");
+        }
+        return response(post);
     }
 
     private MarketplaceListingResponse response(Post post) {

@@ -12,12 +12,17 @@ import org.springframework.stereotype.Component;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 @ConditionalOnProperty(name = "app.orders.auto-release.enabled", havingValue = "true")
 public class OrderAutoReleaseScheduler {
     private final OrderRepository orders;
     private final OrderAutoReleaseService release;
     private final OrderAutoReleaseProperties properties;
+
+    public OrderAutoReleaseScheduler(OrderRepository orders, OrderAutoReleaseService release, OrderAutoReleaseProperties properties) {
+        this.orders = orders;
+        this.release = release;
+        this.properties = properties;
+    }
 
     @Scheduled(fixedDelayString = "${app.orders.auto-release.interval-ms}")
     public void releaseDueOrders() {

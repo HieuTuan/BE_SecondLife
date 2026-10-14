@@ -3,8 +3,9 @@ package com.secondlife.secondlife.service;
 import com.secondlife.secondlife.dto.response.ListingDraftResponse;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.exception.*;
+import com.secondlife.secondlife.notification.NotificationType;
 import com.secondlife.secondlife.repository.PostRepository;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,11 +13,24 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class ListingReviewService {
     private final PostRepository posts;
     private final ListingAccessService access;
     private final ListingPublicationService publication;
+    private final NotificationService notificationService;
+
+    public ListingReviewService(PostRepository posts, ListingAccessService access, ListingPublicationService publication) {
+        this(posts, access, publication, null);
+    }
+
+    @Autowired
+    public ListingReviewService(PostRepository posts, ListingAccessService access, ListingPublicationService publication,
+                                @Autowired(required = false) NotificationService notificationService) {
+        this.posts = posts;
+        this.access = access;
+        this.publication = publication;
+        this.notificationService = notificationService;
+    }
 
     @Transactional(readOnly = true)
     public Page<ListingDraftResponse> queue(Pageable pageable) {
@@ -35,6 +49,17 @@ public class ListingReviewService {
         publication.accept(post);
         post.setReviewedBy(reviewerId); post.setReviewedAt(Instant.now());
         posts.save(post);
+        if (notificationService != null && post.getUser() != null) {
+            notificationService.notify(
+                post.getUser().getId(),
+                "Tin đăng đã được duyệt",
+                "Tin đăng \"" + post.getTitle() + "\" của bạn đã được duyệt và đang hiển thị trên sàn.",
+                NotificationType.LISTING,
+                post.getId(),
+                "POST",
+                "/posts/" + post.getId()
+            );
+        }
         return ListingDraftResponse.from(post);
     }
     @Transactional
@@ -46,6 +71,17 @@ public class ListingReviewService {
         if (!"PENDING".equals(post.getStatus())) throw new ConflictException("Post is not pending review");
         post.setStatus("REJECTED"); post.setRejectionReason(reason.trim());
         post.setReviewedBy(reviewerId); post.setReviewedAt(Instant.now()); posts.save(post);
+        if (notificationService != null && post.getUser() != null) {
+            notificationService.notify(
+                post.getUser().getId(),
+                "Tin đăng bị từ chối duyệt",
+                "Tin đăng \"" + post.getTitle() + "\" bị từ chối duyệt. Lý do: " + reason.trim(),
+                NotificationType.LISTING,
+                post.getId(),
+                "POST",
+                "/seller/posts/" + post.getId() + "/edit"
+            );
+        }
         return ListingDraftResponse.from(post);
     }
     private Post lock(UUID id) {

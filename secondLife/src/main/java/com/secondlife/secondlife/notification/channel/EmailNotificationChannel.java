@@ -94,6 +94,10 @@ public class EmailNotificationChannel implements NotificationChannel {
                 String tempPassword = (String) message.payload().getOrDefault("temporaryPassword", "");
                 yield templateBuilder.buildInspectionCenterWelcomeEmail(recipientName, message.recipient().email(), tempPassword);
             }
+            default -> {
+                String content = (String) message.payload().getOrDefault("message", message.subject());
+                yield templateBuilder.buildGenericNoticeEmail(recipientName, message.type().name(), message.subject(), content, null, null);
+            }
         };
     }
 
@@ -123,6 +127,10 @@ public class EmailNotificationChannel implements NotificationChannel {
             case INSPECTION_CENTER_CREATED -> {
                 String tempPassword = (String) message.payload().getOrDefault("temporaryPassword", "");
                 yield String.format("Xin chào %s,\n\nTài khoản Trung tâm Kiểm định đã được khởi tạo.\nTên đăng nhập: %s\nMật khẩu ban đầu: %s\n\nTrân trọng,\nĐội ngũ SecondLife", name, message.recipient().email(), tempPassword);
+            }
+            default -> {
+                String content = (String) message.payload().getOrDefault("message", message.subject());
+                yield String.format("Xin chào %s,\n\n%s\n\nTrân trọng,\nĐội ngũ SecondLife", name, content);
             }
         };
     }

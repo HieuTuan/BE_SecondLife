@@ -20,16 +20,16 @@ class MarketplaceListingServiceTest {
     @Test
     void unavailableListingReturnsNotFound() {
         UUID id = UUID.randomUUID();
-        when(posts.findByIdAndStatus(id, "ACTIVE")).thenReturn(Optional.empty());
+        when(posts.findById(id)).thenReturn(Optional.empty());
         assertThrows(NotFoundException.class, () -> service.get(id));
-        verify(posts).findByIdAndStatus(id, "ACTIVE");
+        verify(posts).findById(id);
     }
 
     @Test
     void activeDetailContainsAllImagesAndPurchaseId() {
         Post post = listing();
         post.setImageUrl("https://example.com/product.jpg");
-        when(posts.findByIdAndStatus(post.getId(), "ACTIVE")).thenReturn(Optional.of(post));
+        when(posts.findById(post.getId())).thenReturn(Optional.of(post));
         var result = service.get(post.getId());
         assertEquals(post.getId(), result.postId());
         assertEquals(post.getUser().getId(), result.sellerId());

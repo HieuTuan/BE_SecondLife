@@ -13,7 +13,10 @@ import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.NegotiationService;
 import com.secondlife.secondlife.service.ChatService;
+import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.notification.NotificationType;
 import com.secondlife.secondlife.common.PageableUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -40,6 +43,7 @@ public class NegotiationServiceImpl implements NegotiationService {
     private final PostRepository postRepository;
     private final UserRepository userRepository;
     private final ChatService chatService;
+    private final NotificationService notificationService;
 
     private final int maxRejections;
     private final long acceptedTtlHours;
@@ -48,12 +52,22 @@ public class NegotiationServiceImpl implements NegotiationService {
                                   UserRepository userRepository, ChatService chatService,
                                   @Value("${app.negotiation.max-rejections}") int maxRejections,
                                   @Value("${app.negotiation.accepted-ttl-hours}") long acceptedTtlHours) {
+        this(negotiationRepository, postRepository, userRepository, chatService, null, maxRejections, acceptedTtlHours);
+    }
+
+    @Autowired
+    public NegotiationServiceImpl(NegotiationRepository negotiationRepository, PostRepository postRepository,
+                                  UserRepository userRepository, ChatService chatService,
+                                  @Autowired(required = false) NotificationService notificationService,
+                                  @Value("${app.negotiation.max-rejections}") int maxRejections,
+                                  @Value("${app.negotiation.accepted-ttl-hours}") long acceptedTtlHours) {
         if (maxRejections <= 0 || acceptedTtlHours <= 0)
             throw new IllegalArgumentException("Negotiation rejection limit and accepted TTL must be positive");
         this.negotiationRepository = negotiationRepository;
         this.postRepository = postRepository;
         this.userRepository = userRepository;
         this.chatService = chatService;
+        this.notificationService = notificationService;
         this.maxRejections = maxRejections;
         this.acceptedTtlHours = acceptedTtlHours;
     }
@@ -113,6 +127,18 @@ public class NegotiationServiceImpl implements NegotiationService {
             String.format("{\"type\":\"OFFER\", \"status\":\"%s\", \"price\":%s, \"negotiationId\":\"%s\"}", 
             negotiation.getStatus(), negotiation.getOfferedPrice(), negotiation.getId()));
 
+        if (notificationService != null && post.getUser() != null) {
+            notificationService.notify(
+                post.getUser().getId(),
+                "Đề xuất trả giá mới",
+                "Có người mua đề xuất giá " + offeredPrice + " VND cho bài đăng \"" + post.getTitle() + "\"",
+                NotificationType.NEGOTIATION,
+                negotiation.getId(),
+                "NEGOTIATION",
+                "/seller/negotiations"
+            );
+        }
+
         return mapToDTO(negotiation);
     }
 
@@ -149,12 +175,36 @@ public class NegotiationServiceImpl implements NegotiationService {
                 chatService.sendSystemMessage(post.getId(), other.getBuyer().getId(),
                     String.format("{\"type\":\"OFFER\", \"status\":\"%s\", \"price\":%s, \"negotiationId\":\"%s\"}",
                     other.getStatus(), other.getOfferedPrice(), other.getId()));
+
+                if (notificationService != null && other.getBuyer() != null) {
+                    notificationService.notify(
+                        other.getBuyer().getId(),
+                        "Đề xuất giá bị từ chối",
+                        "Đề xuất giá cho \"" + post.getTitle() + "\" đã bị từ chối do người bán chấp nhận ưu đãi khác.",
+                        NotificationType.NEGOTIATION,
+                        other.getId(),
+                        "NEGOTIATION",
+                        "/posts/" + post.getId()
+                    );
+                }
             }
         }
         
         chatService.sendSystemMessage(post.getId(), negotiation.getBuyer().getId(), 
             String.format("{\"type\":\"OFFER\", \"status\":\"%s\", \"price\":%s, \"negotiationId\":\"%s\"}", 
             negotiation.getStatus(), negotiation.getOfferedPrice(), negotiation.getId()));
+
+        if (notificationService != null && negotiation.getBuyer() != null) {
+            notificationService.notify(
+                negotiation.getBuyer().getId(),
+                "Đề xuất giá được chấp nhận",
+                "Người bán đã chấp nhận mức giá " + negotiation.getOfferedPrice() + " VND cho bài đăng \"" + post.getTitle() + "\"!",
+                NotificationType.NEGOTIATION,
+                negotiation.getId(),
+                "NEGOTIATION",
+                "/posts/" + post.getId()
+            );
+        }
 
         return mapToDTO(negotiation);
     }
@@ -181,6 +231,18 @@ public class NegotiationServiceImpl implements NegotiationService {
             String.format("{\"type\":\"OFFER\", \"status\":\"%s\", \"price\":%s, \"negotiationId\":\"%s\"}", 
             negotiation.getStatus(), negotiation.getOfferedPrice(), negotiation.getId()));
 
+        if (notificationService != null && negotiation.getBuyer() != null) {
+            notificationService.notify(
+                negotiation.getBuyer().getId(),
+                "Đề xuất giá bị từ chối",
+                "Đề xuất giá cho \"" + negotiation.getPost().getTitle() + "\" đã bị từ chối.",
+                NotificationType.NEGOTIATION,
+                negotiation.getId(),
+                "NEGOTIATION",
+                "/posts/" + negotiation.getPost().getId()
+            );
+        }
+
         return mapToDTO(negotiation);
     }
 
@@ -205,6 +267,18 @@ public class NegotiationServiceImpl implements NegotiationService {
         chatService.sendSystemMessage(negotiation.getPost().getId(), negotiation.getBuyer().getId(), 
             String.format("{\"type\":\"OFFER\", \"status\":\"%s\", \"price\":%s, \"negotiationId\":\"%s\"}", 
             negotiation.getStatus(), negotiation.getOfferedPrice(), negotiation.getId()));
+
+        if (notificationService != null && negotiation.getPost() != null && negotiation.getPost().getUser() != null) {
+            notificationService.notify(
+                negotiation.getPost().getUser().getId(),
+                "Đề xuất trả giá đã bị hủy",
+                "Người mua đã hủy đề xuất trả giá cho bài đăng \"" + negotiation.getPost().getTitle() + "\"",
+                NotificationType.NEGOTIATION,
+                negotiation.getId(),
+                "NEGOTIATION",
+                "/seller/negotiations"
+            );
+        }
 
         return mapToDTO(negotiation);
     }
