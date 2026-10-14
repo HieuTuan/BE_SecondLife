@@ -54,9 +54,11 @@ public class InspectionCenterController {
     @PreAuthorize("hasAuthority('INSPECTION_ORDER_ASSIGN')")
     @Operation(summary = "Điều phối phân công Kỹ thuật viên (Inspector) cho đơn kiểm định")
     public ResponseEntity<InspectionOrderResponse> assignInspector(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID orderId,
             @RequestParam UUID inspectorId) {
-        return ResponseEntity.ok(inspectionService.assignInspector(orderId, inspectorId));
+        UUID managerId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(inspectionService.assignInspector(orderId, inspectorId, managerId));
     }
 
     // --- 2. QUẢN LÝ CHECKLIST STUDIO ---

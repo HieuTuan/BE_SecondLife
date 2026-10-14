@@ -389,6 +389,12 @@ public class InspectionServiceImpl implements InspectionService {
     @Override
     @Transactional
     public InspectionOrderResponse assignInspector(UUID orderId, UUID inspectorId) {
+        return assignInspector(orderId, inspectorId, null);
+    }
+
+    @Override
+    @Transactional
+    public InspectionOrderResponse assignInspector(UUID orderId, UUID inspectorId, UUID managerId) {
         InspectionOrder order = inspectionOrderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
 
@@ -401,6 +407,10 @@ public class InspectionServiceImpl implements InspectionService {
 
         if (inspector.getAccountStatus() != AccountStatus.ACTIVE || !inspector.hasRole("INSPECTOR")) {
             throw new BadRequestException("Tài khoản được phân công phải là INSPECTOR đang hoạt động (ACTIVE)");
+        }
+
+        if (managerId != null && inspector.getManager() != null && !inspector.getManager().getId().equals(managerId)) {
+            throw new ForbiddenException("Kỹ thuật viên không thuộc quyền quản lý của trung tâm bạn");
         }
 
         order.setInspector(inspector);
@@ -432,6 +442,18 @@ public class InspectionServiceImpl implements InspectionService {
         order.setNote(request.getNote());
         order.setVideoProofUrl(request.getVideoProofUrl());
         order.setUnboxingVideoUrl(request.getUnboxingVideoUrl());
+        if (request.getConditionScore() != null) {
+            order.setConditionScore(request.getConditionScore());
+        }
+        if (request.getConditionGrade() != null) {
+            order.setConditionGrade(request.getConditionGrade());
+        }
+        if (request.getTamperSealId() != null) {
+            order.setTamperSealId(request.getTamperSealId());
+        }
+        if (request.getBarcode() != null) {
+            order.setBarcode(request.getBarcode());
+        }
 
         if (request.getChecklistResults() != null && !request.getChecklistResults().isEmpty()) {
             try {
@@ -482,11 +504,19 @@ public class InspectionServiceImpl implements InspectionService {
         Role inspectorRole = roleRepository.findByCode("INSPECTOR")
                 .orElseThrow(() -> new RuntimeException("Role INSPECTOR không tồn tại trong database"));
 
+        User manager = managerId != null ? userRepository.findById(managerId).orElse(null) : null;
+
         User newInspector = new User();
         newInspector.setEmail(email);
         newInspector.setPasswordHash(passwordEncoder.encode(password));
         newInspector.setAccountStatus(AccountStatus.ACTIVE);
         newInspector.setEmailVerified(true);
+        newInspector.setManager(manager);
+
+        com.secondlife.secondlife.entity.UserProfile profile =
+                new com.secondlife.secondlife.entity.UserProfile(newInspector, fullName != null && !fullName.isBlank() ? fullName : email, null, null);
+        newInspector.setProfile(profile);
+
         newInspector = userRepository.save(newInspector);
 
         UserRole userRole = new UserRole(newInspector, inspectorRole);
@@ -497,7 +527,13 @@ public class InspectionServiceImpl implements InspectionService {
     @Override
     @Transactional(readOnly = true)
     public List<?> getStaffList(UUID managerId) {
-        return userRepository.findAll().stream()
+        List<User> staffList;
+        if (managerId != null) {
+            staffList = userRepository.findByManagerId(managerId);
+        } else {
+            staffList = List.of();
+        }
+        return staffList.stream()
                 .filter(u -> u.getUserRoles().stream()
                         .anyMatch(ur -> "INSPECTOR".equals(ur.getRole().getCode())))
                 .map(userMapper::toSummaryResponse)

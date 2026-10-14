@@ -100,4 +100,30 @@ class AdminInspectionControllerTest {
                 .andExpect(jsonPath("$.data.id").value(proposalId.toString()))
                 .andExpect(jsonPath("$.data.status").value("APPROVED"));
     }
+
+    @Test
+    @DisplayName("POST /api/v1/admin/inspection-fee-proposals/{id}/review: FE gọi alias route duyệt proposal")
+    void testReviewFeeProposalAlias() throws Exception {
+        UUID proposalId = UUID.randomUUID();
+        UUID adminId = UUID.randomUUID();
+
+        ReviewFeeProposalRequest request = new ReviewFeeProposalRequest(true, "Duyệt đề xuất");
+
+        InspectionFeeProposalResponse response = InspectionFeeProposalResponse.builder()
+                .id(proposalId)
+                .status(InspectionFeeProposalStatus.APPROVED)
+                .baseInspectionFee(BigDecimal.valueOf(120000))
+                .build();
+
+        when(currentUserProvider.resolveAdminId(any())).thenReturn(adminId);
+        when(pricingService.reviewProposal(eq(proposalId), eq(adminId), eq(true), anyString())).thenReturn(response);
+
+        mockMvc.perform(post("/api/v1/admin/inspection-fee-proposals/" + proposalId + "/review")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.id").value(proposalId.toString()))
+                .andExpect(jsonPath("$.data.status").value("APPROVED"));
+    }
 }

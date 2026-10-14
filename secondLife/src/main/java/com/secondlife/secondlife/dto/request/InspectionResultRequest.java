@@ -22,5 +22,10 @@ public class InspectionResultRequest {
     private String videoProofUrl; // Video quá trình kiểm tra máy móc
     private String unboxingVideoUrl; // Video khui kiện hàng (nếu gói AT_CENTER)
 
+    private Integer conditionScore;
+    private String conditionGrade;
+    private String tamperSealId;
+    private String barcode;
+
     private List<ChecklistItemResultDto> checklistResults;
 }

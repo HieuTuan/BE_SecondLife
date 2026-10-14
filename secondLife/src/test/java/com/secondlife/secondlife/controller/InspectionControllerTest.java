@@ -25,6 +25,7 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -115,5 +116,78 @@ class InspectionControllerTest {
                 .andExpect(jsonPath("$.id").value(orderId.toString()))
                 .andExpect(jsonPath("$.status").value(InspectionOrderStatus.WAITING_SELLER_APPROVAL.name()))
                 .andExpect(jsonPath("$.inspectionFee").value(100000));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/inspection/quote: Kiểm tra trả về cả cấu trúc lồng nhau atHomePackage và atCenterPackage")
+    void testGetQuoteWithNestedPackages() throws Exception {
+        UUID postId = UUID.randomUUID();
+        InspectionQuoteRequest request = InspectionQuoteRequest.builder()
+                .postId(postId)
+                .build();
+
+        InspectionQuoteResponse response = InspectionQuoteResponse.builder()
+                .postId(postId)
+                .postTitle("Tủ lạnh Samsung Inverter")
+                .baseInspectionFee(BigDecimal.valueOf(100000))
+                .atHomePackage(InspectionQuoteResponse.AtHomePackageDto.builder()
+                        .distanceKm(BigDecimal.valueOf(35.0))
+                        .travelFeeOneWay(BigDecimal.valueOf(117500))
+                        .travelFeeRoundTrip(BigDecimal.valueOf(235000))
+                        .totalFee(BigDecimal.valueOf(335000))
+                        .suggestedSplit50(BigDecimal.valueOf(167500))
+                        .build())
+                .atCenterPackage(InspectionQuoteResponse.AtCenterPackageDto.builder()
+                        .shippingToCenterFee(BigDecimal.valueOf(45000))
+                        .returnReserveFee(BigDecimal.valueOf(45000))
+                        .totalFee(BigDecimal.valueOf(190000))
+                        .suggestedSplit50(BigDecimal.valueOf(95000))
+                        .build())
+                .build();
+
+        when(pricingService.quote(any(InspectionQuoteRequest.class))).thenReturn(response);
+
+        mockMvc.perform(post("/api/v1/inspection/quote")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.baseFee").value(100000))
+                .andExpect(jsonPath("$.atHomePackage.totalFee").value(335000))
+                .andExpect(jsonPath("$.atHomePackage.suggestedSplit50").value(167500))
+                .andExpect(jsonPath("$.atCenterPackage.totalFee").value(190000))
+                .andExpect(jsonPath("$.atCenterPackage.suggestedSplit50").value(95000));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/inspection/requests: Buyer gửi buyerConsentZinLoss boolean alias thành công")
+    void testRequestInspectionWithZinConsentAlias() throws Exception {
+        UUID postId = UUID.randomUUID();
+        UUID buyerId = UUID.randomUUID();
+
+        String payload = """
+                {
+                    "postId": "%s",
+                    "orderType": "AT_HOME",
+                    "feePayer": "SPLIT_50_50",
+                    "buyerConsentZinLoss": true
+                }
+                """.formatted(postId);
+
+        InspectionOrderResponse response = InspectionOrderResponse.builder()
+                .id(UUID.randomUUID())
+                .postId(postId)
+                .status(InspectionOrderStatus.WAITING_SELLER_APPROVAL.name())
+                .buyerConsentZin(true)
+                .build();
+
+        when(currentUserProvider.resolveUserId(any())).thenReturn(buyerId);
+        when(inspectionService.requestInspection(eq(buyerId), any())).thenReturn(response);
+
+        mockMvc.perform(post("/api/v1/inspection/requests")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value(InspectionOrderStatus.WAITING_SELLER_APPROVAL.name()))
+                .andExpect(jsonPath("$.buyerConsentZin").value(true));
     }
 }

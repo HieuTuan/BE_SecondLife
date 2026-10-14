@@ -146,4 +146,43 @@ class InspectorControllerTest {
                 .andExpect(jsonPath("$.status").value("PASSED"))
                 .andExpect(jsonPath("$.videoProofUrl").value("https://res.cloudinary.com/test/video.mp4"));
     }
+
+    @Test
+    @DisplayName("POST /api/v1/inspector/orders/{orderId}/submit-report: FE gọi submit-report alias kèm conditionScore và tamperSealId")
+    void testSubmitInspectionReportAlias() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        UUID inspectorId = UUID.randomUUID();
+
+        when(currentUserProvider.resolveUserId(any())).thenReturn(inspectorId);
+
+        InspectionResultRequest request = new InspectionResultRequest();
+        request.setStatus("PASSED");
+        request.setNote("Bo mạch nguyên bản");
+        request.setConditionScore(95);
+        request.setConditionGrade("Like New");
+        request.setTamperSealId("SL-SEAL-8829102");
+        request.setBarcode("SL-BC-998877");
+
+        InspectionOrderResponse response = InspectionOrderResponse.builder()
+                .id(orderId)
+                .status("PASSED")
+                .conditionScore(95)
+                .conditionGrade("Like New")
+                .tamperSealId("SL-SEAL-8829102")
+                .barcode("SL-BC-998877")
+                .build();
+
+        when(inspectionService.submitResult(eq(orderId), eq(inspectorId), any(InspectionResultRequest.class)))
+                .thenReturn(response);
+
+        mockMvc.perform(post("/api/v1/inspector/orders/" + orderId + "/submit-report")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PASSED"))
+                .andExpect(jsonPath("$.conditionScore").value(95))
+                .andExpect(jsonPath("$.conditionGrade").value("Like New"))
+                .andExpect(jsonPath("$.tamperSealId").value("SL-SEAL-8829102"))
+                .andExpect(jsonPath("$.barcode").value("SL-BC-998877"));
+    }
 }

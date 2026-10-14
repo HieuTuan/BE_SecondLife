@@ -116,6 +116,18 @@ public class InspectionOrder {
     @Column(name = "final_shipping_fee", precision = 18, scale = 2)
     private BigDecimal finalShippingFee;
 
+    @Column(name = "condition_score")
+    private Integer conditionScore;
+
+    @Column(name = "condition_grade", length = 50)
+    private String conditionGrade;
+
+    @Column(name = "tamper_seal_id", length = 100)
+    private String tamperSealId;
+
+    @Column(name = "barcode", length = 100, unique = true)
+    private String barcode;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

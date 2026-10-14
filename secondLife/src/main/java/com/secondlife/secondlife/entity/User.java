@@ -56,6 +56,10 @@ public class User {
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private Set<UserRole> userRoles = new HashSet<>();
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "manager_id")
+    private User manager;
+
     public User(String email, String passwordHash, AccountStatus accountStatus) {
         this.email = email != null ? email.trim().toLowerCase() : null;
         this.passwordHash = passwordHash;

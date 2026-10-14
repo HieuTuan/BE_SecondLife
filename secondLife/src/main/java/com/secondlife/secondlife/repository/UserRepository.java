@@ -50,5 +50,7 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
            "JOIN ur.role r " +
            "WHERE r.code = 'ADMIN' AND u.accountStatus = 'ACTIVE'")
     long countActiveAdmins();
+
+    java.util.List<User> findByManagerId(UUID managerId);
 }
 

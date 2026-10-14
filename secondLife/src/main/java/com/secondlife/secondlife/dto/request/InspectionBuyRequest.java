@@ -1,5 +1,7 @@
 package com.secondlife.secondlife.dto.request;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.secondlife.secondlife.dto.shipping.ShippingAddressRequest;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionOrderType;
@@ -27,10 +29,10 @@ public class InspectionBuyRequest {
     private InspectionFeePayer feePayer;
 
     @AssertTrue(message = "Bạn cần đồng ý với điều khoản tháo máy kiểm định có thể làm mất trạng thái zin ban đầu")
+    @JsonAlias({"buyerConsentZinLoss", "buyerConsentZin"})
     private boolean buyerConsentZin;
 
     @Valid
-    @NotNull(message = "Địa chỉ nhận hàng của người mua là bắt buộc")
     private ShippingAddressRequest buyerDeliveryAddress;
 
     private String note;
@@ -47,7 +49,12 @@ public class InspectionBuyRequest {
         return buyerDeliveryAddress != null ? buyerDeliveryAddress.longitude() : null;
     }
 
+    @JsonProperty("buyerConsentZinLoss")
     public boolean isBuyerConsentZinLoss() {
         return buyerConsentZin;
+    }
+
+    public void setBuyerConsentZinLoss(boolean buyerConsentZinLoss) {
+        this.buyerConsentZin = buyerConsentZinLoss;
     }
 }

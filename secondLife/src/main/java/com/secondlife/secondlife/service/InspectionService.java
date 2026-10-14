@@ -61,6 +61,7 @@ public interface InspectionService {
      * Manager phân công nhân viên cho đơn kiểm định
      */
     InspectionOrderResponse assignInspector(UUID orderId, UUID inspectorId);
+    InspectionOrderResponse assignInspector(UUID orderId, UUID inspectorId, UUID managerId);
 
     /**
      * Inspector nộp kết quả kiểm định kèm video bằng chứng và checklist

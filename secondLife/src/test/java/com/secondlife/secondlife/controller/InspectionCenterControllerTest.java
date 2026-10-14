@@ -97,7 +97,9 @@ class InspectionCenterControllerTest {
                 .status("DISPATCHED")
                 .build();
 
-        when(inspectionService.assignInspector(orderId, inspectorId)).thenReturn(response);
+        UUID managerId = UUID.randomUUID();
+        when(currentUserProvider.resolveUserId(any())).thenReturn(managerId);
+        when(inspectionService.assignInspector(eq(orderId), eq(inspectorId), any())).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/inspector-center/orders/" + orderId + "/assign")
                         .param("inspectorId", inspectorId.toString()))

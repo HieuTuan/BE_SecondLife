@@ -64,7 +64,7 @@ public class InspectorController {
         return ResponseEntity.ok(checklistService.getByCategoryId(categoryId));
     }
 
-    @PostMapping("/orders/{orderId}/result")
+    @PostMapping(value = {"/orders/{orderId}/result", "/orders/{orderId}/submit-report"})
     @PreAuthorize("hasAuthority('INSPECTION_REPORT_SUBMIT')")
     @Operation(summary = "Kỹ thuật viên nộp biên bản kết quả kiểm định kèm video bằng chứng và chi tiết checklist")
     public ResponseEntity<InspectionOrderResponse> submitInspectionResult(

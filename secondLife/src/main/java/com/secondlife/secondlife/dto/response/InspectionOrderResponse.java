@@ -67,6 +67,11 @@ public class InspectionOrderResponse {
     private BigDecimal finalItemPrice;
     private BigDecimal finalShippingFee;
 
+    private Integer conditionScore;
+    private String conditionGrade;
+    private String tamperSealId;
+    private String barcode;
+
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -126,6 +131,11 @@ public class InspectionOrderResponse {
         res.setFinalPaymentPaidAt(order.getFinalPaymentPaidAt());
         res.setFinalItemPrice(order.getFinalItemPrice());
         res.setFinalShippingFee(order.getFinalShippingFee());
+
+        res.setConditionScore(order.getConditionScore());
+        res.setConditionGrade(order.getConditionGrade());
+        res.setTamperSealId(order.getTamperSealId());
+        res.setBarcode(order.getBarcode());
 
         res.setCreatedAt(order.getCreatedAt());
         res.setUpdatedAt(order.getUpdatedAt());

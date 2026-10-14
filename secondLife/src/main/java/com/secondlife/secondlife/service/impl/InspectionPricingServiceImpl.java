@@ -93,6 +93,25 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
         BigDecimal atCenterTotal = baseFee.add(shippingToCenterFee).add(returnReserveFee);
         Map<String, BigDecimal> atCenterSplits = calculateSplits(atCenterTotal);
 
+        BigDecimal atHomeSplit50 = atHomeTotal.divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
+        BigDecimal atCenterSplit50 = atCenterTotal.divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
+
+        InspectionQuoteResponse.AtHomePackageDto atHomePkg = InspectionQuoteResponse.AtHomePackageDto.builder()
+                .distanceKm(travelResult.getDistanceKm())
+                .travelFeeOneWay(travelResult.getOneWayFee())
+                .travelFeeRoundTrip(travelResult.getRoundTripFee())
+                .totalFee(atHomeTotal)
+                .suggestedSplit50(atHomeSplit50)
+                .tiersBreakdown(travelResult.getAppliedTiers())
+                .build();
+
+        InspectionQuoteResponse.AtCenterPackageDto atCenterPkg = InspectionQuoteResponse.AtCenterPackageDto.builder()
+                .shippingToCenterFee(shippingToCenterFee)
+                .returnReserveFee(returnReserveFee)
+                .totalFee(atCenterTotal)
+                .suggestedSplit50(atCenterSplit50)
+                .build();
+
         return InspectionQuoteResponse.builder()
                 .postId(post.getId())
                 .postTitle(post.getTitle())
@@ -108,6 +127,8 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
                 .returnShippingReserveFee(returnReserveFee)
                 .atCenterTotalFee(atCenterTotal)
                 .atCenterSplitOptions(atCenterSplits)
+                .atHomePackage(atHomePkg)
+                .atCenterPackage(atCenterPkg)
                 .build();
     }
 

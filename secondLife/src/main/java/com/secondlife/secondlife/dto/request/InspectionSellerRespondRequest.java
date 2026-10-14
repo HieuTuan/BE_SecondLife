@@ -1,5 +1,7 @@
 package com.secondlife.secondlife.dto.request;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionOrderType;
 import jakarta.validation.constraints.NotBlank;
@@ -20,14 +22,26 @@ public class InspectionSellerRespondRequest {
     private InspectionOrderType counterOrderType;
     private InspectionFeePayer counterFeePayer;
 
+    @JsonAlias({"sellerConsentZinLoss", "sellerConsentZin"})
     private boolean sellerConsentZin;
+
+    @JsonAlias({"rejectReason", "rejectionReason"})
     private String rejectionReason;
 
     public String getRejectReason() {
         return rejectionReason;
     }
 
+    public void setRejectReason(String rejectReason) {
+        this.rejectionReason = rejectReason;
+    }
+
+    @JsonProperty("sellerConsentZinLoss")
     public boolean isSellerConsentZinLoss() {
         return sellerConsentZin;
+    }
+
+    public void setSellerConsentZinLoss(boolean sellerConsentZinLoss) {
+        this.sellerConsentZin = sellerConsentZinLoss;
     }
 }
