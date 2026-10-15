@@ -71,26 +71,18 @@ public class ReverseGeocodingService {
         BigDecimal latKey = latitude.setScale(4, RoundingMode.HALF_UP);
         BigDecimal lonKey = longitude.setScale(4, RoundingMode.HALF_UP);
 
+        var division = VietnameseAdministrativeAreas.locate(latitude.doubleValue(), longitude.doubleValue());
+        GeocodedLocationCache cacheEntry = null;
         if (cacheRepository != null) {
             try {
-                var cached = cacheRepository.findByLatKeyAndLonKey(latKey, lonKey);
-                if (cached.isPresent()) {
-                    var c = cached.get();
-                    var city = policy.allowedCity(c.getCity()) != null
-                            ? policy.allowedCity(c.getCity())
-                            : policy.allowedAdministrativeCity(c.getCity());
-                    if (city != null) {
-                        return new GeocodedAddressResponse(
-                                c.getFormattedAddress(),
-                                latitude.stripTrailingZeros(),
-                                longitude.stripTrailingZeros(),
-                                city,
-                                c.getCountry(),
-                                c.getPlaceId()
-                        );
-                    }
+                cacheEntry = cacheRepository.findByLatKeyAndLonKey(latKey, lonKey).orElse(null);
+                if (isCurrentCacheEntry(cacheEntry, division)) {
+                    return new GeocodedAddressResponse(cacheEntry.getFormattedAddress(), latitude.stripTrailingZeros(),
+                            longitude.stripTrailingZeros(), division.city(), "VN", cacheEntry.getPlaceId());
                 }
-            } catch (Exception ignored) {}
+            } catch (RuntimeException ignored) {
+                // Cache availability must not prevent address resolution.
+            }
         }
 
         if (!properties.isEnabled() || properties.getApiKey() == null || properties.getApiKey().isBlank())
@@ -112,33 +104,6 @@ public class ReverseGeocodingService {
                     throw new ShippingProviderException("Geoapify không xử lý được yêu cầu; kiểm tra API key, quyền truy cập và hạn mức", response.getStatusCode().value());
                 return mapper.readTree(readBounded(response.getBody()));
             });
-        } catch(ShippingProviderException error) { throw error; }
-        catch(ResourceAccessException error) {
-            boolean timeout=false;
-            for(Throwable cause=error;cause!=null;cause=cause.getCause())
-                if(cause instanceof java.net.SocketTimeoutException || cause instanceof java.net.http.HttpTimeoutException) timeout=true;
-            throw new ShippingProviderException(timeout?"Geoapify request timed out":"Geoapify is unavailable",timeout?504:502);
-        }
-        catch(RuntimeException error) { throw malformed(); }
-        // Do not retain upstream errors: they can contain the API key in the request URL.
-        if(root==null || !root.isObject()) throw malformed();
-        if(!root.path("results").isArray()) throw malformed();
-        if(root.path("results").isEmpty()) throw new BadRequestException("Không tìm thấy địa chỉ tại tọa độ này");
-        for(var result:root.path("results")) {
-            if(!result.isObject()) throw malformed();
-            if(!Set.of("street","building","amenity").contains(result.path("result_type").asText())) continue;
-            String country=result.path("country_code").asText().strip().toUpperCase(Locale.ROOT);
-            if(!"VN".equals(country)) throw new BadRequestException("Địa chỉ nằm ngoài khu vực phục vụ Hà Nội, Đà Nẵng và Thành phố Hồ Chí Minh");
-            var division=VietnameseAdministrativeAreas.locate(latitude.doubleValue(),longitude.doubleValue());
-            if(division==null || policy.allowedCity(division.city().name())==null)
-                throw new BadRequestException("Địa chỉ nằm ngoài khu vực phục vụ Hà Nội, Đà Nẵng và Thành phố Hồ Chí Minh");
-            String original=result.path("formatted").asText();
-            if(original.isBlank() || original.length()>500) throw malformed();
-            String address=CurrentVietnameseAddress.format(result,division);
-            return new GeocodedAddressResponse(address,latitude.stripTrailingZeros(),longitude.stripTrailingZeros(),division.city(),country,result.path("place_id").asText(null));
-        }
-        throw new BadRequestException("Không tìm thấy địa chỉ đường hoặc tòa nhà; vui lòng chọn tọa độ chính xác hơn");
-
             if (root == null || !root.isObject() || !root.path("results").isArray()) throw malformed();
             if (root.path("results").isEmpty()) throw new BadRequestException("Không tìm thấy địa chỉ tại tọa độ này");
 
@@ -146,13 +111,13 @@ public class ReverseGeocodingService {
                 if (!result.isObject()) throw malformed();
                 if (!Set.of("street", "building", "amenity").contains(result.path("result_type").asText())) continue;
                 String country = result.path("country_code").asText().strip().toUpperCase(Locale.ROOT);
-                String state = result.path("state").asText("").strip();
-                var city = state.isBlank() ? policy.allowedCity(result.path("city").asText("")) : policy.allowedAdministrativeCity(state);
-                if (!"VN".equals(country) || city == null)
+                if (!"VN".equals(country) || division == null || policy.allowedCity(division.city().name()) == null)
                     throw new BadRequestException("Địa chỉ nằm ngoài khu vực phục vụ Hà Nội, Đà Nẵng và Thành phố Hồ Chí Minh");
-                String address = result.path("formatted").asText();
-                if (address.isBlank() || address.length() > 500) throw malformed();
-                resolved = new GeocodedAddressResponse(address, latitude.stripTrailingZeros(), longitude.stripTrailingZeros(), city, country, result.path("place_id").asText(null));
+                String original = result.path("formatted").asText();
+                if (original.isBlank() || original.length() > 500) throw malformed();
+                String address = CurrentVietnameseAddress.format(result, division);
+                resolved = new GeocodedAddressResponse(address, latitude.stripTrailingZeros(), longitude.stripTrailingZeros(),
+                        division.city(), country, result.path("place_id").asText(null));
                 break;
             }
             if (resolved == null) {
@@ -184,57 +149,71 @@ public class ReverseGeocodingService {
         // 4. Lưu kết quả thành công vào cache
         if (resolved != null && cacheRepository != null) {
             try {
-                cacheRepository.save(new GeocodedLocationCache(
-                        latKey,
-                        lonKey,
-                        resolved.address(),
-                        resolved.city().name(),
-                        resolved.countryCode(),
-                        resolved.placeId()
-                ));
-            } catch (Exception ignored) {}
+                if (cacheEntry == null) cacheEntry = new GeocodedLocationCache();
+                cacheEntry.setLatKey(latKey);
+                cacheEntry.setLonKey(lonKey);
+                cacheEntry.setFormattedAddress(resolved.address());
+                cacheEntry.setCity(resolved.city().name());
+                cacheEntry.setCountry(resolved.countryCode());
+                cacheEntry.setPlaceId(resolved.placeId());
+                cacheRepository.save(cacheEntry);
+            } catch (RuntimeException ignored) {}
         }
 
         return resolved;
     }
 
+    private boolean isCurrentCacheEntry(GeocodedLocationCache entry, VietnameseAdministrativeAreas.Division division) {
+        if (entry == null || division == null || policy.allowedCity(division.city().name()) == null
+                || !"VN".equals(entry.getCountry()) || entry.getFormattedAddress() == null) return false;
+        var city = policy.allowedCity(entry.getCity());
+        if (city == null) city = policy.allowedAdministrativeCity(entry.getCity());
+        if (city != division.city()) return false;
+        // Legacy cache rows have only formatted text. Refresh instead of trusting stale administrative labels.
+        var result = mapper.createObjectNode().put("formatted", entry.getFormattedAddress());
+        try {
+            return entry.getFormattedAddress().equals(CurrentVietnameseAddress.format(result, division));
+        } catch (BadRequestException invalid) {
+            return false;
+        }
+    }
+
     private GeocodedAddressResponse fallbackNominatim(BigDecimal latitude, BigDecimal longitude) {
         try {
-            var uri = UriComponentsBuilder.fromUriString("https://nominatim.openstreetmap.org/reverse")
+            var uri = UriComponentsBuilder.fromUriString(properties.getFallbackBaseUrl())
                     .queryParam("lat", latitude.stripTrailingZeros().toPlainString())
                     .queryParam("lon", longitude.stripTrailingZeros().toPlainString())
                     .queryParam("format", "json")
                     .queryParam("addressdetails", "1")
-                    .queryParam("accept-language", "vi")
+                    .queryParam("accept-language", properties.getLanguage())
                     .build().encode().toUri();
 
             JsonNode root = client().get().uri(uri)
-                    .header("User-Agent", "SecondLife-Platform/1.0 (support@secondlife.tech)")
+                    .header("User-Agent", properties.getFallbackUserAgent())
                     .accept(MediaType.APPLICATION_JSON)
                     .exchange((request, response) -> {
                         if (!response.getStatusCode().is2xxSuccessful()) return null;
                         return mapper.readTree(readBounded(response.getBody()));
                     });
 
-            if (root != null && root.has("display_name")) {
-                String address = root.path("display_name").asText();
-                JsonNode addr = root.path("address");
-                String country = addr.path("country_code").asText("").strip().toUpperCase(Locale.ROOT);
-                String state = addr.path("state").asText("").strip();
-                String cityStr = addr.path("city").asText("").strip();
-                if (cityStr.isBlank()) cityStr = addr.path("province").asText("").strip();
-                if (cityStr.isBlank()) cityStr = state;
-
-                var city = policy.allowedAdministrativeCity(state) != null
-                        ? policy.allowedAdministrativeCity(state)
-                        : policy.allowedCity(cityStr);
-
-                if ("VN".equals(country) && city != null && !address.isBlank()) {
-                    String placeId = "osm-" + root.path("osm_id").asText("0");
-                    return new GeocodedAddressResponse(address, latitude.stripTrailingZeros(), longitude.stripTrailingZeros(), city, country, placeId);
-                }
-            }
-        } catch (Throwable ignored) {}
+            if (root == null || !root.isObject() || !root.path("address").isObject()) return null;
+            String original = root.path("display_name").asText("");
+            if (original.isBlank() || original.length() > 500) return null;
+            JsonNode addr = root.path("address");
+            String country = addr.path("country_code").asText("").strip().toUpperCase(Locale.ROOT);
+            var division = VietnameseAdministrativeAreas.locate(latitude.doubleValue(), longitude.doubleValue());
+            if (!"VN".equals(country) || division == null || policy.allowedCity(division.city().name()) == null) return null;
+            var normalized = mapper.createObjectNode().put("formatted", original);
+            addr.properties().forEach(e -> normalized.set(e.getKey(), e.getValue()));
+            normalized.put("street", addr.path("road").asText(""));
+            normalized.put("housenumber", addr.path("house_number").asText(""));
+            String address = CurrentVietnameseAddress.format(normalized, division);
+            String placeId = "osm-" + root.path("osm_id").asText("0");
+            return new GeocodedAddressResponse(address, latitude.stripTrailingZeros(), longitude.stripTrailingZeros(),
+                    division.city(), country, placeId);
+        } catch (RuntimeException ignored) {
+            // Preserve the sanitized primary error if the fallback also fails.
+        }
         return null;
     }
 

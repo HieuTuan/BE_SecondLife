@@ -10,5 +10,12 @@ import java.util.UUID;
 
 @Repository
 public interface GeocodedLocationCacheRepository extends JpaRepository<GeocodedLocationCache, UUID> {
+    @org.springframework.transaction.annotation.Transactional(readOnly = true,
+            propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     Optional<GeocodedLocationCache> findByLatKeyAndLonKey(BigDecimal latKey, BigDecimal lonKey);
+
+    @Override
+    @org.springframework.transaction.annotation.Transactional(
+            propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    <S extends GeocodedLocationCache> S save(S entity);
 }

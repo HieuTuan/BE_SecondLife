@@ -17,7 +17,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
-import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -89,36 +88,6 @@ public class DepositServiceImpl implements DepositService {
             return;
         }
 
-        // SePay extracts the matching code, e.g., SL123456
-        String code = webhookDTO.getCode();
-        if (code == null || code.isEmpty()) {
-            log.info("No code found in transaction {}", webhookDTO.getId());
-            return;
-        }
-
-        Optional<DepositRequest> optionalDeposit = depositRequestRepository.findByCodeForUpdate(code);
-        if (optionalDeposit.isEmpty()) {
-            log.info("Deposit request with code {} not found", code);
-            return;
-        }
-
-        DepositRequest depositRequest = optionalDeposit.get();
-
-        if (depositRequest.getStatus() == DepositStatus.COMPLETED) {
-            log.info("Deposit request {} already completed", code);
-            return;
-        }
-
-        // Call WalletService to deposit the actual amount received
-        walletService.deposit(
-                depositRequest.getUser().getId(),
-                webhookDTO.getTransferAmount(),
-                depositRequest.getId());
-
-        depositRequest.setStatus(DepositStatus.COMPLETED);
-        depositRequest.setSepayTransactionId(webhookDTO.getId());
-        depositRequestRepository.save(depositRequest);
-        log.info("Successfully processed deposit {} for user {}", code, depositRequest.getUser().getId());
         var request=depositRequestRepository.findByIdForUpdate(initial.get().getId()).orElseThrow();
         if(!ledger.claim(webhookDTO,code)) return;
         walletService.deposit(request.getUser().getId(),webhookDTO.getTransferAmount(),request.getId());
