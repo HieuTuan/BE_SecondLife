@@ -28,10 +28,22 @@ public class NotificationController {
 
     private final NotificationService notificationService;
     private final CurrentUserProvider currentUserProvider;
+    private final com.secondlife.secondlife.repository.UserDeviceTokenRepository deviceTokenRepository;
+    private final com.secondlife.secondlife.repository.UserRepository userRepository;
 
-    public NotificationController(NotificationService notificationService, CurrentUserProvider currentUserProvider) {
+    @org.springframework.beans.factory.annotation.Autowired
+    public NotificationController(NotificationService notificationService,
+                                  CurrentUserProvider currentUserProvider,
+                                  com.secondlife.secondlife.repository.UserDeviceTokenRepository deviceTokenRepository,
+                                  com.secondlife.secondlife.repository.UserRepository userRepository) {
         this.notificationService = notificationService;
         this.currentUserProvider = currentUserProvider;
+        this.deviceTokenRepository = deviceTokenRepository;
+        this.userRepository = userRepository;
+    }
+
+    public NotificationController(NotificationService notificationService, CurrentUserProvider currentUserProvider) {
+        this(notificationService, currentUserProvider, null, null);
     }
 
     @GetMapping
@@ -106,5 +118,38 @@ public class NotificationController {
             @AuthenticationPrincipal CustomUserDetails userDetails) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(notificationService.clearAllNotifications(userId));
+    }
+
+    @PostMapping("/devices")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Đăng ký hoặc cập nhật FCM device token cho thiết bị di động")
+    public ResponseEntity<com.secondlife.secondlife.common.ApiResponse<Void>> registerDevice(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @jakarta.validation.Valid @RequestBody com.secondlife.secondlife.dto.request.DeviceTokenRequest request) {
+        UUID userId = currentUserProvider.resolveUserId(userDetails);
+        com.secondlife.secondlife.entity.User user = userRepository.findById(userId).orElseThrow();
+
+        var existing = deviceTokenRepository.findByToken(request.getToken());
+        if (existing.isPresent()) {
+            var token = existing.get();
+            token.setUser(user);
+            token.setDeviceType(request.getDeviceType() != null ? request.getDeviceType().toUpperCase() : token.getDeviceType());
+            token.setLastUsedAt(java.time.Instant.now());
+            deviceTokenRepository.save(token);
+        } else {
+            deviceTokenRepository.save(new com.secondlife.secondlife.entity.UserDeviceToken(
+                    user, request.getToken(), request.getDeviceType()));
+        }
+        return ResponseEntity.ok(com.secondlife.secondlife.common.ApiResponse.success("Đăng ký token thiết bị thành công", null));
+    }
+
+    @DeleteMapping("/devices/{token}")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Hủy đăng ký FCM device token khi người dùng đăng xuất khỏi thiết bị")
+    @org.springframework.transaction.annotation.Transactional
+    public ResponseEntity<com.secondlife.secondlife.common.ApiResponse<Void>> unregisterDevice(
+            @PathVariable String token) {
+        deviceTokenRepository.deleteByToken(token);
+        return ResponseEntity.ok(com.secondlife.secondlife.common.ApiResponse.success("Hủy đăng ký token thiết bị thành công", null));
     }
 }

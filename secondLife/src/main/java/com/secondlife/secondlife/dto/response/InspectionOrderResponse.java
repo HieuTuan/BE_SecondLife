@@ -58,6 +58,10 @@ public class InspectionOrderResponse {
     private String checklistResultJson;
     private String videoProofUrl;
     private String unboxingVideoUrl;
+    private String videoCleanupStatus; // ACTIVE, CLEANED, EXEMPTED
+    private String videoCleanedMessage;
+    private Instant videoCleanedAt;
+    private Instant videoRetentionUntil;
 
     private boolean buyerConsentZin;
     private boolean sellerConsentZin;
@@ -123,6 +127,12 @@ public class InspectionOrderResponse {
         res.setChecklistResultJson(order.getChecklistResultJson());
         res.setVideoProofUrl(order.getVideoProofUrl());
         res.setUnboxingVideoUrl(order.getUnboxingVideoUrl());
+        res.setVideoCleanupStatus(order.getVideoCleanupStatus());
+        res.setVideoCleanedAt(order.getVideoCleanedAt());
+        res.setVideoRetentionUntil(order.getVideoRetentionUntil());
+        if ("CLEANED".equals(order.getVideoCleanupStatus())) {
+            res.setVideoCleanedMessage("Video bằng chứng đã được hệ thống tự động dọn dẹp an toàn sau 48h hoàn tất giao dịch theo Chính sách Bảo mật Dữ liệu.");
+        }
 
         res.setBuyerConsentZin(order.isBuyerConsentZin());
         res.setSellerConsentZin(order.isSellerConsentZin());

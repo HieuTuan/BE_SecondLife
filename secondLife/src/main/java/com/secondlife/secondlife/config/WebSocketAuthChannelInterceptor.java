@@ -51,6 +51,17 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
                     }
                 }
             }
+        } else if (accessor != null && StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
+            String destination = accessor.getDestination();
+            if (destination != null) {
+                // Chống rò rỉ: Bắt buộc đã xác thực danh tính User khi subscribe vào private destination hoặc notifications
+                if (destination.startsWith("/user/") || destination.startsWith("/queue/") || destination.contains("notifications")) {
+                    if (accessor.getUser() == null) {
+                        log.warn("Chặn truy cập trái phép: Người dùng chưa xác thực cố gắng subscribe vào {}", destination);
+                        throw new org.springframework.security.access.AccessDeniedException("Cần đăng nhập để đăng ký nhận thông báo từ " + destination);
+                    }
+                }
+            }
         }
         return message;
     }

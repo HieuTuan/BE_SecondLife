@@ -95,8 +95,23 @@ public class InspectionOrder {
     @Column(name = "video_proof_url", columnDefinition = "TEXT")
     private String videoProofUrl;
 
+    @Column(name = "video_proof_public_id", length = 255)
+    private String videoProofPublicId;
+
     @Column(name = "unboxing_video_url", columnDefinition = "TEXT")
     private String unboxingVideoUrl;
+
+    @Column(name = "unboxing_video_public_id", length = 255)
+    private String unboxingVideoPublicId;
+
+    @Column(name = "video_cleanup_status", length = 30)
+    private String videoCleanupStatus = "ACTIVE"; // ACTIVE, CLEANED, EXEMPTED
+
+    @Column(name = "video_cleaned_at")
+    private Instant videoCleanedAt;
+
+    @Column(name = "video_retention_until")
+    private Instant videoRetentionUntil;
 
     @Column(name = "buyer_consent_zin")
     private boolean buyerConsentZin = false;

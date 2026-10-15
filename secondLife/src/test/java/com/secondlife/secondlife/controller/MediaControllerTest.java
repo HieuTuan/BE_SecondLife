@@ -110,4 +110,30 @@ class MediaControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.publicId").value("configured-folder/photo"));
     }
+
+    @Test
+    void uploadVideo_WhenValid_ShouldReturn201WithResponse() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "timelapse.mp4", "video/mp4", "fake-video-bytes".getBytes()
+        );
+
+        MediaUploadResponse response = new MediaUploadResponse(
+                "https://res.cloudinary.com/dmcodhbcc/video/upload/v1/timelapse.mp4",
+                "secondlife/inspections/videos/timelapse",
+                "mp4",
+                20480L,
+                "timelapse.mp4"
+        );
+
+        when(mediaService.uploadVideo(any(), any())).thenReturn(response);
+
+        mockMvc.perform(multipart("/api/v1/media/upload-video")
+                        .file(file)
+                        .param("folder", "secondlife/inspections/videos"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message").value("Tải video lên thành công"))
+                .andExpect(jsonPath("$.data.url").value("https://res.cloudinary.com/dmcodhbcc/video/upload/v1/timelapse.mp4"))
+                .andExpect(jsonPath("$.data.publicId").value("secondlife/inspections/videos/timelapse"));
+    }
 }

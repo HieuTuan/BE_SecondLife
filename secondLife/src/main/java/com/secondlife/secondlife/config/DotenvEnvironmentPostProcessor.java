@@ -70,7 +70,10 @@ public class DotenvEnvironmentPostProcessor implements EnvironmentPostProcessor 
         Path[] searchPaths = new Path[]{
                 Paths.get(".env"),
                 Paths.get(System.getProperty("user.dir", "."), ".env"),
-                Paths.get("..", ".env")
+                Paths.get("secondLife", ".env"),
+                Paths.get(System.getProperty("user.dir", "."), "secondLife", ".env"),
+                Paths.get("..", ".env"),
+                Paths.get("..", "secondLife", ".env")
         };
 
         for (Path p : searchPaths) {

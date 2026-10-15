@@ -20,7 +20,10 @@ public class InspectionResultRequest {
     private String note; // Ghi chú chi tiết kết quả kiểm định
 
     private String videoProofUrl; // Video quá trình kiểm tra máy móc
+    private String videoProofPublicId; // Cloudinary publicId của video kiểm định
+
     private String unboxingVideoUrl; // Video khui kiện hàng (nếu gói AT_CENTER)
+    private String unboxingVideoPublicId; // Cloudinary publicId của video mở hộp
 
     private Integer conditionScore;
     private String conditionGrade;

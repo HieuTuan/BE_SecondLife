@@ -6,7 +6,6 @@ import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.DepositService;
 import com.secondlife.secondlife.service.WalletService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -17,12 +16,19 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/wallets")
-@RequiredArgsConstructor
 public class WalletController {
 
     private final WalletService walletService;
     private final DepositService depositService;
     private final CurrentUserProvider currentUserProvider;
+
+    public WalletController(WalletService walletService,
+                            DepositService depositService,
+                            CurrentUserProvider currentUserProvider) {
+        this.walletService = walletService;
+        this.depositService = depositService;
+        this.currentUserProvider = currentUserProvider;
+    }
 
     @GetMapping("/me")
     @PreAuthorize("isAuthenticated()")
@@ -68,5 +74,45 @@ public class WalletController {
                 .build());
                 
         return ResponseEntity.ok(com.secondlife.secondlife.common.PageResponse.from(dtoPage));
+    }
+
+    @PostMapping("/withdrawals")
+    @PreAuthorize("isAuthenticated()")
+    @io.swagger.v3.oas.annotations.Operation(summary = "Yêu cầu rút tiền từ ví về tài khoản ngân hàng")
+    public ResponseEntity<com.secondlife.secondlife.dto.response.WalletWithdrawalResponse> requestWithdrawal(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @jakarta.validation.Valid @RequestBody com.secondlife.secondlife.dto.request.WalletWithdrawalRequest request) {
+        UUID userId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(walletService.requestWithdrawal(userId, request));
+    }
+
+    @GetMapping("/withdrawals")
+    @PreAuthorize("isAuthenticated()")
+    @io.swagger.v3.oas.annotations.Operation(summary = "Lịch sử yêu cầu rút tiền của người dùng")
+    public ResponseEntity<com.secondlife.secondlife.common.PageResponse<com.secondlife.secondlife.dto.response.WalletWithdrawalResponse>> getMyWithdrawals(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @org.springdoc.core.annotations.ParameterObject org.springframework.data.domain.Pageable pageable) {
+        UUID userId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(com.secondlife.secondlife.common.PageResponse.from(walletService.getMyWithdrawals(userId, pageable)));
+    }
+
+    @GetMapping("/admin/withdrawals")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('ADMIN_RBAC_MANAGE')")
+    @io.swagger.v3.oas.annotations.Operation(summary = "Admin xem danh sách yêu cầu rút tiền")
+    public ResponseEntity<com.secondlife.secondlife.common.PageResponse<com.secondlife.secondlife.dto.response.WalletWithdrawalResponse>> getAllWithdrawals(
+            @RequestParam(required = false) String status,
+            @org.springdoc.core.annotations.ParameterObject org.springframework.data.domain.Pageable pageable) {
+        return ResponseEntity.ok(com.secondlife.secondlife.common.PageResponse.from(walletService.getAllWithdrawals(status, pageable)));
+    }
+
+    @PostMapping("/admin/withdrawals/{id}/review")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('ADMIN_RBAC_MANAGE')")
+    @io.swagger.v3.oas.annotations.Operation(summary = "Admin phê duyệt hoặc từ chối yêu cầu rút tiền")
+    public ResponseEntity<com.secondlife.secondlife.dto.response.WalletWithdrawalResponse> reviewWithdrawal(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID id,
+            @jakarta.validation.Valid @RequestBody com.secondlife.secondlife.dto.request.WalletWithdrawalReviewRequest request) {
+        UUID adminId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(walletService.reviewWithdrawal(adminId, id, request));
     }
 }

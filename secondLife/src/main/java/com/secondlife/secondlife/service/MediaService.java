@@ -10,4 +10,6 @@ public interface MediaService {
     MediaUploadResponse uploadImage(MultipartFile file, String folder);
 
     List<MediaUploadResponse> uploadImages(List<MultipartFile> files, String folder);
+
+    MediaUploadResponse uploadVideo(MultipartFile file, String folder);
 }

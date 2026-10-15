@@ -25,7 +25,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/inspector")
-@RequiredArgsConstructor
 @Tag(name = "Inspector Execution Station", description = "APIs dành cho Kỹ thuật viên kiểm định thực thi quy trình nghiệp vụ")
 public class InspectorController {
 
@@ -33,6 +32,16 @@ public class InspectorController {
     private final InspectionChecklistService checklistService;
     private final InspectionOrderRepository orderRepository;
     private final CurrentUserProvider currentUserProvider;
+
+    public InspectorController(InspectionService inspectionService,
+                               InspectionChecklistService checklistService,
+                               InspectionOrderRepository orderRepository,
+                               CurrentUserProvider currentUserProvider) {
+        this.inspectionService = inspectionService;
+        this.checklistService = checklistService;
+        this.orderRepository = orderRepository;
+        this.currentUserProvider = currentUserProvider;
+    }
 
     @GetMapping("/orders")
     @PreAuthorize("hasAuthority('INSPECTION_ORDER_READ_SELF')")
@@ -62,6 +71,16 @@ public class InspectorController {
 
         UUID categoryId = order.getPost() != null ? order.getPost().getCategoryId() : null;
         return ResponseEntity.ok(checklistService.getByCategoryId(categoryId));
+    }
+
+    @PostMapping("/orders/{orderId}/start")
+    @PreAuthorize("hasAuthority('INSPECTION_REPORT_SUBMIT')")
+    @Operation(summary = "Kỹ thuật viên bắt đầu tiến hành kiểm định sản phẩm (chuyển trạng thái sang INSPECTING)")
+    public ResponseEntity<InspectionOrderResponse> startInspection(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID orderId) {
+        UUID inspectorId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(inspectionService.startInspection(inspectorId, orderId));
     }
 
     @PostMapping(value = {"/orders/{orderId}/result", "/orders/{orderId}/submit-report"})

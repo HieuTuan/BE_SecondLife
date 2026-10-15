@@ -21,6 +21,8 @@ public class SettlementServiceImpl implements SettlementService {
     private final WalletService wallets;
     private final SystemWalletService systemWallet;
     private final SellerReputationService reputation;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private InspectionOrderRepository inspectionOrders;
 
     @Override @Transactional(propagation = Propagation.MANDATORY)
     public SettlementResponse settle(Order requestedOrder) {
@@ -47,6 +49,15 @@ public class SettlementServiceImpl implements SettlementService {
         order.setEscrowStatus(EscrowStatus.RELEASED);
         orders.saveAndFlush(order);
         reputation.recordCompletedSale(order);
+
+        if (inspectionOrders != null) {
+            inspectionOrders.findByOrderId(order.getId()).ifPresent(io -> {
+                if ("ACTIVE".equals(io.getVideoCleanupStatus())) {
+                    io.setVideoRetentionUntil(Instant.now().plus(48, java.time.temporal.ChronoUnit.HOURS));
+                    inspectionOrders.save(io);
+                }
+            });
+        }
         return SettlementResponse.from(settlement);
     }
     @Override @Transactional(readOnly = true)

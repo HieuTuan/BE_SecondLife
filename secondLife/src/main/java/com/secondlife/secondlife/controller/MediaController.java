@@ -19,11 +19,14 @@ import java.util.List;
 @RestController
 @PreAuthorize("hasAuthority('MEDIA_UPLOAD_SELF')")
 @RequestMapping("/api/v1/media")
-@RequiredArgsConstructor
 @Tag(name = "Media Storage", description = "Media and file upload APIs via Cloudinary")
 public class MediaController {
 
     private final MediaService mediaService;
+
+    public MediaController(MediaService mediaService) {
+        this.mediaService = mediaService;
+    }
 
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Upload a single image file (JPG, PNG, WEBP) to Cloudinary and return CDN URL")
@@ -49,5 +52,18 @@ public class MediaController {
         List<MediaUploadResponse> response = mediaService.uploadImages(files, folder);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Tải danh sách ảnh lên thành công", response));
+    }
+
+    @PostMapping(value = "/upload-video", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Upload a single video file (MP4, MOV, WEBM <= 100MB) to Cloudinary and return CDN URL and publicId")
+    public ResponseEntity<ApiResponse<MediaUploadResponse>> uploadVideo(
+            @Parameter(description = "Video file to upload", required = true)
+            @RequestParam("file") MultipartFile file,
+            @Parameter(description = "Target folder on Cloudinary; omitted values use secondlife/inspections/videos")
+            @RequestParam(value = "folder", required = false, defaultValue = "secondlife/inspections/videos") String folder
+    ) {
+        MediaUploadResponse response = mediaService.uploadVideo(file, folder);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("Tải video lên thành công", response));
     }
 }

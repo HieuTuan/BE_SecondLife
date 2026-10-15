@@ -26,7 +26,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -38,6 +38,12 @@ class NotificationControllerTest {
 
     @Mock
     private CurrentUserProvider currentUserProvider;
+
+    @Mock
+    private com.secondlife.secondlife.repository.UserDeviceTokenRepository deviceTokenRepository;
+
+    @Mock
+    private com.secondlife.secondlife.repository.UserRepository userRepository;
 
     @InjectMocks
     private NotificationController notificationController;
@@ -188,5 +194,37 @@ class NotificationControllerTest {
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.affectedCount").value(12));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/notifications/devices: Đăng ký token thiết bị FCM thành công")
+    void testRegisterDeviceToken() throws Exception {
+        UUID userId = UUID.randomUUID();
+        when(currentUserProvider.resolveUserId(any())).thenReturn(userId);
+
+        com.secondlife.secondlife.entity.User user = new com.secondlife.secondlife.entity.User();
+        user.setId(userId);
+        when(userRepository.findById(userId)).thenReturn(java.util.Optional.of(user));
+        when(deviceTokenRepository.findByToken("test_fcm_token_123")).thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(post("/api/v1/notifications/devices")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"test_fcm_token_123\",\"deviceType\":\"ANDROID\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message").value("Đăng ký token thiết bị thành công"));
+
+        verify(deviceTokenRepository, times(1)).save(any());
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/notifications/devices/{token}: Hủy đăng ký token thiết bị FCM khi đăng xuất")
+    void testUnregisterDeviceToken() throws Exception {
+        mockMvc.perform(delete("/api/v1/notifications/devices/test_fcm_token_123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message").value("Hủy đăng ký token thiết bị thành công"));
+
+        verify(deviceTokenRepository, times(1)).deleteByToken("test_fcm_token_123");
     }
 }

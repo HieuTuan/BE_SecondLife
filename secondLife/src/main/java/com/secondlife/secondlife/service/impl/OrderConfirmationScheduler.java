@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.UUID;
 @Slf4j @Component
-@ConditionalOnProperty(name="app.orders.confirmation.enabled",havingValue="true")
+@ConditionalOnProperty(name="app.orders.confirmation.enabled",havingValue="true",matchIfMissing=false)
 public class OrderConfirmationScheduler {
     private final OrderRepository orders;
     private final OrderConfirmationService confirmations;
