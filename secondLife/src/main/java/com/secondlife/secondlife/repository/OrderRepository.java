@@ -36,6 +36,8 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     @org.springframework.data.jpa.repository.Query("select o from Order o where o.id=:id")
     java.util.Optional<Order> findByIdForUpdate(@org.springframework.data.repository.query.Param("id") UUID id);
+    @org.springframework.data.jpa.repository.Query("select o.post.id from Order o where o.id=:id")
+    java.util.Optional<UUID> findPostId(@org.springframework.data.repository.query.Param("id") UUID id);
     java.util.Optional<Order> findByBuyerIdAndRequestId(UUID buyerId, UUID requestId);
     Page<Order> findByBuyerId(UUID buyerId, Pageable pageable);
     Page<Order> findByConfirmationDeadlineIsNotNull(Pageable pageable);

@@ -17,6 +17,9 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor
 public class Order {
+    @Enumerated(EnumType.STRING)
+    @Column(nullable=false, length=20)
+    private com.secondlife.secondlife.enums.OrderPaymentMethod paymentMethod = com.secondlife.secondlife.enums.OrderPaymentMethod.WALLET;
     private UUID shippingQuoteId;
     @Column(nullable=false, precision=18, scale=2) private BigDecimal shippingFee=BigDecimal.ZERO;
     @Column(columnDefinition="TEXT") private String deliveryAddress;

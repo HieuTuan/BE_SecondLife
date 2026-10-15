@@ -14,6 +14,11 @@ import java.util.UUID;
 @Getter
 @Setter
 public class DepositRequest {
+    @Column(unique=true) private UUID orderId;
+    private Instant expiresAt;
+    @Column(nullable=false,precision=18,scale=2) private BigDecimal receivedAmount = BigDecimal.ZERO;
+    @Column(nullable=false,precision=18,scale=2) private BigDecimal allocatedAmount = BigDecimal.ZERO;
+    @Column(nullable=false,precision=18,scale=2) private BigDecimal walletCreditedAmount = BigDecimal.ZERO;
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;

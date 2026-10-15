@@ -65,6 +65,9 @@ public class OrderConfirmationService {
     }
     @Transactional
     public boolean processIfDue(UUID id) {
+        var postId=orders.findPostId(id);
+        if(postId.isEmpty()) return false;
+        posts.findByIdForUpdate(postId.get()).orElseThrow(()->new NotFoundException("Post not found"));
         var found=orders.findByIdForUpdate(id);
         if(found.isEmpty()) return false;
         var o=found.get();
@@ -81,7 +84,7 @@ public class OrderConfirmationService {
 
         var refund=o.getFinalPrice();
         if(shipping.stream().allMatch(x->x.getOrderCode()==null)) refund=refund.add(o.getShippingFee());
-        // Keep order -> system wallet -> buyer wallet -> reputation lock ordering, like ordinary cancellation.
+        // Stock is already locked; continue order -> system wallet -> buyer wallet -> reputation ordering.
         systemWallet.refund(o,refund);
         wallets.processRefund(o.getBuyer().getId(),refund,id);
         o.setStatus(OrderStatus.CANCELLED);o.setEscrowStatus(EscrowStatus.REFUNDED);

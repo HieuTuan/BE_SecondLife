@@ -58,6 +58,20 @@ public class OrderServiceImpl implements OrderService {
     private final com.secondlife.secondlife.service.SellerReputationService reputation;
     private final com.secondlife.secondlife.service.NotificationService notificationService;
     private final com.secondlife.secondlife.service.OrderConfirmationService confirmations;
+    @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager entityManager;
+    private com.secondlife.secondlife.service.payment.PaidOrderService paidOrders;
+    private com.secondlife.secondlife.service.payment.OrderBankPaymentService bankPayments;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public OrderServiceImpl(OrderRepository orders,PostRepository posts,UserRepository users,NegotiationRepository negotiations,
+            WalletService wallets,ShippingQuoteService quotes,ShipmentRepository shipments,CommissionService commissions,
+            SettlementService settlements,SystemWalletService systemWallet,com.secondlife.secondlife.service.SellerReputationService reputation,
+            com.secondlife.secondlife.service.NotificationService notifications,com.secondlife.secondlife.service.OrderConfirmationService confirmations,
+            com.secondlife.secondlife.service.payment.PaidOrderService paidOrders,
+            com.secondlife.secondlife.service.payment.OrderBankPaymentService bankPayments) {
+        this(orders,posts,users,negotiations,wallets,quotes,shipments,commissions,settlements,systemWallet,reputation,notifications,confirmations);
+        this.paidOrders=paidOrders; this.bankPayments=bankPayments;
+    }
 
     public OrderServiceImpl(OrderRepository orderRepository,PostRepository postRepository,UserRepository userRepository,
             NegotiationRepository negotiationRepository,WalletService walletService,ShippingQuoteService shippingQuotes,
@@ -68,7 +82,6 @@ public class OrderServiceImpl implements OrderService {
                 commissions,settlements,systemWallet,reputation,notificationService,null);
     }
 
-    @org.springframework.beans.factory.annotation.Autowired
     public OrderServiceImpl(
             OrderRepository orderRepository,
             PostRepository postRepository,
@@ -97,6 +110,8 @@ public class OrderServiceImpl implements OrderService {
         this.reputation = java.util.Objects.requireNonNull(reputation, "SellerReputationService is required");
         this.notificationService = notificationService;
         this.confirmations = confirmations;
+        this.paidOrders = new com.secondlife.secondlife.service.payment.PaidOrderService(orderRepository,postRepository,
+            negotiationRepository,walletService,systemWallet,reputation,notificationService,userRepository);
     }
 
     public OrderServiceImpl(
@@ -126,6 +141,7 @@ public class OrderServiceImpl implements OrderService {
         if (replay.isPresent()) {
             var previous=replay.get();
             if (!previous.getPost().getId().equals(requestDTO.getPostId())
+                    || previous.getPaymentMethod()!=requestDTO.getPaymentMethod()
                     || !java.util.Objects.equals(previous.getShippingQuoteId(),requestDTO.getShippingQuoteId())
                     || !java.util.Objects.equals(previous.getNegotiation()==null?null:previous.getNegotiation().getId(),requestDTO.getNegotiationId()))
                 throw new ConflictException("requestId was already used with different order details");
@@ -184,62 +200,20 @@ public class OrderServiceImpl implements OrderService {
         order.setNegotiation(negotiation);
         order.setFinalPrice(finalPrice);
         order.setRequestId(requestDTO.getRequestId());
-        order.setStatus(OrderStatus.PROCESSING); // assuming payment is immediate
-        order.setEscrowStatus(EscrowStatus.HELD);
-        
+        order.setPaymentMethod(requestDTO.getPaymentMethod());
+        order.setStatus(OrderStatus.PENDING_PAYMENT);
+        order.setEscrowStatus(EscrowStatus.PENDING);
+
         order = orderRepository.saveAndFlush(order);
         commissions.capture(order, buyerId, "Order created");
         var shippingQuote=shippingQuotes.consume(buyerId,post.getId(),requestDTO.getShippingQuoteId(),order.getId(),finalPrice);
         order.setShippingQuoteId(shippingQuote.getId()); order.setShippingFee(shippingQuote.getFee()); order.setDeliveryAddress(shippingQuote.getDeliveryAddress());
         orderRepository.save(order);
 
-        // Deduct money from buyer. This will throw an exception if insufficient balance
-        systemWallet.hold(order);
-        walletService.processPayment(buyerId, finalPrice.add(order.getShippingFee()), order.getId());
-        reputation.initializePaidOrder(order);
-        orderRepository.save(order);
-
-        // Update post status so it can't be bought again
-        post.setStatus("SOLD");
-        postRepository.save(post);
-
-        // Update negotiation status
-        if (negotiation != null) {
-            negotiation.setStatus(NegotiationStatus.COMPLETED);
-            negotiationRepository.save(negotiation);
-        }
-
-        if (notificationService != null) {
-            notificationService.notifyWithEmail(
-                    buyer,
-                    "Đặt hàng thành công",
-                    "Đơn hàng #" + order.getId() + " cho sản phẩm '" + post.getTitle() + "' đã được tạo thành công và giữ tiền ký quỹ an toàn.",
-                    "ORDER",
-                    order.getId(),
-                    "ORDER",
-                    "/buyer/orders/" + order.getId(),
-                    "Xác nhận đơn hàng #" + order.getId() + " - SecondLife",
-                    "Đơn hàng #" + order.getId() + " cho sản phẩm '" + post.getTitle() + "' đã được tạo thành công với tổng số tiền " + finalPrice.add(order.getShippingFee()) + " VND. Khoản tiền đang được giữ an toàn trong ví ký quỹ SecondLife."
-            );
-            notificationService.notifyWithEmail(
-                    post.getUser(),
-                    "Bạn có đơn hàng mới!",
-                    "Khách hàng vừa đặt đơn hàng #" + order.getId() + " cho sản phẩm '" + post.getTitle() + "'. Vui lòng xác nhận trước " + order.getConfirmationDeadline() + ".",
-                    "ORDER",
-                    order.getId(),
-                    "ORDER",
-                    "/seller/orders/" + order.getId(),
-                    "Thông báo đơn hàng mới #" + order.getId() + " - SecondLife",
-                    "Bạn vừa nhận được đơn hàng mới #" + order.getId() + " cho sản phẩm '" + post.getTitle() + "'. Vui lòng truy cập hệ thống để chuẩn bị và xác nhận đơn hàng."
-            );
-        }
-
-        if (notificationService != null) {
-            for (UUID staffId : userRepository.findActiveOrderReviewStaffIds()) {
-                notificationService.notify(staffId,"Đơn hàng mới chờ SELLER xác nhận",
-                    "Đơn hàng #"+order.getId()+" đã thanh toán, chờ người bán xác nhận trước "+order.getConfirmationDeadline(),
-                    "ORDER",order.getId(),"ORDER","/staff/orders/"+order.getId());
-            }
+        if (requestDTO.getPaymentMethod()==com.secondlife.secondlife.enums.OrderPaymentMethod.BANK_TRANSFER) {
+            bankPayments.begin(order);
+        } else {
+            paidOrders.complete(order,true);
         }
         return mapToDTO(order);
     }
@@ -314,8 +288,13 @@ public class OrderServiceImpl implements OrderService {
 
     @Override @Transactional
     public OrderResponseDTO cancelOrder(UUID userId,UUID orderId,com.secondlife.secondlife.dto.reputation.CancelOrderRequest request) {
+        var initial=orderRepository.findById(orderId).orElseThrow(() -> new NotFoundException("Order not found"));
+        if (initial.getPaymentMethod()==com.secondlife.secondlife.enums.OrderPaymentMethod.BANK_TRANSFER
+                && initial.getPaidAt()==null) return mapToDTO(bankPayments.cancel(userId,orderId));
+        postRepository.findByIdForUpdate(initial.getPost().getId()).orElseThrow(() -> new NotFoundException("Post not found"));
         Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new NotFoundException("Order not found"));
+        if(entityManager!=null) entityManager.refresh(order,jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
 
         if (!order.getBuyer().getId().equals(userId) && !order.getSeller().getId().equals(userId)) {
             throw new BadRequestException("You are not authorized to cancel this order");
@@ -417,7 +396,13 @@ public class OrderServiceImpl implements OrderService {
         dto.setNegotiationId(order.getNegotiation() != null ? order.getNegotiation().getId() : null);
         dto.setFinalPrice(order.getFinalPrice());
         dto.setShippingQuoteId(order.getShippingQuoteId()); dto.setShippingFee(order.getShippingFee());
-        dto.setTotalPaid(order.getFinalPrice().add(order.getShippingFee())); dto.setShippingDeliveredAt(order.getShippingDeliveredAt());
+        dto.setPaymentMethod(order.getPaymentMethod());
+        dto.setTotalAmount(order.getFinalPrice().add(order.getShippingFee()));
+        dto.setTotalPaid(order.getPaymentMethod()==com.secondlife.secondlife.enums.OrderPaymentMethod.BANK_TRANSFER && order.getPaidAt()==null
+            ? BigDecimal.ZERO : dto.getTotalAmount());
+        if (order.getPaymentMethod()==com.secondlife.secondlife.enums.OrderPaymentMethod.BANK_TRANSFER)
+            dto.setPayment(bankPayments.details(order));
+        dto.setShippingDeliveredAt(order.getShippingDeliveredAt());
         dto.setStatus(order.getStatus());
         dto.setEscrowStatus(order.getEscrowStatus());
         dto.setCreatedAt(order.getCreatedAt());

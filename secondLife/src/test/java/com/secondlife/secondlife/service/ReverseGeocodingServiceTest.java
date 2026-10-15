@@ -26,6 +26,56 @@ class ReverseGeocodingServiceTest {
         var builder=RestClient.builder();var service=new ReverseGeocodingService(properties,new ShippingCatalogPolicy(cities,mapper),mapper,builder);
         return new Module(service,MockRestServiceServer.bindTo(builder).build(),properties);
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "10.7769,106.7009,Hồ Chí Minh,Phường Bến Nghé,Quận 1,Phường Sài Gòn,Thành phố Hồ Chí Minh",
+        "21.0333,105.7937,Hà Nội,Phường Dịch Vọng,Quận Cầu Giấy,Phường Cầu Giấy,Thành phố Hà Nội",
+        "16.0544,108.2022,Đà Nẵng,Phường Hòa Thuận Tây,Quận Hải Châu,Phường Hoà Cường,Thành phố Đà Nẵng",
+        "15.8801,108.338,Quảng Nam,Phường Minh An,Thành phố Hội An,Phường Hội An,Thành phố Đà Nẵng"
+    })
+    void resolvesCurrentWardByCoordinatesAndRemovesLegacyAdministrativeText(String lat,String lng,String state,
+            String oldWard,String oldDistrict,String newWard,String newCity) {
+        var module=module();var latitude=new BigDecimal(lat);var longitude=new BigDecimal(lng);
+        String formatted="12 Đường thử nghiệm, "+oldWard+", "+oldDistrict+", "+state+", Việt Nam";
+        var body=mapper.writeValueAsString(Map.of("results",List.of(Map.of("formatted",formatted,
+            "result_type","building","country_code","vn","state",state,"suburb",oldWard,
+            "county",oldDistrict,"housenumber","12","street","Đường thử nghiệm"))));
+        reply(module,body,latitude,longitude);
+        var result=module.service.reverse(latitude,longitude);
+        assertEquals("12 Đường thử nghiệm, "+newWard+", "+newCity+", Việt Nam",result.address());
+        assertEquals(latitude,result.latitude());assertEquals(longitude,result.longitude());module.server.verify();
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "hcm,10.7769,106.7009,Phường Sài Gòn,Thành phố Hồ Chí Minh",
+        "hanoi,21.0333,105.7937,Phường Cầu Giấy,Thành phố Hà Nội",
+        "danang,16.0544,108.2022,Phường Hoà Cường,Thành phố Đà Nẵng"
+    })
+    void capturedLiveProviderResponsesProduceCurrentTwoLevelAddresses(String file,String lat,String lng,String ward,String city) throws Exception {
+        var module=module();var latitude=new BigDecimal(lat);var longitude=new BigDecimal(lng);
+        String captured=new org.springframework.core.io.ClassPathResource("geocoding/captured-"+file+".json")
+            .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        reply(module,captured,latitude,longitude);
+        var address=module.service.reverse(latitude,longitude).address();
+        assertTrue(address.endsWith(ward+", "+city+", Việt Nam"));
+        assertFalse(address.contains("Thành phố Thủ Đức"));assertFalse(address.contains("HC 71006"));
+        module.server.verify();
+    }
+    @Test void outsideCoordinateCannotBeAcceptedByClaimingAnAllowedCity() {
+        var module=module();var latitude=new BigDecimal("10.045");var longitude=new BigDecimal("105.7469");
+        reply(module,response("Hồ Chí Minh","VN","12 Street","building"),latitude,longitude);
+        assertThrows(BadRequestException.class,()->module.service.reverse(latitude,longitude));module.server.verify();
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"Xã Đàn","Huyện Thanh Quan"})
+    void streetNamesThatResembleAdministrativePrefixesRemainPhysicalAddresses(String street) {
+        var module=module();
+        String body=mapper.writeValueAsString(Map.of("results",List.of(Map.of("formatted",street+", Hà Nội",
+            "street",street,"result_type","street","country_code","vn","state","Hà Nội"))));
+        reply(module,body);
+        assertTrue(module.service.reverse(lat(),lng()).address().startsWith(street+", "));
+        module.server.verify();
+    }
     private BigDecimal lat() { return new BigDecimal("21.0333"); }
     private BigDecimal lng() { return new BigDecimal("105.7937"); }
     private String response(String city,String country,String address,String type) {
@@ -45,7 +95,7 @@ class ReverseGeocodingServiceTest {
     void allowedCityIsResolvedUsingStructuredComponents(String city) {
         var module=module();reply(module,response(city,"VN","Địa chỉ do Geoapify xác định","street"));
         var result=module.service.reverse(lat(),lng());
-        assertEquals("Địa chỉ do Geoapify xác định",result.address());assertEquals(lat(),result.latitude());assertEquals(lng(),result.longitude());
+        assertEquals("Địa chỉ do Geoapify xác định, Phường Cầu Giấy, Thành phố Hà Nội, Việt Nam",result.address());assertEquals(lat(),result.latitude());assertEquals(lng(),result.longitude());
         assertNotNull(result.city());assertEquals("VN",result.countryCode());module.server.verify();
     }
     @Test void studentCulturalHousePointReportedUnderLegacyBinhDuongBelongsToHoChiMinh() throws Exception {
@@ -57,18 +107,21 @@ class ReverseGeocodingServiceTest {
         var result=module.service.reverse(latitude,longitude);
         assertEquals(ShippingCatalogProperties.City.HO_CHI_MINH,result.city());
         assertEquals(latitude,result.latitude());assertEquals(longitude,result.longitude());
-        assertEquals(mapper.readTree(captured).path("results").get(0).path("formatted").asText(),result.address());
+        assertTrue(result.address().endsWith("Phường Đông Hoà, Thành phố Hồ Chí Minh, Việt Nam"));
+        assertFalse(result.address().contains("Thành phố Dĩ An"));assertFalse(result.address().contains("Phường Linh Xuân"));
         module.server.verify();
     }
     @ParameterizedTest @ValueSource(strings={"Bình Dương","Tỉnh Bình Dương","Binh Duong Province","Bà Rịa - Vũng Tàu","Ba Ria-Vung Tau Province"})
     void mergedHoChiMinhProvincesAreRecognizedFromLegacyGeocodingState(String state) {
-        var module=module();reply(module,response(state,"VN","Địa chỉ do Geoapify xác định","street"));
-        assertEquals(ShippingCatalogProperties.City.HO_CHI_MINH,module.service.reverse(lat(),lng()).city());module.server.verify();
+        var module=module();var latitude=new BigDecimal("10.906");var longitude=new BigDecimal("106.769");
+        reply(module,response(state,"VN","Địa chỉ do Geoapify xác định","street"),latitude,longitude);
+        assertEquals(ShippingCatalogProperties.City.HO_CHI_MINH,module.service.reverse(latitude,longitude).city());module.server.verify();
     }
     @ParameterizedTest @ValueSource(strings={"Quảng Nam","Tỉnh Quảng Nam","Quang Nam Province"})
     void mergedDaNangProvinceIsRecognizedFromLegacyGeocodingState(String state) {
-        var module=module();reply(module,response(state,"VN","Địa chỉ do Geoapify xác định","building"));
-        assertEquals(ShippingCatalogProperties.City.DANANG,module.service.reverse(lat(),lng()).city());module.server.verify();
+        var module=module();var latitude=new BigDecimal("15.8801");var longitude=new BigDecimal("108.338");
+        reply(module,response(state,"VN","Địa chỉ do Geoapify xác định","building"),latitude,longitude);
+        assertEquals(ShippingCatalogProperties.City.DANANG,module.service.reverse(latitude,longitude).city());module.server.verify();
     }
     @Test void foreignCountryCannotPassByUsingALegacyMergedProvinceName() {
         var module=module();reply(module,response("Bình Dương","TH","Street","street"));
@@ -77,13 +130,14 @@ class ReverseGeocodingServiceTest {
     @Test void shippingAddressUsesOnlyProviderTextAndPreservesContactsAndInputPoint() {
         var module=module();reply(module,response("Hà Nội","VN","123 Cầu Giấy, Hà Nội, Việt Nam","building"));
         var result=module.service.shipping(new ShippingAddressRequest(" Seller "," 0912345678 ",lat(),lng()));
-        assertEquals("123 Cầu Giấy, Hà Nội, Việt Nam",result.address());assertEquals("Seller",result.name());assertEquals("0912345678",result.phone());
+        assertEquals("123 Cầu Giấy, Phường Cầu Giấy, Thành phố Hà Nội, Việt Nam",result.address());assertEquals("Seller",result.name());assertEquals("0912345678",result.phone());
         module.server.verify();
     }
     @ParameterizedTest @ValueSource(strings={"Cần Thơ","Hải Phòng","Hà Nội giả","Đồng Nai","Bình Phước","Long An","Bình Dương giả"})
     void citiesOutsideServiceAreaAreRejected(String city) {
-        var module=module();reply(module,response(city,"VN","Street, Hà Nội","street"));
-        assertThrows(BadRequestException.class,()->module.service.reverse(lat(),lng()));module.server.verify();
+        var module=module();var latitude=new BigDecimal("10.045");var longitude=new BigDecimal("105.7469");
+        reply(module,response(city,"VN","Street, Hà Nội","street"),latitude,longitude);
+        assertThrows(BadRequestException.class,()->module.service.reverse(latitude,longitude));module.server.verify();
     }
     @Test void foreignCountryCannotPassByUsingAnAllowedCityName() {
         var module=module();reply(module,response("Hà Nội","TH","Street","street"));
@@ -94,14 +148,14 @@ class ReverseGeocodingServiceTest {
         reply(module,"{\"results\":[{\"result_type\":\"building\",\"formatted\":\"123 Street, Hà Nội\",\"country_code\":\"vn\",\"city\":\"Hà Nội\"}]}");
         assertEquals(ShippingCatalogProperties.City.HANOI,module.service.reverse(lat(),lng()).city());module.server.verify();
     }
-    @Test void allowedCityNameCannotOverrideAnOutsideState() {
+    @Test void coordinateBoundaryIsAuthoritativeWhenProviderAdministrativeNamesAreStale() {
         var module=module();
         reply(module,"{\"results\":[{\"result_type\":\"street\",\"formatted\":\"Street\",\"country_code\":\"vn\",\"state\":\"Đồng Nai\",\"city\":\"Ho Chi Minh City\"}]}");
-        assertThrows(BadRequestException.class,()->module.service.reverse(lat(),lng()));module.server.verify();
+        assertEquals(ShippingCatalogProperties.City.HANOI,module.service.reverse(lat(),lng()).city());module.server.verify();
     }
     @Test void amenityLocationCanSupplyAPhysicalPickupAddress() {
         var module=module();reply(module,response("Hà Nội","vn","Tòa nhà, Hà Nội","amenity"));
-        assertEquals("Tòa nhà, Hà Nội",module.service.reverse(lat(),lng()).address());module.server.verify();
+        assertEquals("Tòa nhà, Phường Cầu Giấy, Thành phố Hà Nội, Việt Nam",module.service.reverse(lat(),lng()).address());module.server.verify();
     }
     @Test void connectionFailureIsSanitizedAndClassifiedAsBadGateway() {
         var module=module();module.server.expect(requestTo(org.hamcrest.Matchers.startsWith(URL+"?")))

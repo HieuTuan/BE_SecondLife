@@ -77,7 +77,7 @@ public class InspectionServiceImpl implements InspectionService {
     @Override
     @Transactional
     public InspectionOrderResponse requestInspection(UUID buyerId, InspectionBuyRequest request) {
-        Post post = postRepository.findById(request.getPostId())
+        Post post = postRepository.findByIdForUpdate(request.getPostId())
                 .orElseThrow(() -> new NotFoundException("Bài đăng không tồn tại"));
 
         if (post.getUser() != null && post.getUser().getId().equals(buyerId)) {

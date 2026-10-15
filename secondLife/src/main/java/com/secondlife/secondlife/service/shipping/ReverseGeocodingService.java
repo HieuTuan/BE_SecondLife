@@ -73,13 +73,14 @@ public class ReverseGeocodingService {
             if(!result.isObject()) throw malformed();
             if(!Set.of("street","building","amenity").contains(result.path("result_type").asText())) continue;
             String country=result.path("country_code").asText().strip().toUpperCase(Locale.ROOT);
-            // Normalize legacy province names; an unrelated state still cannot be overridden by city text.
-            String state=result.path("state").asText("").strip();
-            var city=state.isBlank()?policy.allowedCity(result.path("city").asText("")):policy.allowedAdministrativeCity(state);
-            if(!"VN".equals(country) || city==null) throw new BadRequestException("Địa chỉ nằm ngoài khu vực phục vụ Hà Nội, Đà Nẵng và Thành phố Hồ Chí Minh");
-            String address=result.path("formatted").asText();
-            if(address.isBlank() || address.length()>500) throw malformed();
-            return new GeocodedAddressResponse(address,latitude.stripTrailingZeros(),longitude.stripTrailingZeros(),city,country,result.path("place_id").asText(null));
+            if(!"VN".equals(country)) throw new BadRequestException("Địa chỉ nằm ngoài khu vực phục vụ Hà Nội, Đà Nẵng và Thành phố Hồ Chí Minh");
+            var division=VietnameseAdministrativeAreas.locate(latitude.doubleValue(),longitude.doubleValue());
+            if(division==null || policy.allowedCity(division.city().name())==null)
+                throw new BadRequestException("Địa chỉ nằm ngoài khu vực phục vụ Hà Nội, Đà Nẵng và Thành phố Hồ Chí Minh");
+            String original=result.path("formatted").asText();
+            if(original.isBlank() || original.length()>500) throw malformed();
+            String address=CurrentVietnameseAddress.format(result,division);
+            return new GeocodedAddressResponse(address,latitude.stripTrailingZeros(),longitude.stripTrailingZeros(),division.city(),country,result.path("place_id").asText(null));
         }
         throw new BadRequestException("Không tìm thấy địa chỉ đường hoặc tòa nhà; vui lòng chọn tọa độ chính xác hơn");
     }

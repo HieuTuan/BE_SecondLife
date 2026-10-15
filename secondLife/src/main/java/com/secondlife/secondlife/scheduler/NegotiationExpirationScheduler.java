@@ -23,6 +23,7 @@ public class NegotiationExpirationScheduler {
     private final NegotiationRepository negotiationRepository;
     private final PostRepository postRepository;
     private final ChatService chatService;
+    @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager entityManager;
 
     // Run every 5 minutes
     @Scheduled(fixedRate = 300000)
@@ -37,16 +38,19 @@ public class NegotiationExpirationScheduler {
         log.info("Found {} expired negotiations. Reverting post statuses.", expiredNegotiations.size());
         
         for (Negotiation negotiation : expiredNegotiations) {
+            Post post=postRepository.findByIdForUpdate(negotiation.getPost().getId()).orElseThrow();
+            entityManager.refresh(post);entityManager.refresh(negotiation);
+            // Checkout owns the reservation until its bank-payment deadline is processed.
+            if("PAYMENT_PENDING".equals(post.getStatus()) || negotiation.getStatus()!=NegotiationStatus.ACCEPTED) continue;
             negotiation.setStatus(NegotiationStatus.EXPIRED);
             negotiationRepository.save(negotiation);
             
-            Post post = negotiation.getPost();
             if ("RESERVED".equals(post.getStatus())) {
                 post.setStatus("ACTIVE");
                 postRepository.save(post);
                 
                 // Notify seller
-                chatService.sendSystemMessage(post.getId(), post.getUser().getId(),
+                chatService.sendSystemMessage(post.getId(), negotiation.getBuyer().getId(),
                     String.format("{\"type\":\"SYSTEM\", \"message\":\"The negotiation with %s has expired because they didn't check out in time. Your product is now ACTIVE again.\"}", negotiation.getBuyer().getEmail()));
                 
                 // Notify buyer

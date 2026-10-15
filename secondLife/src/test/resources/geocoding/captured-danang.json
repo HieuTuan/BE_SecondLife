@@ -1,0 +1,58 @@
+{
+  "results": [
+    {
+      "datasource": {
+        "sourcename": "openstreetmap",
+        "attribution": "© OpenStreetMap contributors",
+        "license": "Open Database License",
+        "url": "https://www.openstreetmap.org/copyright"
+      },
+      "name": "Techcombank ATM",
+      "other_names": {
+        "brand": "Techcombank"
+      },
+      "country": "Việt Nam",
+      "country_code": "vn",
+      "city": "Thành phố Đà Nẵng",
+      "postcode": "84236",
+      "suburb": "Phường Hòa Cường",
+      "street": "Đường Lối vào Ga đến",
+      "iso3166_2": "VN-DN",
+      "lon": 108.2022176,
+      "lat": 16.0544111,
+      "distance": 2.24954980838373,
+      "result_type": "amenity",
+      "county": "Hải Châu",
+      "state": "Đà Nẵng",
+      "state_code": "DA",
+      "formatted": "Techcombank ATM, Đường Lối vào Ga đến, Phường Hòa Cường, Thành phố Đà Nẵng, DA 84236, Việt Nam",
+      "address_line1": "Techcombank ATM",
+      "address_line2": "Đường Lối vào Ga đến, Phường Hòa Cường, Thành phố Đà Nẵng, DA 84236, Việt Nam",
+      "category": "service.financial.atm",
+      "timezone": {
+        "name": "Asia/Ho_Chi_Minh",
+        "offset_STD": "+07:00",
+        "offset_DST": "+07:00",
+        "offset_STD_seconds": 25200,
+        "offset_DST_seconds": 25200
+      },
+      "plus_code": "7P8C3632+QV",
+      "rank": {
+        "importance": 6.461966887917934e-05,
+        "popularity": 2.267827161040303
+      },
+      "place_id": "513dab1622f10c5b4059150ac7e2ed0d3040f00103f901e04001b002000000c0020192030f54656368636f6d62616e6b2041544de203246f70656e7374726565746d61703a76656e75653a6e6f64652f3131353432383036373532",
+      "bbox": {
+        "lon1": 108.2021676,
+        "lat1": 16.0543611,
+        "lon2": 108.2022676,
+        "lat2": 16.0544611
+      }
+    }
+  ],
+  "query": {
+    "lat": 16.0544,
+    "lon": 108.2022,
+    "plus_code": "7P8C3632+QV"
+  }
+}

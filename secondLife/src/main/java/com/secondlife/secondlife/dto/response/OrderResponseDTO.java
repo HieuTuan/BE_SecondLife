@@ -12,6 +12,9 @@ import java.util.UUID;
 @Getter
 @Setter
 public class OrderResponseDTO {
+    private com.secondlife.secondlife.enums.OrderPaymentMethod paymentMethod;
+    private BigDecimal totalAmount;
+    private OrderBankPaymentResponse payment;
     private UUID shippingQuoteId;
     private BigDecimal shippingFee;
     private BigDecimal totalPaid;
