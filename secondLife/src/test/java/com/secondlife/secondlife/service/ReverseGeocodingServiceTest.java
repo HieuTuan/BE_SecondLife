@@ -19,12 +19,98 @@ class ReverseGeocodingServiceTest {
     private static final String URL="https://api.geoapify.com/v1/geocode/reverse";
     private final ObjectMapper mapper=new ObjectMapper();
     private record Module(ReverseGeocodingService service,MockRestServiceServer server,GeocodingProperties properties) {}
-    private Module module() {
+    private Module module() { return module(null); }
+    private Module module(com.secondlife.secondlife.repository.GeocodedLocationCacheRepository cache) {
         var properties=new GeocodingProperties(); properties.setEnabled(true); properties.setApiKey("private-test-key");
+        properties.setFallbackBaseUrl("https://nominatim.openstreetmap.org/reverse"); properties.setFallbackUserAgent("SecondLife-Test/1.0");
         properties.setBaseUrl(URL); properties.setLanguage("vi"); properties.setTimeoutMs(5000); properties.setMaxResponseCharacters(1048576);
         var cities=new ShippingCatalogProperties();cities.setAllowedCities(List.of(ShippingCatalogProperties.City.HANOI,ShippingCatalogProperties.City.DANANG,ShippingCatalogProperties.City.HO_CHI_MINH));
-        var builder=RestClient.builder();var service=new ReverseGeocodingService(properties,new ShippingCatalogPolicy(cities,mapper),mapper,builder);
+        var builder=RestClient.builder();var service=new ReverseGeocodingService(properties,new ShippingCatalogPolicy(cities,mapper),mapper,builder,cache);
         return new Module(service,MockRestServiceServer.bindTo(builder).build(),properties);
+    }
+    private com.secondlife.secondlife.entity.GeocodedLocationCache cached(String address) {
+        var row = new com.secondlife.secondlife.entity.GeocodedLocationCache(lat(), lng(), address,
+                "HANOI", "VN", "cached-place");
+        row.setId(UUID.randomUUID());
+        return row;
+    }
+    @Test void currentCacheEntryAvoidsProviderCall() {
+        var cache = org.mockito.Mockito.mock(com.secondlife.secondlife.repository.GeocodedLocationCacheRepository.class);
+        var row = cached("12 Cầu Giấy, Phường Cầu Giấy, Thành phố Hà Nội, Việt Nam");
+        org.mockito.Mockito.when(cache.findByLatKeyAndLonKey(lat(), lng())).thenReturn(Optional.of(row));
+        var module = module(cache);
+        var result = module.service.reverse(lat(), lng());
+        assertEquals(row.getFormattedAddress(), result.address());
+        assertEquals(ShippingCatalogProperties.City.HANOI, result.city());
+        module.server.verify();
+    }
+    @ParameterizedTest @ValueSource(strings = {
+            "12 Cầu Giấy, Phường Dịch Vọng, Quận Cầu Giấy, Hà Nội, Việt Nam",
+            "12 Cầu Giấy, Phường Sài Gòn, Thành phố Hà Nội, Việt Nam",
+            "12 Cầu Giấy, Quận Cầu Giấy, Phường Cầu Giấy, Thành phố Hà Nội, Việt Nam"})
+    void staleCacheIsRefreshedUsingCurrentWard(String oldAddress) {
+        var cache = org.mockito.Mockito.mock(com.secondlife.secondlife.repository.GeocodedLocationCacheRepository.class);
+        var row = cached(oldAddress);
+        org.mockito.Mockito.when(cache.findByLatKeyAndLonKey(lat(), lng())).thenReturn(Optional.of(row));
+        var module = module(cache);
+        reply(module, response("Hà Nội", "VN", "12 Cầu Giấy, Hà Nội, Việt Nam", "building"));
+        var result = module.service.reverse(lat(), lng());
+        assertEquals("12 Cầu Giấy, Phường Cầu Giấy, Thành phố Hà Nội, Việt Nam", result.address());
+        var saved = org.mockito.ArgumentCaptor.forClass(com.secondlife.secondlife.entity.GeocodedLocationCache.class);
+        org.mockito.Mockito.verify(cache).save(saved.capture());
+        assertEquals(row.getId(), saved.getValue().getId());
+        assertEquals(result.address(), saved.getValue().getFormattedAddress());
+        module.server.verify();
+    }
+    @Test void cachedForeignCountryDoesNotBypassValidation() {
+        var cache = org.mockito.Mockito.mock(com.secondlife.secondlife.repository.GeocodedLocationCacheRepository.class);
+        var row = cached("12 Cầu Giấy, Phường Cầu Giấy, Thành phố Hà Nội, Việt Nam"); row.setCountry("TH");
+        org.mockito.Mockito.when(cache.findByLatKeyAndLonKey(lat(), lng())).thenReturn(Optional.of(row));
+        var module = module(cache);
+        reply(module, response("Hà Nội", "VN", "12 Cầu Giấy, Hà Nội", "building"));
+        assertEquals("VN", module.service.reverse(lat(), lng()).countryCode());
+        module.server.verify();
+    }
+    @Test void cachedCityCannotAuthorizeAnOutsideCoordinate() {
+        var cache = org.mockito.Mockito.mock(com.secondlife.secondlife.repository.GeocodedLocationCacheRepository.class);
+        var latitude = new BigDecimal("10.045"); var longitude = new BigDecimal("105.7469");
+        org.mockito.Mockito.when(cache.findByLatKeyAndLonKey(latitude.setScale(4), longitude)).thenReturn(Optional.of(
+                cached("12 Cầu Giấy, Phường Cầu Giấy, Thành phố Hà Nội, Việt Nam")));
+        var module = module(cache);
+        reply(module, response("Hà Nội", "VN", "12 Cầu Giấy, Hà Nội", "building"), latitude, longitude);
+        assertThrows(BadRequestException.class, () -> module.service.reverse(latitude, longitude));
+        module.server.verify();
+    }
+    private void primaryUnavailable(Module module) {
+        module.server.expect(requestTo(org.hamcrest.Matchers.startsWith(URL + "?")))
+                .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+    }
+    private void fallbackReply(Module module, String body) {
+        module.server.expect(requestTo(org.hamcrest.Matchers.startsWith("https://nominatim.openstreetmap.org/reverse?")))
+                .andExpect(queryParam("lat", lat().toPlainString()))
+                .andExpect(queryParam("lon", lng().toPlainString()))
+                .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+    }
+    @Test void fallbackAlsoRemovesOldDistrictAndUsesCoordinateBoundary() {
+        var module = module(); primaryUnavailable(module);
+        fallbackReply(module, """
+                {"display_name":"12 Xã Đàn, Phường Dịch Vọng, Quận Cầu Giấy, Hà Nội, Việt Nam",
+                 "osm_id":123,"address":{"house_number":"12","road":"Xã Đàn","suburb":"Phường Dịch Vọng",
+                 "county":"Quận Cầu Giấy","state":"Đồng Nai","country_code":"vn"}}
+                """);
+        var result = module.service.reverse(lat(), lng());
+        assertEquals("12 Xã Đàn, Phường Cầu Giấy, Thành phố Hà Nội, Việt Nam", result.address());
+        assertEquals("osm-123", result.placeId());
+        assertEquals(ShippingCatalogProperties.City.HANOI, result.city());
+        module.server.verify();
+    }
+    @Test void failedFallbackKeepsSanitizedPrimaryError() {
+        var module = module(); primaryUnavailable(module);
+        fallbackReply(module, "{\"error\":\"private-test-key\"}");
+        var error = assertThrows(ShippingProviderException.class, () -> module.service.reverse(lat(), lng()));
+        assertEquals(503, error.getUpstreamStatus()); assertNull(error.getCause());
+        assertFalse(error.getMessage().contains("private-test-key"));
+        module.server.verify();
     }
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({
