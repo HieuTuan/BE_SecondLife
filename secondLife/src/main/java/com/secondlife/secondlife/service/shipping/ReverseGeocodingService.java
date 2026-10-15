@@ -112,6 +112,32 @@ public class ReverseGeocodingService {
                     throw new ShippingProviderException("Geoapify không xử lý được yêu cầu; kiểm tra API key, quyền truy cập và hạn mức", response.getStatusCode().value());
                 return mapper.readTree(readBounded(response.getBody()));
             });
+        } catch(ShippingProviderException error) { throw error; }
+        catch(ResourceAccessException error) {
+            boolean timeout=false;
+            for(Throwable cause=error;cause!=null;cause=cause.getCause())
+                if(cause instanceof java.net.SocketTimeoutException || cause instanceof java.net.http.HttpTimeoutException) timeout=true;
+            throw new ShippingProviderException(timeout?"Geoapify request timed out":"Geoapify is unavailable",timeout?504:502);
+        }
+        catch(RuntimeException error) { throw malformed(); }
+        // Do not retain upstream errors: they can contain the API key in the request URL.
+        if(root==null || !root.isObject()) throw malformed();
+        if(!root.path("results").isArray()) throw malformed();
+        if(root.path("results").isEmpty()) throw new BadRequestException("Không tìm thấy địa chỉ tại tọa độ này");
+        for(var result:root.path("results")) {
+            if(!result.isObject()) throw malformed();
+            if(!Set.of("street","building","amenity").contains(result.path("result_type").asText())) continue;
+            String country=result.path("country_code").asText().strip().toUpperCase(Locale.ROOT);
+            if(!"VN".equals(country)) throw new BadRequestException("Địa chỉ nằm ngoài khu vực phục vụ Hà Nội, Đà Nẵng và Thành phố Hồ Chí Minh");
+            var division=VietnameseAdministrativeAreas.locate(latitude.doubleValue(),longitude.doubleValue());
+            if(division==null || policy.allowedCity(division.city().name())==null)
+                throw new BadRequestException("Địa chỉ nằm ngoài khu vực phục vụ Hà Nội, Đà Nẵng và Thành phố Hồ Chí Minh");
+            String original=result.path("formatted").asText();
+            if(original.isBlank() || original.length()>500) throw malformed();
+            String address=CurrentVietnameseAddress.format(result,division);
+            return new GeocodedAddressResponse(address,latitude.stripTrailingZeros(),longitude.stripTrailingZeros(),division.city(),country,result.path("place_id").asText(null));
+        }
+        throw new BadRequestException("Không tìm thấy địa chỉ đường hoặc tòa nhà; vui lòng chọn tọa độ chính xác hơn");
 
             if (root == null || !root.isObject() || !root.path("results").isArray()) throw malformed();
             if (root.path("results").isEmpty()) throw new BadRequestException("Không tìm thấy địa chỉ tại tọa độ này");

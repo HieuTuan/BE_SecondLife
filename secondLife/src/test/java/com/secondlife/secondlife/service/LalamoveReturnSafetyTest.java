@@ -140,6 +140,7 @@ class LalamoveReturnSafetyTest {
         cancelled.setOrderId(order.getId());
         cancelled.setStatus("CANCELLED");
         cancelled.setOrderCode(carrierOrderCode);
+        when(orders.findById(order.getId())).thenReturn(Optional.of(order));
         when(orders.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
         when(orders.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(posts.findByIdForUpdate(order.getPost().getId())).thenReturn(Optional.of(order.getPost()));

@@ -1,0 +1,61 @@
+{
+  "results": [
+    {
+      "datasource": {
+        "sourcename": "openstreetmap",
+        "attribution": "© OpenStreetMap contributors",
+        "license": "Open Database License",
+        "url": "https://www.openstreetmap.org/copyright"
+      },
+      "name": "Sở Nông nghiệp và Môi trường Thành phố Hồ Chí Minh",
+      "other_names": {
+        "name:en": "Department of Agriculture and Environment of Ho Chi Minh City",
+        "name:id": "Departemen Pertanian dan Lingkungan Hidup Kota Ho Chi Minh",
+        "name:zh": "胡志明市农业与环境厅"
+      },
+      "country": "Việt Nam",
+      "country_code": "vn",
+      "city": "Thành phố Thủ Đức",
+      "postcode": "71006",
+      "district": "Khu phố 3",
+      "suburb": "Phường Sài Gòn",
+      "street": "Lý Tự Trọng",
+      "housenumber": "63",
+      "iso3166_2": "VN-SG",
+      "lon": 106.7005892,
+      "lat": 10.7770237,
+      "distance": 14.718559515226449,
+      "result_type": "amenity",
+      "county": "Quan 8",
+      "state": "Thành phố Hồ Chí Minh",
+      "state_code": "HC",
+      "formatted": "Sở Nông nghiệp và Môi trường Thành phố Hồ Chí Minh, 63, Lý Tự Trọng, Phường Sài Gòn, Thành phố Thủ Đức, HC 71006, Việt Nam",
+      "address_line1": "Sở Nông nghiệp và Môi trường Thành phố Hồ Chí Minh",
+      "address_line2": "63, Lý Tự Trọng, Phường Sài Gòn, Thành phố Thủ Đức, HC 71006, Việt Nam",
+      "timezone": {
+        "name": "Asia/Ho_Chi_Minh",
+        "offset_STD": "+07:00",
+        "offset_DST": "+07:00",
+        "offset_STD_seconds": 25200,
+        "offset_DST_seconds": 25200
+      },
+      "plus_code": "7P28QPG2+R6",
+      "rank": {
+        "importance": 6.703364614323671e-05,
+        "popularity": 6.589677954731138
+      },
+      "place_id": "51927b1574d6ac5a4059106fe70cd68d2540f00102f901aed5cb2f00000000c0020192034253e1bb9f204ec3b46e67206e676869e1bb87702076c3a0204dc3b469207472c6b0e1bb9d6e67205468c3a06e68207068e1bb912048e1bb93204368c3ad204d696e68e203216f70656e7374726565746d61703a76656e75653a7761792f383031383837363632",
+      "bbox": {
+        "lon1": 106.7003813,
+        "lat1": 10.7767001,
+        "lon2": 106.7007781,
+        "lat2": 10.7772131
+      }
+    }
+  ],
+  "query": {
+    "lat": 10.7769,
+    "lon": 106.7009,
+    "plus_code": "7P28QPG2+Q9"
+  }
+}

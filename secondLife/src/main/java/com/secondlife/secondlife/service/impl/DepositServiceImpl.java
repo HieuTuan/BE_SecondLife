@@ -28,6 +28,8 @@ public class DepositServiceImpl implements DepositService {
     private final DepositRequestRepository depositRequestRepository;
     private final UserRepository userRepository;
     private final WalletService walletService;
+    private final com.secondlife.secondlife.service.payment.OrderBankPaymentService bankPayments;
+    private final com.secondlife.secondlife.service.payment.SePayTransferLedger ledger;
 
     @org.springframework.beans.factory.annotation.Value("${app.sepay.bank-account-name}")
     private String bankAccountName;
@@ -75,14 +77,15 @@ public class DepositServiceImpl implements DepositService {
     @Override
     @Transactional
     public void processSepayWebhook(SePayWebhookDTO webhookDTO) {
-        // Prevent duplicate processing
-        if (depositRequestRepository.existsBySepayTransactionId(webhookDTO.getId())) {
-            log.info("Transaction {} already processed", webhookDTO.getId());
-            return;
-        }
-
-        if (!"in".equalsIgnoreCase(webhookDTO.getTransferType())) {
-            log.info("Transaction {} is not 'in' type", webhookDTO.getId());
+        if (!"in".equalsIgnoreCase(webhookDTO.getTransferType())) return;
+        if(webhookDTO.getAccountNumber()==null || !bankAccountNumber.trim().equals(webhookDTO.getAccountNumber().trim()))
+            throw new com.secondlife.secondlife.exception.BadRequestException("SePay receiving bank account does not match configuration");
+        String code=ledger.reference(webhookDTO);
+        if(code==null) return;
+        var initial=depositRequestRepository.findReferenceByCode(code);
+        if(initial.isEmpty()) return;
+        if(initial.get().getOrderId()!=null) {
+            bankPayments.receive(initial.get().getOrderId(),webhookDTO,code);
             return;
         }
 
@@ -116,5 +119,12 @@ public class DepositServiceImpl implements DepositService {
         depositRequest.setSepayTransactionId(webhookDTO.getId());
         depositRequestRepository.save(depositRequest);
         log.info("Successfully processed deposit {} for user {}", code, depositRequest.getUser().getId());
+        var request=depositRequestRepository.findByIdForUpdate(initial.get().getId()).orElseThrow();
+        if(!ledger.claim(webhookDTO,code)) return;
+        walletService.deposit(request.getUser().getId(),webhookDTO.getTransferAmount(),request.getId());
+        request.setReceivedAmount(request.getReceivedAmount().add(webhookDTO.getTransferAmount()));
+        request.setWalletCreditedAmount(request.getWalletCreditedAmount().add(webhookDTO.getTransferAmount()));
+        request.setStatus(DepositStatus.COMPLETED);request.setSepayTransactionId(webhookDTO.getId());
+        depositRequestRepository.save(request);
     }
 }

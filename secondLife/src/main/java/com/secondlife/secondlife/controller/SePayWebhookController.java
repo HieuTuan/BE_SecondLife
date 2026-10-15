@@ -40,8 +40,8 @@ public class SePayWebhookController {
                                             .replace("Apikey", "")
                                             .trim();
         
-        if (!receivedToken.equals(expectedToken)) {
-            log.warn("Invalid SePay API Token. Received: '{}', Expected: '{}'", receivedToken, expectedToken);
+        if (expectedToken.isBlank() || !java.security.MessageDigest.isEqual(receivedToken.getBytes(java.nio.charset.StandardCharsets.UTF_8), expectedToken.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+            log.warn("Invalid SePay webhook authorization");
             return ResponseEntity.status(401).body(Map.of("success", false));
         }
             

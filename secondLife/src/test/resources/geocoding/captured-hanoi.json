@@ -1,0 +1,57 @@
+{
+  "results": [
+    {
+      "datasource": {
+        "sourcename": "openstreetmap",
+        "attribution": "© OpenStreetMap contributors",
+        "license": "Open Database License",
+        "url": "https://www.openstreetmap.org/copyright"
+      },
+      "name": "WinMart+",
+      "country": "Việt Nam",
+      "country_code": "vn",
+      "city": "Hà Nội",
+      "postcode": "11314",
+      "district": "Dịch Vọng Trung",
+      "suburb": "Phường Cầu Giấy",
+      "quarter": "Dịch Vọng",
+      "street": "Ngõ 29 Phố Dịch Vọng",
+      "iso3166_2": "VN-HN",
+      "lon": 105.7938025,
+      "lat": 21.0332379,
+      "county": "Hoàn Kiếm",
+      "state": "Hà Nội",
+      "state_code": "HI",
+      "distance": 12.682715585777775,
+      "result_type": "amenity",
+      "formatted": "WinMart+, Ngõ 29 Phố Dịch Vọng, Phường Cầu Giấy, Hà Nội, HI 11314, Việt Nam",
+      "address_line1": "WinMart+",
+      "address_line2": "Ngõ 29 Phố Dịch Vọng, Phường Cầu Giấy, Hà Nội, HI 11314, Việt Nam",
+      "category": "commercial.convenience",
+      "timezone": {
+        "name": "Asia/Bangkok",
+        "offset_STD": "+07:00",
+        "offset_DST": "+07:00",
+        "offset_STD_seconds": 25200,
+        "offset_DST_seconds": 25200
+      },
+      "plus_code": "7PH72QMV+7G",
+      "rank": {
+        "importance": 7.283054856179167e-05,
+        "popularity": 3.9271332546873032
+      },
+      "place_id": "51ea3e00a9cd725a4059db7c6d4782083540f00103f901255ce1d402000000c0020192030857696e4d6172742be203246f70656e7374726565746d61703a76656e75653a6e6f64652f3132313631343733353733",
+      "bbox": {
+        "lon1": 105.7937525,
+        "lat1": 21.0331879,
+        "lon2": 105.7938525,
+        "lat2": 21.0332879
+      }
+    }
+  ],
+  "query": {
+    "lat": 21.0333,
+    "lon": 105.7937,
+    "plus_code": "7PH72QMV+8F"
+  }
+}

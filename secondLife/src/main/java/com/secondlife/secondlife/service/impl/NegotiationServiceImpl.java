@@ -45,6 +45,7 @@ public class NegotiationServiceImpl implements NegotiationService {
     private final ChatService chatService;
     private final NotificationService notificationService;
 
+    @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager entityManager;
     private final int maxRejections;
     private final long acceptedTtlHours;
 
@@ -148,6 +149,12 @@ public class NegotiationServiceImpl implements NegotiationService {
         Negotiation negotiation = negotiationRepository.findById(negotiationId)
                 .orElseThrow(() -> new NotFoundException("Negotiation not found"));
 
+        Post post=postRepository.findByIdForUpdate(negotiation.getPost().getId())
+                .orElseThrow(() -> new NotFoundException("Post not found"));
+        if(entityManager!=null) { entityManager.refresh(post);entityManager.refresh(negotiation); }
+        if(!"ACTIVE".equals(post.getStatus()))
+            throw new com.secondlife.secondlife.exception.ConflictException("Post is reserved, awaiting payment or no longer available");
+
         if (!negotiation.getPost().getUser().getId().equals(sellerId)) {
             throw new BadRequestException("You are not the seller of this post");
         }
@@ -162,7 +169,6 @@ public class NegotiationServiceImpl implements NegotiationService {
         negotiation = negotiationRepository.save(negotiation);
 
         // Reserve the post
-        Post post = negotiation.getPost();
         post.setStatus("RESERVED");
         postRepository.save(post);
 

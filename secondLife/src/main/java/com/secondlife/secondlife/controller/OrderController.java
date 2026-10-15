@@ -27,6 +27,15 @@ public class OrderController {
 
     private final OrderService orderService;
     private final CurrentUserProvider currentUserProvider;
+    private final com.secondlife.secondlife.service.payment.OrderBankPaymentService bankPayments;
+
+    @GetMapping("/{id}/payment")
+    @Operation(summary="BUYER reads bank transfer instructions and polls payment status", description="Read only; payment is confirmed exclusively by authenticated SePay webhooks")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<com.secondlife.secondlife.dto.response.OrderBankPaymentResponse> payment(
+            @AuthenticationPrincipal CustomUserDetails userDetails,@PathVariable UUID id) {
+        return ResponseEntity.ok(bankPayments.get(currentUserProvider.resolveUserId(userDetails),id));
+    }
 
     @PostMapping
     @PreAuthorize("isAuthenticated()")
