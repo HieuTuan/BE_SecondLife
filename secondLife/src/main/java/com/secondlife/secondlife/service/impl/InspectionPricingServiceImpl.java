@@ -137,7 +137,7 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
         if (post != null && post.getCategoryId() != null) {
             UUID categoryId = post.getCategoryId();
             Optional<InspectionFeeProposal> proposal =
-                    proposalRepository.findFirstByCategoryIdAndStatusOrderByReviewedAtDesc(categoryId, InspectionFeeProposalStatus.APPROVED);
+                    proposalRepository.findFirstByCategory_IdAndStatusOrderByReviewedAtDesc(categoryId, InspectionFeeProposalStatus.APPROVED);
             if (proposal.isPresent()) {
                 return proposal.get().getBaseInspectionFee();
             }

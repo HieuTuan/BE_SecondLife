@@ -10,7 +10,11 @@ import java.util.UUID;
 
 public interface InspectionChecklistTemplateRepository extends JpaRepository<InspectionChecklistTemplate, UUID> {
 
-    List<InspectionChecklistTemplate> findByCategoryIdAndActiveTrue(UUID categoryId);
+    List<InspectionChecklistTemplate> findByCategory_IdAndActiveTrue(UUID categoryId);
+
+    default List<InspectionChecklistTemplate> findByCategoryIdAndActiveTrue(UUID categoryId) {
+        return findByCategory_IdAndActiveTrue(categoryId);
+    }
 
     List<InspectionChecklistTemplate> findByActiveTrueOrderByCreatedAtDesc();
 

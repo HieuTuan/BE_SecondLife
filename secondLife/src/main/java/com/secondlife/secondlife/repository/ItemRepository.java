@@ -8,7 +8,10 @@ import java.util.UUID;
 
 @Repository
 public interface ItemRepository extends JpaRepository<Item, UUID> {
-    java.util.List<Item> findByCategoryId(UUID categoryId);
+    java.util.List<Item> findByCategory_Id(UUID categoryId);
+    default java.util.List<Item> findByCategoryId(UUID categoryId) {
+        return findByCategory_Id(categoryId);
+    }
     boolean existsByCategory_Id(UUID categoryId);
     @org.springframework.data.jpa.repository.Query("select (count(i) > 0) from Item i where i.category.id = :categoryId and lower(trim(i.name)) = lower(:name) and (:excludedId is null or i.id <> :excludedId)")
     boolean nameExists(@org.springframework.data.repository.query.Param("categoryId") UUID categoryId,
