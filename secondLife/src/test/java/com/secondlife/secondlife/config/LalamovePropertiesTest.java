@@ -11,7 +11,7 @@ class LalamovePropertiesTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner().withUserConfiguration(TestConfiguration.class)
             .withPropertyValues("app.shipping.lalamove.enabled=false", "app.shipping.lalamove.base-url=https://rest.sandbox.lalamove.com",
                     "app.shipping.lalamove.key=", "app.shipping.lalamove.secret=", "app.shipping.lalamove.market=VN",
-                    "app.shipping.lalamove.language=vi_VN", "app.shipping.lalamove.service-type=MOTORCYCLE",
+                    "app.shipping.lalamove.language=vi_VN",
                     "app.shipping.lalamove.timeout-ms=5000", "app.shipping.lalamove.max-response-characters=8192",
                     "app.shipping.lalamove.webhook-max-future-skew-seconds=300");
 

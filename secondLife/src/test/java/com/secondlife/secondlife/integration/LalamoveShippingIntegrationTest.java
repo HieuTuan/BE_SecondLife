@@ -62,7 +62,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.shipping.lalamove.key=pk_test_integration", "app.shipping.lalamove.secret=sk_test_integration",
         "app.shipping.lalamove.base-url=https://rest.sandbox.lalamove.com/v3",
         "app.shipping.lalamove.market=VN", "app.shipping.lalamove.language=vi_VN",
-        "app.shipping.lalamove.service-type=MOTORCYCLE", "app.shipping.lalamove.timeout-ms=5000",
+        "app.shipping.lalamove.timeout-ms=5000",
         "app.shipping.lalamove.max-response-characters=4194304", "app.shipping.lalamove.webhook-max-future-skew-seconds=300"
 })
 class LalamoveShippingIntegrationTest {
@@ -99,6 +99,8 @@ class LalamoveShippingIntegrationTest {
     @MockitoBean(name = "ollamaChatModel") ChatModel ollama;
     @MockitoBean(name = "googleGenAiChatModel") ChatModel google;
     @MockitoBean com.secondlife.secondlife.service.shipping.ReverseGeocodingService geocoding;
+    @MockitoBean org.springframework.mail.javamail.JavaMailSender mail;
+    @MockitoBean org.springframework.messaging.simp.SimpMessagingTemplate messages;
 
     @BeforeEach void carrierReplies() {
         when(releaseClock.instant()).thenReturn(Instant.now());
@@ -423,6 +425,37 @@ class LalamoveShippingIntegrationTest {
         verify(carrier, times(2)).driver(code, "79973");
     }
 
+    @Test void quoteChoosesVehicleOnServerAndIgnoresLegacyBuyerOverride() throws Exception {
+        Fixture f=fixture();
+        var requested=new java.util.concurrent.atomic.AtomicReference<Map<String,Object>>();
+        when(carrier.preview(anyMap())).thenAnswer(invocation->{
+            requested.set(new java.util.HashMap<>(invocation.<Map<String,Object>>getArgument(0)));return preview(FEE);
+        });
+        var result=tree(mvc.perform(post("/api/v1/shipping/quotes").header("Authorization",bearer(f.buyer()))
+            .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("postId",f.post().getId(),"serviceType","BUYER_CHOICE",
+                "deliveryAddress",address("Buyer","10.781","106.7")))))
+            .andExpect(status().isOk()).andReturn()).path("data");
+        assertEquals("MOTORCYCLE",result.path("serviceType").asText());
+        var id=UUID.fromString(result.path("quoteId").asText());
+        var stored=mapper.readTree(jdbc.queryForObject("SELECT payload FROM shipping_quotes WHERE id=?",String.class,id));
+        assertEquals("MOTORCYCLE",stored.path("service_type").asText());
+        assertFalse(requested.get().containsKey("service_type"));
+    }
+    @Test void expiredCheckoutQuoteRequiresBuyerToRequestNewPriceWithoutDebit() throws Exception {
+        Fixture f=fixture();var id=quoteId(quote(f));
+        jdbc.update("UPDATE shipping_quotes SET expires_at=? WHERE id=?",Timestamp.from(Instant.now().minusSeconds(1)),id);
+        mvc.perform(post("/api/v1/orders").header("Authorization",bearer(f.buyer())).contentType(MediaType.APPLICATION_JSON)
+            .content(body(Map.of("postId",f.post().getId(),"shippingQuoteId",id,"requestId",UUID.randomUUID()))))
+            .andExpect(status().isConflict());
+        assertMoney(FUNDS,balance(f.buyer()));
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM orders WHERE shipping_quote_id=?",Integer.class,id));
+    }
+    @Test void sellerCannotChangeParcelAfterBuyerHasPaid() throws Exception {
+        Fixture f=fixture();checkout(f,quoteId(quote(f)));
+        mvc.perform(put("/api/v1/posts/"+f.post().getId()+"/shipping-package").header("Authorization",bearer(f.seller()))
+            .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("weight",40000,"length",100,"width",80,"height",120))))
+            .andExpect(status().isConflict());
+    }
     @Test void expiredPaidQuoteWithHigherFreshFeeDoesNotCreateBookingOrDebitBuyerAgain() throws Exception {
         Fixture f = fixture();
         UUID quoteId = quoteId(quote(f));
@@ -551,7 +584,7 @@ class LalamoveShippingIntegrationTest {
 
     private JsonNode quote(Fixture f) throws Exception {
         return tree(mvc.perform(post("/api/v1/shipping/quotes").header("Authorization", bearer(f.buyer()))
-                .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("postId", f.post().getId(), "serviceType", "MOTORCYCLE",
+                .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("postId", f.post().getId(),
                         "deliveryAddress", address("Buyer", "10.781", "106.7")))))
                 .andExpect(status().isOk()).andReturn()).path("data");
     }

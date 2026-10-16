@@ -72,15 +72,41 @@ public class LalamoveShippingProvider implements ShippingProvider {
         String serviceType = string(payload.get("service_type"));
         if (serviceType.isBlank() && payload.get("provider_quote")!=null)
             serviceType=mapper.valueToTree(payload.get("provider_quote")).path("serviceType").asText();
-        if (serviceType.isBlank()) serviceType = properties.getServiceType();
+        // Validate stops before catalogue requests; contacts/coordinates never reach unrelated calls.
+        var stops=List.of(stop(payload,"from"),stop(payload,"to"));
+        if (serviceType.isBlank()) return automaticPreview(payload,stops);
+        return previewForService(serviceType,stops);
+    }
+
+    private JsonNode automaticPreview(Map<String,Object> payload,List<Map<String,Object>> stops) {
+        LalamoveVehicleSelector.validateParcel(payload);
+        var candidates=LalamoveVehicleSelector.eligible(cities(),payload);
+        JsonNode best=null;
+        for(String service:candidates) {
+            JsonNode result;
+            try { result=previewForService(service,stops); }
+            catch(LalamoveRequestException error) {
+                if(error.getUpstreamStatus()==422 && Set.of("ERR_OUT_OF_SERVICE_AREA","ERR_INVALID_SERVICE_TYPE").contains(error.getErrorCode()==null?"":error.getErrorCode())) continue;
+                throw error;
+            }
+            if(best==null || result.path("total_fee").decimalValue().compareTo(best.path("total_fee").decimalValue())<0) best=result;
+        }
+        if(best==null) throw new BadRequestException("Lalamove chưa hỗ trợ tuyến giao hàng này với các loại xe phù hợp");
+        if(!Instant.parse(best.path("expires_at").asText()).isAfter(Instant.now()))
+            throw new ConflictException("Báo giá vận chuyển đã hết hạn; vui lòng lấy lại báo giá trước khi thanh toán");
+        return best;
+    }
+
+    private JsonNode previewForService(String serviceType,List<Map<String,Object>> stops) {
         if (serviceType == null || !serviceType.matches("[A-Z][A-Z0-9_]{0,59}"))
             throw new BadRequestException("Select a valid Lalamove service type");
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("serviceType", serviceType);
         data.put("language", properties.getLanguage());
-        data.put("stops", List.of(stop(payload, "from"), stop(payload, "to")));
+        data.put("stops", stops);
         JsonNode nativeQuote = request(HttpMethod.POST, "/v3/quotations", Map.of("data", data));
         validateQuotation(nativeQuote);
+        if(!serviceType.equals(nativeQuote.path("serviceType").asText())) throw malformed();
         ObjectNode result = mapper.createObjectNode();
         result.put("total_fee", fee(nativeQuote));
         result.put("expires_at", quotationExpiry(nativeQuote).toString());

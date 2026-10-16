@@ -21,7 +21,6 @@ public class LalamoveProperties {
     @NotNull private String secret;
     @NotBlank @Pattern(regexp = "[A-Z]{2}") private String market;
     @NotBlank @Pattern(regexp = "[a-z]{2}_[A-Z]{2}") private String language;
-    @NotBlank @Pattern(regexp = "[A-Z][A-Z0-9_]{0,59}") private String serviceType;
     @Min(1000) @Max(30000) private int timeoutMs;
     @Positive @Max(4 * 1024 * 1024) private int maxResponseCharacters;
     @Min(0) private int webhookMaxFutureSkewSeconds;

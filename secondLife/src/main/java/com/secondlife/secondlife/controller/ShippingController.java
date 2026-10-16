@@ -35,6 +35,8 @@ public class ShippingController {
     @GetMapping("/pickup-address") @PreAuthorize("hasRole('SELLER')")
     public ApiResponse<ShippingAddress> pickup(@AuthenticationPrincipal CustomUserDetails user) { return ApiResponse.success(quotes.pickup(current.resolveUserId(user))); }
     @PostMapping("/quotes") @PreAuthorize("hasRole('BUYER') or hasRole('SELLER')")
+    @io.swagger.v3.oas.annotations.Operation(summary="Tự chọn xe phù hợp và lấy phí vận chuyển",
+        description="BUYER gửi bài đăng và địa chỉ nhận. BE lọc tải trọng/kích thước kiện hàng theo danh mục xe Lalamove, chọn báo giá thấp nhất. serviceType trong response do BE quyết định.")
     public ApiResponse<ShippingQuoteResponse> quote(@AuthenticationPrincipal CustomUserDetails user,@Valid @RequestBody ShippingQuoteRequest body) {
         return ApiResponse.success(quotes.quote(current.resolveUserId(user),body));
     }
