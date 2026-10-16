@@ -12,7 +12,7 @@ Chọn vị trí lấy hàng → lưu shop → xác nhận email → eKYC
 
 Luồng mua ngay, tính phí, tạo vận đơn, cập nhật trạng thái và quyết toán đã được kiểm tra. Không đồng nghĩa toàn bộ SRS đã hoàn thiện:
 
-- BE chưa tự lọc/chọn loại xe theo tải trọng và kích thước kiện hàng.
+- BE đã tự lọc/chọn xe theo tải trọng, kích thước và báo giá. Xem [hướng dẫn FE tự chọn xe mới](FE_AUTO_VEHICLE_SHIPPING_GUIDE.md) cho contract hiện tại.
 - GPS tài xế thực tế chưa được xác minh với chuyến giao hàng Production.
 - Sandbox hiện trả tài xế giả lập với GPS `0,0`/năm `1970`; BE lọc các điểm này thành không khả dụng.
 - Hướng dẫn mua hàng dưới đây dành cho mua ngay, không thương lượng, giao thẳng SELLER → BUYER. Chặng từ trung tâm kiểm định có vai trò xử lý riêng.
@@ -257,7 +257,7 @@ Lấy danh sách thành phố/dịch vụ:
 GET /api/v1/shipping/cities
 ```
 
-Lấy `services[].key` của thành phố tương ứng làm `serviceType`. Chỉ hiển thị thành phố/dịch vụ BE thực sự trả về; không thêm thành phố giả nếu Sandbox chưa có dữ liệu.
+Danh mục `services[]` dùng tham khảo; BE tự chọn xe, BUYER không truyền `serviceType`. Chỉ hiển thị thành phố/dịch vụ BE thực sự trả về; không thêm thành phố giả nếu Sandbox chưa có dữ liệu.
 
 ```http
 POST /api/v1/shipping/quotes
@@ -276,10 +276,10 @@ POST /api/v1/shipping/quotes
 ```
 
 - Mua ngay: bỏ `negotiationId`.
-- Có thể thêm `serviceType` bằng key thực tế từ danh sách dịch vụ.
-- Bỏ `serviceType`: BE dùng dịch vụ mặc định.
+- Không gửi `serviceType` từ BUYER; BE tự xác định loại xe phù hợp.
+- BE lấy danh mục xe theo điểm lấy hàng, lọc tải trọng/kích thước và chọn báo giá thấp nhất trong các xe phù hợp.
 - BE lookup địa chỉ nhận từ tọa độ, sử dụng địa chỉ lấy hàng của SELLER và kiện hàng của bài đăng.
-- BE chưa tự chọn xe phù hợp theo kích thước/tải trọng. FE không mô tả dịch vụ mặc định là kết quả tự chọn xe tối ưu.
+- Không dùng xe mặc định. Chi tiết lựa chọn, snapshot và xử lý lỗi: [FE_AUTO_VEHICLE_SHIPPING_GUIDE.md](FE_AUTO_VEHICLE_SHIPPING_GUIDE.md).
 
 | Response trong `data` | FE sử dụng |
 |---|---|

@@ -107,12 +107,13 @@ class LalamoveShippingProviderTest {
         assertEquals(order("ASSIGNING_DRIVER"), result.path("raw"));
         module.server().verify();
     }
-    @Test void refreshedQuotationPreservesPaidVehicleWhenTheConfiguredDefaultHasChanged() {
+    @Test void refreshedQuotationPreservesPaidVehicleWithoutAutoSelection() {
         Module module=module(properties());var route=payload();
         ((tools.jackson.databind.node.ObjectNode)route.get("provider_quote")).put("serviceType","CAR");
+        var refreshed=(tools.jackson.databind.node.ObjectNode)quotation();refreshed.put("serviceType","CAR");
         expect(module,HttpMethod.POST,"/v3/quotations")
             .andExpect(request->assertEquals("CAR",requestBody(request).path("data").path("serviceType").asText()))
-            .andRespond(withSuccess(envelope(quotation()),MediaType.APPLICATION_JSON));
+            .andRespond(withSuccess(envelope(refreshed),MediaType.APPLICATION_JSON));
         module.provider().preview(route);module.server().verify();
     }
 
@@ -312,7 +313,7 @@ class LalamoveShippingProviderTest {
     private static String envelope(JsonNode data) { return MAPPER.writeValueAsString(Map.of("data", data)); }
 
     private static JsonNode quotation() {
-        return MAPPER.valueToTree(Map.of("quotationId", "quotation-1", "expiresAt", Instant.now().plusSeconds(300).toString(),
+        return MAPPER.valueToTree(Map.of("quotationId", "quotation-1", "serviceType", "MOTORCYCLE", "expiresAt", Instant.now().plusSeconds(300).toString(),
                 "priceBreakdown", Map.of("total", "25000", "currency", "VND"), "stops", List.of(Map.of("stopId", "stop-from"), Map.of("stopId", "stop-to"))));
     }
 
@@ -336,7 +337,7 @@ class LalamoveShippingProviderTest {
 
     private static LalamoveProperties properties() {
         LalamoveProperties p = new LalamoveProperties(); p.setEnabled(true); p.setBaseUrl(BASE);
-        p.setKey(KEY); p.setSecret(SECRET); p.setMarket("VN"); p.setLanguage("vi_VN"); p.setServiceType("MOTORCYCLE");
+        p.setKey(KEY); p.setSecret(SECRET); p.setMarket("VN"); p.setLanguage("vi_VN");
         p.setTimeoutMs(5000); p.setMaxResponseCharacters(4 * 1024 * 1024); p.setWebhookMaxFutureSkewSeconds(300);
         return p;
     }

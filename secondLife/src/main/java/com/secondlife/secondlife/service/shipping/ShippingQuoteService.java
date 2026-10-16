@@ -77,13 +77,17 @@ public class ShippingQuoteService {
             ShippingPayloads.requireCoordinates(sellerPickup,"Original seller pickup for return shipping");
             ShippingPayloads.requireCoordinates(origin,"Seller/inspection center pickup");
             ShippingPayloads.requireCoordinates(delivery,"Buyer delivery");
-            if (request.serviceType()!=null) payload.put("service_type",request.serviceType());
         }
         var result=provider.preview(payload);
         var total=result.get("total_fee");
         if (total==null || !total.isNumber() || total.decimalValue().signum()<0 || total.decimalValue().compareTo(BigDecimal.valueOf(1000000000))>0)
             throw new ShippingProviderException("Carrier returned an invalid shipping fee");
         if (result.hasNonNull("provider_quote")) payload.put("provider_quote",result.get("provider_quote"));
+        if ("LALAMOVE".equals(carrier)) {
+            String selected=result.path("provider_quote").path("serviceType").asText();
+            if(!selected.matches("[A-Z][A-Z0-9_]{0,59}")) throw new ShippingProviderException("Lalamove returned no selected vehicle");
+            payload.put("service_type",selected);
+        }
         var row=new ShippingQuote(); row.setBuyerId(buyerId); row.setPostId(post.getId()); row.setPayload(mapper.writeValueAsString(payload));
         row.setProvider(carrier);
         row.setLeg(leg);
