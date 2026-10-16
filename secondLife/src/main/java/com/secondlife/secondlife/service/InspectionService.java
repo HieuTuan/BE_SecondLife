@@ -92,4 +92,9 @@ public interface InspectionService {
      * Ghi nhận lịch sử các lần quét mã QR tem niêm phong (KTV, Shipper, Buyer)
      */
     com.secondlife.secondlife.dto.response.InspectionSealLogResponse recordSealScan(UUID actorId, com.secondlife.secondlife.dto.request.InspectionSealScanRequest request);
+
+    /**
+     * Sinh mã tem niêm phong chuẩn cho đơn kiểm định
+     */
+    String generateSealForOrder(UUID inspectorId, UUID orderId);
 }

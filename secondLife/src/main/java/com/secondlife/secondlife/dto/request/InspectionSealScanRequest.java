@@ -24,5 +24,7 @@ public class InspectionSealScanRequest {
     private String sealCondition;
 
     private String locationText;
+    private java.math.BigDecimal latitude;
+    private java.math.BigDecimal longitude;
     private String note;
 }

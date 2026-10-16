@@ -53,7 +53,7 @@ public class SettlementServiceImpl implements SettlementService {
         if (inspectionOrders != null) {
             inspectionOrders.findByOrderId(order.getId()).ifPresent(io -> {
                 if ("ACTIVE".equals(io.getVideoCleanupStatus())) {
-                    io.setVideoRetentionUntil(Instant.now().plus(48, java.time.temporal.ChronoUnit.HOURS));
+                    io.setVideoRetentionUntil(Instant.now().plus(14, java.time.temporal.ChronoUnit.DAYS));
                     inspectionOrders.save(io);
                 }
             });

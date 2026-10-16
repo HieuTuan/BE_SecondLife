@@ -37,13 +37,14 @@ public class ShipmentService {
     private final SystemWalletService systemWallet;
     private final SellerReputationService reputation;
     private final NotificationService notificationService;
+    private final com.secondlife.secondlife.repository.InspectionSealLogRepository sealLogs;
 
     public ShipmentService(ShipmentRepository shipments, ShipmentEventRepository events, OrderRepository orders,
                            InspectionOrderRepository inspections, ShippingQuoteRepository quotes, ShippingQuoteService quoteService,
                            ReverseGeocodingService geocoding, ShippingProvider provider, ObjectMapper mapper,
                            EntityManager entityManager, WalletService wallets, PlatformTransactionManager transactions,
                            SystemWalletService systemWallet, SellerReputationService reputation) {
-        this(shipments, events, orders, inspections, quotes, quoteService, geocoding, provider, mapper, entityManager, wallets, transactions, systemWallet, reputation, null);
+        this(shipments, events, orders, inspections, quotes, quoteService, geocoding, provider, mapper, entityManager, wallets, transactions, systemWallet, reputation, null, null);
     }
 
     @Autowired
@@ -52,7 +53,8 @@ public class ShipmentService {
                            ReverseGeocodingService geocoding, ShippingProvider provider, ObjectMapper mapper,
                            EntityManager entityManager, WalletService wallets, PlatformTransactionManager transactions,
                            SystemWalletService systemWallet, SellerReputationService reputation,
-                           @Autowired(required = false) NotificationService notificationService) {
+                           @Autowired(required = false) NotificationService notificationService,
+                           @Autowired(required = false) com.secondlife.secondlife.repository.InspectionSealLogRepository sealLogs) {
         this.shipments = shipments;
         this.events = events;
         this.orders = orders;
@@ -68,6 +70,7 @@ public class ShipmentService {
         this.systemWallet = systemWallet;
         this.reputation = Objects.requireNonNull(reputation, "SellerReputationService is required");
         this.notificationService = notificationService;
+        this.sealLogs = sealLogs;
     }
 
     private record Prepared(UUID id, boolean submit) {}
@@ -124,7 +127,8 @@ public class ShipmentService {
         if (!"SELLER_TO_CENTER".equals(request.leg()) || request.toAddress()==null) throw new BadRequestException("SELLER_TO_CENTER and an inspection center address are required");
         if (!staff) throw new ForbiddenException("STAFF/ADMIN assigns the verified inspection center destination");
         var inspection=inspections.findByIdForUpdate(inspectionId).orElseThrow();
-        if (!"PENDING".equals(inspection.getStatus())) throw new ConflictException("Inspection is already completed");
+        if (Set.of("CANCELLED", "FAILED", "PAYMENT_EXPIRED", "COMPLETED").contains(inspection.getStatus()))
+            throw new ConflictException("Inspection order is not eligible for center shipment");
         var post=inspection.getPost();
         var saved=shipments.findById(shipmentId(inspectionId,request));
         Map<String,Object> payload;
@@ -393,6 +397,9 @@ public class ShipmentService {
         shipment.setProviderStatus(status); shipment.setStatus(canonicalLalamove(status)); shipment.setLastEventAt(time); shipment.setLastError(null);
         if ("COMPLETED".equals(status) && shipment.getDeliveredAt()==null) shipment.setDeliveredAt(time);
         if (Set.of("REJECTED","EXPIRED").contains(status)) freeze(shipment);
+        if (shipment.getInspectionOrderId() != null) {
+            applyLalamoveInspectionStatus(shipment, status, time);
+        }
         if (shipment.getOrderId()==null) return;
         var order=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();
         if (Set.of(OrderStatus.COMPLETED,OrderStatus.CANCELLED).contains(order.getStatus())) return;
@@ -442,6 +449,68 @@ public class ShipmentService {
             }
         }
         orders.save(order);
+    }
+
+    private void applyLalamoveInspectionStatus(Shipment shipment, String status, Instant time) {
+        var inspectionOpt = inspections.findByIdForUpdate(shipment.getInspectionOrderId());
+        if (inspectionOpt.isEmpty()) return;
+        var inspection = inspectionOpt.get();
+
+        if ("SELLER_TO_CENTER".equals(shipment.getLeg())) {
+            if ("PICKED_UP".equals(status)) {
+                inspection.setStatus("SHIPPING_TO_CENTER");
+                if (sealLogs != null && inspection.getTamperSealId() != null
+                        && !sealLogs.existsByTamperSealIdAndScanStage(inspection.getTamperSealId(), "CARRIER_HANDOVER")) {
+                    var sealLog = new com.secondlife.secondlife.entity.InspectionSealLog(
+                            inspection,
+                            inspection.getTamperSealId(),
+                            null,
+                            "CARRIER_HANDOVER",
+                            "INTACT",
+                            "Tài xế đã nhận hàng từ Người bán",
+                            "Ghi nhận tự động từ Webhook đối tác vận chuyển"
+                    );
+                    sealLogs.save(sealLog);
+                }
+            } else if ("COMPLETED".equals(status)) {
+                if (!Set.of("PASSED", "FAILED", "COMPLETED").contains(inspection.getStatus())) {
+                    inspection.setStatus("INSPECTING");
+                }
+            }
+        } else if ("CENTER_TO_BUYER".equals(shipment.getLeg())) {
+            if ("PICKED_UP".equals(status)) {
+                inspection.setStatus("DELIVERING_TO_BUYER");
+                if (sealLogs != null && inspection.getTamperSealId() != null
+                        && !sealLogs.existsByTamperSealIdAndScanStage(inspection.getTamperSealId(), "CARRIER_HANDOVER")) {
+                    var sealLog = new com.secondlife.secondlife.entity.InspectionSealLog(
+                            inspection,
+                            inspection.getTamperSealId(),
+                            null,
+                            "CARRIER_HANDOVER",
+                            "INTACT",
+                            "Tài xế nhận hàng từ Hub SecondLife",
+                            "Ghi nhận tự động từ Webhook đối tác vận chuyển"
+                    );
+                    sealLogs.save(sealLog);
+                }
+            } else if ("COMPLETED".equals(status)) {
+                inspection.setStatus("COMPLETED");
+                if (sealLogs != null && inspection.getTamperSealId() != null
+                        && !sealLogs.existsByTamperSealIdAndScanStage(inspection.getTamperSealId(), "DELIVERED_BUYER")) {
+                    var sealLog = new com.secondlife.secondlife.entity.InspectionSealLog(
+                            inspection,
+                            inspection.getTamperSealId(),
+                            null,
+                            "DELIVERED_BUYER",
+                            "INTACT",
+                            "Đã giao tận tay Người mua",
+                            "Ghi nhận tự động từ Webhook đối tác vận chuyển"
+                    );
+                    sealLogs.save(sealLog);
+                }
+            }
+        }
+        inspections.save(inspection);
     }
     private void recordVerifiedPickup(Shipment shipment,Instant actualTime) {
         if(shipment.getOrderId()==null || !"SELLER_TO_BUYER".equals(shipment.getLeg())) return;

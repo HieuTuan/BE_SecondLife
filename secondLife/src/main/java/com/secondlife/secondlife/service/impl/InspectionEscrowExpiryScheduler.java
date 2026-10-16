@@ -2,26 +2,44 @@ package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Post;
+import com.secondlife.secondlife.notification.NotificationType;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.service.InspectionEscrowService;
-import lombok.RequiredArgsConstructor;
+import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.service.WalletService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class InspectionEscrowExpiryScheduler {
 
     private final InspectionOrderRepository inspectionOrderRepository;
     private final InspectionEscrowService inspectionEscrowService;
     private final PostRepository postRepository;
+    private final WalletService walletService;
+    private final NotificationService notificationService;
+
+    @Autowired
+    public InspectionEscrowExpiryScheduler(InspectionOrderRepository inspectionOrderRepository,
+                                           InspectionEscrowService inspectionEscrowService,
+                                           PostRepository postRepository,
+                                           WalletService walletService,
+                                           @Autowired(required = false) NotificationService notificationService) {
+        this.inspectionOrderRepository = inspectionOrderRepository;
+        this.inspectionEscrowService = inspectionEscrowService;
+        this.postRepository = postRepository;
+        this.walletService = walletService;
+        this.notificationService = notificationService;
+    }
 
     /**
      * Quét định kỳ mỗi 60 giây các đơn kiểm định quá hạn 6 giờ chưa đủ tiền thanh toán.
@@ -62,6 +80,41 @@ public class InspectionEscrowExpiryScheduler {
         order.setStatus("CANCELLED");
         order.setNote((order.getNote() != null ? order.getNote() + " | " : "") +
                 "Người mua không thanh toán tiền hàng trong vòng 6 giờ sau khi kiểm định đạt chuẩn.");
+
+        // Bồi hoàn tiền cọc/phí kiểm định của người mua cho người bán
+        if (order.getBuyerPaidAt() != null && order.getBuyer() != null && order.getSeller() != null
+                && order.getBuyerFeeShare() != null && order.getBuyerFeeShare().compareTo(BigDecimal.ZERO) > 0) {
+            try {
+                walletService.processEarning(order.getSeller().getId(), order.getBuyerFeeShare(), order.getId());
+                log.info("Compensated buyer deposit fee share of {} to seller {} for cancelled inspection order {}",
+                        order.getBuyerFeeShare(), order.getSeller().getId(), order.getId());
+
+                if (notificationService != null) {
+                    notificationService.notify(
+                            order.getSeller().getId(),
+                            "Nhận tiền bồi hoàn cọc kiểm định",
+                            "Người mua không thanh toán tiền hàng đúng hạn 6 giờ. Bạn nhận được số tiền bồi hoàn cọc: " + order.getBuyerFeeShare() + " VND.",
+                            NotificationType.ORDER,
+                            order.getId(),
+                            "INSPECTION_ORDER",
+                            "/seller/inspections/" + order.getId()
+                    );
+                    notificationService.notify(
+                            order.getBuyer().getId(),
+                            "Đơn kiểm định đã bị hủy do quá hạn thanh toán",
+                            "Bạn không hoàn tất thanh toán trong 6 giờ. Đơn hàng bị hủy và tiền cọc kiểm định được bồi hoàn cho người bán theo chính sách cam kết.",
+                            NotificationType.ORDER,
+                            order.getId(),
+                            "INSPECTION_ORDER",
+                            "/buyer/inspections/" + order.getId()
+                    );
+                }
+            } catch (Exception ex) {
+                log.error("Failed to compensate seller {} for expired final payment order {}: {}",
+                        order.getSeller().getId(), order.getId(), ex.getMessage());
+            }
+        }
+
         inspectionOrderRepository.save(order);
 
         // Trả lại trạng thái bài đăng về ACTIVE cho người bán

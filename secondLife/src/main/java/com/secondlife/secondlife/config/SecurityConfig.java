@@ -33,6 +33,7 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final com.secondlife.secondlife.security.filter.InspectionSealRateLimitingFilter sealRateLimitingFilter;
     private final JwtAuthenticationEntryPoint authenticationEntryPoint;
     private final JwtAccessDeniedHandler accessDeniedHandler;
     private final CorsProperties corsProperties;
@@ -77,7 +78,8 @@ public class SecurityConfig {
                                 AuthorityAuthorizationManager.hasAuthority("ADMIN_RBAC_MANAGE")))
                         .anyRequest().authenticated()
                 )
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(sealRateLimitingFilter, JwtAuthenticationFilter.class);
 
         return http.build();
     }

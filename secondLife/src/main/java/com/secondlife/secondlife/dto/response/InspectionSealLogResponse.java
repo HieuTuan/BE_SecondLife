@@ -21,6 +21,8 @@ public class InspectionSealLogResponse {
     private String scanStage;
     private String sealCondition;
     private String locationText;
+    private java.math.BigDecimal latitude;
+    private java.math.BigDecimal longitude;
     private String note;
     private Instant scannedAt;
 
@@ -42,6 +44,8 @@ public class InspectionSealLogResponse {
                 .scanStage(log.getScanStage())
                 .sealCondition(log.getSealCondition())
                 .locationText(log.getLocationText())
+                .latitude(log.getLatitude())
+                .longitude(log.getLongitude())
                 .note(log.getNote())
                 .scannedAt(log.getScannedAt())
                 .build();

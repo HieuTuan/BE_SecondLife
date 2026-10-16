@@ -18,6 +18,7 @@ public class InspectionSealVerificationResponse {
     private UUID inspectionOrderId;
     private UUID postId;
     private String productTitle;
+    private String productImageUrl;
     private String productModel;
     private String productBrand;
     private Integer conditionScore;

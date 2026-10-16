@@ -71,6 +71,7 @@ public class InspectionServiceImpl implements InspectionService {
     private final ObjectMapper objectMapper;
     private final NotificationService notificationService;
     private final com.secondlife.secondlife.repository.InspectionSealLogRepository inspectionSealLogRepository;
+    private final com.secondlife.secondlife.service.TamperSealService tamperSealService;
 
     @Qualifier("googleGenAiChatModel")
     private final org.springframework.ai.chat.model.ChatModel googleChatModel;
@@ -643,8 +644,19 @@ public class InspectionServiceImpl implements InspectionService {
         if (request.getConditionGrade() != null) {
             order.setConditionGrade(request.getConditionGrade());
         }
+        String sealId = null;
         if (request.getTamperSealId() != null && !request.getTamperSealId().isBlank()) {
-            String sealId = request.getTamperSealId().trim();
+            sealId = request.getTamperSealId().trim();
+            if (!tamperSealService.verifyChecksum(sealId)) {
+                throw new BadRequestException("Mã tem niêm phong không hợp lệ hoặc sai định dạng checksum");
+            }
+        } else if (order.getTamperSealId() != null && !order.getTamperSealId().isBlank()) {
+            sealId = order.getTamperSealId();
+        } else if ("PASSED".equals(request.getStatus())) {
+            sealId = tamperSealService.generateSealCode();
+        }
+
+        if (sealId != null) {
             order.setTamperSealId(sealId);
             if (inspectionSealLogRepository != null && !inspectionSealLogRepository.existsByTamperSealIdAndScanStage(sealId, "INITIAL_SEAL")) {
                 User inspector = userRepository.findById(inspectorId).orElse(null);
@@ -678,7 +690,7 @@ public class InspectionServiceImpl implements InspectionService {
         if ("FAILED".equals(request.getStatus())) {
             order.setStatus(InspectionOrderStatus.FAILED.name());
             if (!isExternalVideo) {
-                order.setVideoRetentionUntil(Instant.now().plus(48, java.time.temporal.ChronoUnit.HOURS));
+                order.setVideoRetentionUntil(Instant.now().plus(14, java.time.temporal.ChronoUnit.DAYS));
             }
             post.setStatus("ACTIVE"); // Mở lại bài đăng
             postRepository.save(post);
@@ -886,11 +898,21 @@ public class InspectionServiceImpl implements InspectionService {
             }
         }
 
+        String productImageUrl = null;
+        if (post != null) {
+            if (post.getImageUrls() != null && !post.getImageUrls().isEmpty()) {
+                productImageUrl = post.getImageUrls().get(0);
+            } else {
+                productImageUrl = post.getImageUrl();
+            }
+        }
+
         return com.secondlife.secondlife.dto.response.InspectionSealVerificationResponse.builder()
                 .tamperSealId(tamperSealId.trim())
                 .inspectionOrderId(order.getId())
                 .postId(post != null ? post.getId() : null)
                 .productTitle(post != null ? post.getTitle() : null)
+                .productImageUrl(productImageUrl)
                 .productModel(null)
                 .productBrand(null)
                 .conditionScore(order.getConditionScore())
@@ -924,6 +946,8 @@ public class InspectionServiceImpl implements InspectionService {
                 request.getScanStage().trim().toUpperCase(),
                 request.getSealCondition().trim().toUpperCase(),
                 request.getLocationText(),
+                request.getLatitude(),
+                request.getLongitude(),
                 request.getNote()
         );
 
@@ -944,5 +968,22 @@ public class InspectionServiceImpl implements InspectionService {
         }
 
         return com.secondlife.secondlife.dto.response.InspectionSealLogResponse.from(sealLog);
+    }
+
+    @Override
+    @Transactional
+    public String generateSealForOrder(UUID inspectorId, UUID orderId) {
+        InspectionOrder order = inspectionOrderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
+        if (order.getInspector() != null && !order.getInspector().getId().equals(inspectorId)) {
+            throw new ForbiddenException("Bạn không được phân công kiểm định cho đơn này");
+        }
+        if (order.getTamperSealId() != null && !order.getTamperSealId().isBlank()) {
+            return order.getTamperSealId();
+        }
+        String newSeal = tamperSealService.generateSealCode();
+        order.setTamperSealId(newSeal);
+        inspectionOrderRepository.save(order);
+        return newSeal;
     }
 }

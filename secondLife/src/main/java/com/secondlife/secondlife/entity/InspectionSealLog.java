@@ -39,6 +39,12 @@ public class InspectionSealLog {
     @Column(name = "location_text", length = 255)
     private String locationText;
 
+    @Column(name = "latitude", precision = 10, scale = 7)
+    private java.math.BigDecimal latitude;
+
+    @Column(name = "longitude", precision = 10, scale = 7)
+    private java.math.BigDecimal longitude;
+
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
 
@@ -47,12 +53,20 @@ public class InspectionSealLog {
 
     public InspectionSealLog(InspectionOrder inspectionOrder, String tamperSealId, User scannedBy,
                              String scanStage, String sealCondition, String locationText, String note) {
+        this(inspectionOrder, tamperSealId, scannedBy, scanStage, sealCondition, locationText, null, null, note);
+    }
+
+    public InspectionSealLog(InspectionOrder inspectionOrder, String tamperSealId, User scannedBy,
+                             String scanStage, String sealCondition, String locationText,
+                             java.math.BigDecimal latitude, java.math.BigDecimal longitude, String note) {
         this.inspectionOrder = inspectionOrder;
         this.tamperSealId = tamperSealId;
         this.scannedBy = scannedBy;
         this.scanStage = scanStage;
         this.sealCondition = sealCondition;
         this.locationText = locationText;
+        this.latitude = latitude;
+        this.longitude = longitude;
         this.note = note;
         this.scannedAt = Instant.now();
     }

@@ -45,7 +45,7 @@ class SecondLifeApplicationTests {
                 .andExpect(jsonPath("$.paths['/api/v1/auth/login']").doesNotExist())
                 .andExpect(jsonPath("$.paths['/api/v1/seller-onboarding/me'].put").exists())
                 .andExpect(jsonPath("$.paths.keys()").value(everyItem(anyOf(
-                        startsWith("/api/v1/"), startsWith("/api/auth/")))));
+                        startsWith("/api/v1/"), startsWith("/api/auth/"), startsWith("/api/ai/")))));
     }
 
     @Test

@@ -93,4 +93,15 @@ public class InspectorController {
         UUID inspectorId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(inspectionService.submitResult(orderId, inspectorId, request));
     }
+
+    @PostMapping("/orders/{orderId}/generate-seal")
+    @PreAuthorize("hasAuthority('INSPECTION_REPORT_SUBMIT')")
+    @Operation(summary = "Kỹ thuật viên yêu cầu hệ thống tự sinh mã tem niêm phong số chuẩn kèm checksum")
+    public ResponseEntity<com.secondlife.secondlife.common.ApiResponse<String>> generateSeal(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID orderId) {
+        UUID inspectorId = currentUserProvider.resolveUserId(userDetails);
+        String sealCode = inspectionService.generateSealForOrder(inspectorId, orderId);
+        return ResponseEntity.ok(com.secondlife.secondlife.common.ApiResponse.success("Sinh mã tem thành công", sealCode));
+    }
 }
