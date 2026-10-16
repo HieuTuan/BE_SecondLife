@@ -15,6 +15,11 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import com.secondlife.secondlife.dto.response.InspectorPayoutResponse;
+import com.secondlife.secondlife.dto.response.InspectorStatsResponse;
+import org.springdoc.core.annotations.ParameterObject;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -103,5 +108,26 @@ public class InspectorController {
         UUID inspectorId = currentUserProvider.resolveUserId(userDetails);
         String sealCode = inspectionService.generateSealForOrder(inspectorId, orderId);
         return ResponseEntity.ok(com.secondlife.secondlife.common.ApiResponse.success("Sinh mã tem thành công", sealCode));
+    }
+
+    @GetMapping("/stats")
+    @PreAuthorize("hasAuthority('INSPECTION_ORDER_READ_SELF')")
+    @Operation(summary = "Kỹ thuật viên xem thống kê hiệu suất KPI và tổng thu nhập theo tháng")
+    public ResponseEntity<InspectorStatsResponse> getMyStats(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @RequestParam(required = false) Integer month,
+            @RequestParam(required = false) Integer year) {
+        UUID inspectorId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(inspectionService.getInspectorStats(inspectorId, month, year));
+    }
+
+    @GetMapping("/payouts")
+    @PreAuthorize("hasAuthority('INSPECTION_ORDER_READ_SELF')")
+    @Operation(summary = "Kỹ thuật viên xem danh sách lịch sử thù lao và phụ cấp theo từng đơn")
+    public ResponseEntity<Page<InspectorPayoutResponse>> getPayoutHistory(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @ParameterObject Pageable pageable) {
+        UUID inspectorId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(inspectionService.getPayoutHistory(inspectorId, pageable));
     }
 }

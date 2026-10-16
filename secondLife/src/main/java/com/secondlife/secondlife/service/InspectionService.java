@@ -97,4 +97,14 @@ public interface InspectionService {
      * Sinh mã tem niêm phong chuẩn cho đơn kiểm định
      */
     String generateSealForOrder(UUID inspectorId, UUID orderId);
+
+    /**
+     * Kỹ thuật viên xem thống kê hiệu suất KPI và tổng thu nhập theo tháng
+     */
+    com.secondlife.secondlife.dto.response.InspectorStatsResponse getInspectorStats(UUID inspectorId, Integer month, Integer year);
+
+    /**
+     * Kỹ thuật viên xem danh sách lịch sử thù lao và phụ cấp theo từng đơn
+     */
+    Page<com.secondlife.secondlife.dto.response.InspectorPayoutResponse> getPayoutHistory(UUID inspectorId, Pageable pageable);
 }

@@ -26,6 +26,9 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
 
     List<InspectionOrder> findByInspectorIdOrderByCreatedAtDesc(UUID inspectorId);
 
+    @Query("SELECT o FROM InspectionOrder o WHERE o.inspector.id = :inspectorId AND o.status IN ('PASSED', 'FAILED', 'COMPLETED') ORDER BY o.updatedAt DESC")
+    Page<InspectionOrder> findPayoutOrdersByInspectorId(@Param("inspectorId") UUID inspectorId, Pageable pageable);
+
     Page<InspectionOrder> findByStatus(String status, Pageable pageable);
 
     Page<InspectionOrder> findAll(Pageable pageable);

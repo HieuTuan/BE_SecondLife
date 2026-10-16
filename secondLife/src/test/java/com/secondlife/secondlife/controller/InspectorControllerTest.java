@@ -1,11 +1,15 @@
 package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
-import com.secondlife.secondlife.dto.response.InspectionChecklistItemResponse;
-import com.secondlife.secondlife.dto.response.InspectionChecklistResponse;
-import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
+import com.secondlife.secondlife.dto.response.*;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Post;
+import com.secondlife.secondlife.enums.InspectionOrderType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import java.math.BigDecimal;
 import com.secondlife.secondlife.exception.GlobalExceptionHandler;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.security.CurrentUserProvider;
@@ -22,7 +26,9 @@ import org.springframework.http.MediaType;
 import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 
 import java.util.List;
 import java.util.Optional;
@@ -59,8 +65,14 @@ class InspectorControllerTest {
 
     @BeforeEach
     void setUp() {
+        objectMapper.registerModule(new JavaTimeModule());
+
         mockMvc = MockMvcBuilders.standaloneSetup(inspectorController)
-                .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
+                .setCustomArgumentResolvers(
+                        new AuthenticationPrincipalArgumentResolver(),
+                        new org.springframework.data.web.PageableHandlerMethodArgumentResolver()
+                )
+                .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -204,5 +216,64 @@ class InspectorControllerTest {
         mockMvc.perform(post("/api/v1/inspector/orders/" + orderId + "/start"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("INSPECTING"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/inspector/stats: Lấy thống kê hiệu suất KPI và thu nhập thành công")
+    void testGetMyStats() throws Exception {
+        UUID inspectorId = UUID.randomUUID();
+        when(currentUserProvider.resolveUserId(any())).thenReturn(inspectorId);
+
+        InspectorStatsResponse response = InspectorStatsResponse.builder()
+                .inspectorId(inspectorId)
+                .inspectorName("Trần Kỹ Thuật")
+                .badgeCode("SL-TECH-089A")
+                .skillLevel("Kỹ thuật viên Thẩm định Bậc 3")
+                .completedJobs(15)
+                .passedJobs(12)
+                .failedJobs(3)
+                .averageRating(4.9)
+                .onTimeRate(98.5)
+                .monthlyEarnings(new BigDecimal("3500000"))
+                .laborFeeEarned(new BigDecimal("2800000"))
+                .travelAllowanceEarned(new BigDecimal("700000"))
+                .pendingSettlementAmount(new BigDecimal("500000"))
+                .build();
+
+        when(inspectionService.getInspectorStats(eq(inspectorId), eq(10), eq(2026))).thenReturn(response);
+
+        mockMvc.perform(get("/api/v1/inspector/stats?month=10&year=2026"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.badgeCode").value("SL-TECH-089A"))
+                .andExpect(jsonPath("$.completedJobs").value(15))
+                .andExpect(jsonPath("$.monthlyEarnings").value(3500000))
+                .andExpect(jsonPath("$.averageRating").value(4.9));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/inspector/payouts: Lấy danh sách lịch sử đối soát thù lao phân trang thành công")
+    void testGetPayoutHistory() throws Exception {
+        UUID inspectorId = UUID.randomUUID();
+        when(currentUserProvider.resolveUserId(any())).thenReturn(inspectorId);
+
+        InspectorPayoutResponse payout = InspectorPayoutResponse.builder()
+                .payoutId("PO-ABC12345")
+                .orderId(UUID.randomUUID())
+                .postTitle("Samsung Galaxy S23 Ultra")
+                .orderType(InspectionOrderType.AT_HOME)
+                .laborFee(new BigDecimal("150000"))
+                .travelFee(new BigDecimal("30000"))
+                .totalPayout(new BigDecimal("180000"))
+                .status("SETTLED")
+                .build();
+
+        Page<InspectorPayoutResponse> page = new PageImpl<>(List.of(payout), PageRequest.of(0, 10), 1);
+        when(inspectionService.getPayoutHistory(eq(inspectorId), any(Pageable.class))).thenReturn(page);
+
+        mockMvc.perform(get("/api/v1/inspector/payouts?page=0&size=10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].payoutId").value("PO-ABC12345"))
+                .andExpect(jsonPath("$.content[0].totalPayout").value(180000))
+                .andExpect(jsonPath("$.content[0].status").value("SETTLED"));
     }
 }
