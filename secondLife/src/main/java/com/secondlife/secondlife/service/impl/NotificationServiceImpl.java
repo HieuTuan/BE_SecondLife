@@ -63,6 +63,16 @@ public class NotificationServiceImpl implements NotificationService {
     @Override
     @Transactional
     public NotificationResponseDTO notify(UUID userId, String title, String message, String type, UUID referenceId, String referenceType, String actionUrl) {
+        return createNotification(userId, title, message, type, referenceId, referenceType, actionUrl, true);
+    }
+
+    @Override
+    @Transactional
+    public NotificationResponseDTO notifyInApp(UUID userId, String title, String message, String type, UUID referenceId, String referenceType, String actionUrl) {
+        return createNotification(userId, title, message, type, referenceId, referenceType, actionUrl, false);
+    }
+
+    private NotificationResponseDTO createNotification(UUID userId, String title, String message, String type, UUID referenceId, String referenceType, String actionUrl, boolean dispatchExternalChannels) {
         if (userId == null) {
             log.warn("Cannot create notification: userId is null");
             return null;
@@ -100,7 +110,7 @@ public class NotificationServiceImpl implements NotificationService {
         });
 
         // Dispatch to push notification channels (FCM)
-        if (channels != null && !channels.isEmpty()) {
+        if (dispatchExternalChannels && channels != null && !channels.isEmpty()) {
             afterCommit(() -> {
                 com.secondlife.secondlife.notification.NotificationType parsedType = com.secondlife.secondlife.notification.NotificationType.SYSTEM;
                 try {

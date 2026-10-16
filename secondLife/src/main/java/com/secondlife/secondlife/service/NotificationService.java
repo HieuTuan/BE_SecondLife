@@ -23,6 +23,15 @@ public interface NotificationService {
     }
 
     /**
+     * Lưu thông báo và đẩy WebSocket; không gửi qua email, SMS hoặc FCM.
+     */
+    NotificationResponseDTO notifyInApp(UUID userId, String title, String message, String type, UUID referenceId, String referenceType, String actionUrl);
+
+    default NotificationResponseDTO notifyInApp(UUID userId, String title, String message, com.secondlife.secondlife.notification.NotificationType type, UUID referenceId, String referenceType, String actionUrl) {
+        return notifyInApp(userId, title, message, type != null ? type.name() : "SYSTEM", referenceId, referenceType, actionUrl);
+    }
+
+    /**
      * Tạo thông báo In-App, đẩy WebSocket và gửi kèm Email chứng từ quan trọng.
      */
     NotificationResponseDTO notifyWithEmail(User user, String title, String message, String type, UUID referenceId, String referenceType, String actionUrl, String emailSubject, String emailBody);

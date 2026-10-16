@@ -10,6 +10,7 @@ public enum NotificationType {
     INSPECTION_CENTER_CREATED,
     ORDER,
     REPUTATION,
+    REPORT,
     INSPECTION,
     SHIPPING,
     LISTING,

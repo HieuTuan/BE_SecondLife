@@ -21,8 +21,9 @@ public class StaffReportController {
     private final UserReportService reports;
     private final CurrentUserProvider currentUser;
     @GetMapping
-    public ApiResponse<PageResponse<ReportResponse>> queue(@RequestParam(required=false) ReportRequests.Status status,Pageable pageable) {
-        return ApiResponse.success(reports.queue(status,pageable));
+    public ApiResponse<PageResponse<ReportResponse>> queue(@RequestParam(required=false) ReportRequests.Status status,
+            @RequestParam(required=false) ReportRequests.TargetType targetType,Pageable pageable) {
+        return ApiResponse.success(reports.queue(status,targetType,pageable));
     }
     @PostMapping("/{id}/start-review")
     @Operation(summary="Assign OPEN report to the current reviewer; other staff cannot resolve it")
@@ -30,7 +31,7 @@ public class StaffReportController {
         return ApiResponse.success(reports.startReview(currentUser.resolveUserId(user),id));
     }
     @PostMapping("/{id}/resolve")
-    @Operation(summary="Confirm responsible party or dismiss; only confirmed SELLER fault changes reputation, FRAUD restricts new sales")
+    @Operation(summary="Confirm responsible party or dismiss; only confirmed SELLER fault changes reputation, repeated confirmed FRAUD restricts new sales")
     public ApiResponse<ReportResponse> resolve(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID id,
             @Valid @RequestBody ReportRequests.Resolve request) {
         return ApiResponse.success(reports.resolve(currentUser.resolveUserId(user),id,request));

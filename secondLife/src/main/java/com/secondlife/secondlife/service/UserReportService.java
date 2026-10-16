@@ -26,11 +26,18 @@ public class UserReportService {
     private final ReputationProperties properties;
     private final ObjectMapper mapper;
     private final ReportEvidenceService evidence;
+    private final ListingReportNotifications notifications;
     public UserReportService(JdbcTemplate jdbc,OrderRepository orders,PostRepository posts,
             SellerReputationService reputation,ReputationProperties properties,ObjectMapper mapper,
-            ReportEvidenceService evidence) {
+            ReportEvidenceService evidence,ListingReportNotifications notifications) {
         this.jdbc=jdbc; this.orders=orders; this.posts=posts; this.reputation=reputation;
-        this.properties=properties; this.mapper=mapper; this.evidence=evidence;
+        this.properties=properties; this.mapper=mapper; this.evidence=evidence; this.notifications=notifications;
+    }
+
+    @Transactional
+    public ReportResponse createListing(UUID reporterId,UUID postId,ListingCreate request) {
+        return create(reporterId,new Create(request.requestId(),postId,null,ReasonCode.valueOf(request.reasonCode().name()),
+                request.description(),request.evidenceUrls(),request.relatedPostId()));
     }
 
     @Transactional
@@ -44,13 +51,16 @@ public class UserReportService {
             if (!Objects.equals(previous.orderId(),request.orderId())
                     || (request.postId()!=null && !previous.postId().equals(request.postId()))
                     || previous.reasonCode()!=request.reasonCode() || !previous.description().equals(request.description().trim())
-                    || !previous.evidenceUrls().equals(request.evidenceUrls()))
+                    || !previous.evidenceUrls().equals(request.evidenceUrls())
+                    || !Objects.equals(previous.relatedPostId(),request.relatedPostId()))
                 throw new ConflictException("requestId was already used for different report details");
             return previous;
         }
         UUID postId,sellerId;
         if ((request.postId()==null)==(request.orderId()==null)) throw new BadRequestException("Provide exactly one of postId or orderId");
         if (request.orderId()!=null) {
+            if (request.reasonCode()==ReasonCode.DUPLICATE_LISTING || request.relatedPostId()!=null)
+                throw new BadRequestException("Duplicate listing reports and relatedPostId require a postId, not an orderId");
             Order order=orders.findById(request.orderId()).orElseThrow(() -> new NotFoundException("Order not found"));
             if (!order.getBuyer().getId().equals(reporterId)) throw new ForbiddenException("Only the buyer of this order can report it");
             if (order.getStatus()==com.secondlife.secondlife.enums.OrderStatus.PENDING_PAYMENT)
@@ -59,9 +69,11 @@ public class UserReportService {
         } else {
             var post=posts.findById(request.postId()).orElseThrow(() -> new NotFoundException("Post not found"));
             if (!Set.of("ACTIVE","RESERVED","SOLD").contains(post.getStatus())) throw new ConflictException("Only a published listing can be reported");
-            if (Set.of(ReasonCode.ITEM_NOT_RECEIVED,ReasonCode.LATE_HANDOVER,ReasonCode.SELLER_CANCELLATION,ReasonCode.RETURN_NOT_AS_DESCRIBED).contains(request.reasonCode())) throw new BadRequestException("This report reason requires an orderId");
+            if (!Set.of(ReasonCode.FRAUD,ReasonCode.MISLEADING_DESCRIPTION,ReasonCode.DUPLICATE_LISTING,ReasonCode.OTHER).contains(request.reasonCode()))
+                throw new BadRequestException("Listing reports support FRAUD, MISLEADING_DESCRIPTION, DUPLICATE_LISTING and OTHER only");
             postId=post.getId(); sellerId=post.getUser().getId();
         }
+        validateRelatedListing(request,postId);
         if (sellerId.equals(reporterId)) throw new BadRequestException("You cannot report your own listing or order");
         boolean pending=Boolean.TRUE.equals(jdbc.queryForObject("""
             SELECT EXISTS(SELECT 1 FROM user_reports WHERE reporter_id=? AND post_id=?
@@ -70,11 +82,13 @@ public class UserReportService {
         if (pending) throw new ConflictException("A report for this target and reason is already awaiting review");
         UUID id=UUID.randomUUID();
         jdbc.update("""
-            INSERT INTO user_reports(id,reporter_id,request_id,seller_id,post_id,order_id,reason_code,description,evidence_urls,status,created_at,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,CAST(? AS JSONB),'OPEN',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-            """,id,reporterId,request.requestId(),sellerId,postId,request.orderId(),request.reasonCode().name(),request.description().trim(),mapper.writeValueAsString(request.evidenceUrls()));
+            INSERT INTO user_reports(id,reporter_id,request_id,seller_id,post_id,order_id,reason_code,description,evidence_urls,related_post_id,status,created_at,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,CAST(? AS JSONB),?,'OPEN',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+            """,id,reporterId,request.requestId(),sellerId,postId,request.orderId(),request.reasonCode().name(),request.description().trim(),mapper.writeValueAsString(request.evidenceUrls()),request.relatedPostId());
         evidence.bind(reporterId,id,request.evidenceUrls());
-        return find(id,false);
+        var report=find(id,false);
+        if (report.orderId()==null) notifications.created(report);
+        return report;
     }
 
     @Transactional(readOnly=true)
@@ -84,12 +98,12 @@ public class UserReportService {
         return report;
     }
     @Transactional(readOnly=true)
-    public PageResponse<ReportResponse> mine(UUID reporterId,Pageable page) {
-        return page("reporter_id=?",List.of(reporterId),page);
+    public PageResponse<ReportResponse> mine(UUID reporterId,TargetType targetType,Pageable page) {
+        return page("reporter_id=?"+targetFilter(targetType),List.of(reporterId),page);
     }
     @Transactional(readOnly=true)
-    public PageResponse<ReportResponse> queue(Status status,Pageable page) {
-        return page(status==null?"TRUE":"status=?",status==null?List.of():List.of(status.name()),page);
+    public PageResponse<ReportResponse> queue(Status status,TargetType targetType,Pageable page) {
+        return page((status==null?"TRUE":"status=?")+targetFilter(targetType),status==null?List.of():List.of(status.name()),page);
     }
     @Transactional
     public ReportResponse startReview(UUID reviewerId,UUID id) {
@@ -99,7 +113,9 @@ public class UserReportService {
         if (reviewerId.equals(report.sellerId()) || reviewerId.equals(report.reporterId()))
             throw new ForbiddenException("You cannot review a report concerning yourself");
         jdbc.update("UPDATE user_reports SET status='IN_REVIEW',reviewer_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",reviewerId,id);
-        return find(id,false);
+        var updated=find(id,false);
+        if (updated.orderId()==null) notifications.reviewStarted(updated);
+        return updated;
     }
     @Transactional
     public ReportResponse resolve(UUID reviewerId,UUID id,Resolve request) {
@@ -126,7 +142,21 @@ public class UserReportService {
             """,request.decision().name(),party.name(),request.reason().trim(),id);
         if (request.decision()==Decision.CONFIRMED && party==ResponsibleParty.SELLER)
             reputation.confirmSellerFault(report,reviewerId,request.reason().trim());
-        return find(id,false);
+        var updated=find(id,false);
+        if (updated.orderId()==null) notifications.resolved(updated);
+        return updated;
+    }
+    private String targetFilter(TargetType targetType) {
+        return targetType==null ? "" : targetType==TargetType.LISTING ? " AND order_id IS NULL" : " AND order_id IS NOT NULL";
+    }
+    private void validateRelatedListing(Create request,UUID postId) {
+        if (request.relatedPostId()==null) return;
+        if (request.orderId()!=null || request.reasonCode()!=ReasonCode.DUPLICATE_LISTING)
+            throw new BadRequestException("relatedPostId is only allowed for duplicate listing reports");
+        if (request.relatedPostId().equals(postId)) throw new BadRequestException("Related listing must differ from the reported listing");
+        var related=posts.findById(request.relatedPostId()).orElseThrow(() -> new NotFoundException("Related listing not found"));
+        if (!Set.of("ACTIVE","RESERVED","SOLD").contains(related.getStatus()))
+            throw new ConflictException("Related listing must be published");
     }
     private ReportResponse find(UUID id,boolean lock) {
         return jdbc.query("SELECT * FROM user_reports WHERE id=?"+(lock?" FOR UPDATE":""),this::row,id)
@@ -145,7 +175,8 @@ public class UserReportService {
                 ReasonCode.valueOf(rs.getString("reason_code")),rs.getString("description"),
                 List.of(mapper.readValue(rs.getString("evidence_urls"),String[].class)),Status.valueOf(rs.getString("status")),
                 rs.getObject("reviewer_id",UUID.class),party==null?null:ResponsibleParty.valueOf(party),rs.getString("decision_reason"),
-                instant(rs,"created_at"),instant(rs,"updated_at"),instant(rs,"resolved_at"));
+                instant(rs,"created_at"),instant(rs,"updated_at"),instant(rs,"resolved_at"),
+                rs.getObject("related_post_id",UUID.class),rs.getObject("order_id")==null?TargetType.LISTING:TargetType.ORDER);
     }
     private void validateEvidence(UUID ownerId,List<String> urls) {
         if(urls.size()>properties.maxEvidenceImages()) throw new BadRequestException("Too many report evidence images; maximum is "+properties.maxEvidenceImages());

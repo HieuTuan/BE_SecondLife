@@ -26,9 +26,17 @@ public class UserReportController {
     public ApiResponse<ReportResponse> create(@AuthenticationPrincipal CustomUserDetails user,@Valid @RequestBody ReportRequests.Create request) {
         return ApiResponse.success(reports.create(currentUser.resolveUserId(user),request));
     }
+    @PostMapping("/listings/{postId}") @ResponseStatus(HttpStatus.CREATED)
+    @Operation(summary="Báo cáo vi phạm bài đăng: nghi ngờ lừa đảo, sai thông tin, trùng bài hoặc vi phạm khác",
+            description="Không cần mua hàng. Upload bằng chứng trước qua POST /api/v1/reports/evidence. Report mới chưa làm giảm điểm người bán.")
+    public ApiResponse<ReportResponse> createListing(@AuthenticationPrincipal CustomUserDetails user,
+            @PathVariable UUID postId,@Valid @RequestBody ReportRequests.ListingCreate request) {
+        return ApiResponse.success(reports.createListing(currentUser.resolveUserId(user),postId,request));
+    }
     @GetMapping("/me")
-    public ApiResponse<PageResponse<ReportResponse>> mine(@AuthenticationPrincipal CustomUserDetails user,Pageable pageable) {
-        return ApiResponse.success(reports.mine(currentUser.resolveUserId(user),pageable));
+    public ApiResponse<PageResponse<ReportResponse>> mine(@AuthenticationPrincipal CustomUserDetails user,
+            @RequestParam(required=false) ReportRequests.TargetType targetType,Pageable pageable) {
+        return ApiResponse.success(reports.mine(currentUser.resolveUserId(user),targetType,pageable));
     }
     @GetMapping("/{id}")
     @Operation(summary="Private report detail; only reporter or authorized STAFF/ADMIN")
