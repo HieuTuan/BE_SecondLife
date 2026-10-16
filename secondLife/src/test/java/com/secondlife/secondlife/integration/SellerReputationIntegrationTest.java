@@ -146,11 +146,17 @@ class SellerReputationIntegrationTest {
         recordGood(order);
         assertEquals(0,reputation.get(seller.getId()).goodTransactions()); assertEquals(1,reputation.get(seller.getId()).badTransactions());
     }
-    @Test void seriousFraudWarnsAndRestrictsNewSalesAndAdminCanLiftWithAudit() throws Exception {
+    @Test void secondDistinctFraudRestrictsNewSalesAndAdminCanLiftWithAudit() throws Exception {
         var seller=user("SELLER"); var buyer=user("BUYER"); var staff=user("STAFF"); var admin=user("ADMIN");
         var listing=listing(seller); UUID report=report(buyer,listing.getId(),null,"FRAUD"); start(staff,report);
         resolve(staff,report,"CONFIRMED","SELLER").andExpect(status().isOk());
-        var data=reputation.get(seller.getId()); assertTrue(data.sellingRestricted()); assertEquals(1,data.seriousIncidents());
+        var first=reputation.get(seller.getId());
+        assertFalse(first.sellingRestricted()); assertEquals(1,first.seriousIncidents());
+        assertEquals("SERIOUS_VIOLATION_HISTORY",first.warningCode());
+        assertDoesNotThrow(()->reputation.requireSellingAllowed(seller.getId()));
+        UUID second=report(buyer,listing(seller).getId(),null,"FRAUD"); start(staff,second);
+        resolve(staff,second,"CONFIRMED","SELLER").andExpect(status().isOk());
+        var data=reputation.get(seller.getId()); assertTrue(data.sellingRestricted()); assertEquals(2,data.seriousIncidents());
         assertEquals("SELLING_RESTRICTED",data.warningCode()); assertEquals(0,data.evaluatedOrders());
         assertThrows(com.secondlife.secondlife.exception.ForbiddenException.class,()->reputation.requireSellingAllowed(seller.getId()));
         mvc.perform(post("/api/v1/orders").header("Authorization",bearer(buyer)).contentType(MediaType.APPLICATION_JSON)
@@ -163,8 +169,57 @@ class SellerReputationIntegrationTest {
         mvc.perform(post(url).header("Authorization",bearer(admin)).contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.sellingRestricted").value(false))
             .andExpect(jsonPath("$.data.warningCode").value("SERIOUS_VIOLATION_HISTORY"));
-        assertEquals(2,eventCount(seller));
+        assertEquals(3,eventCount(seller));
         assertDoesNotThrow(()->reputation.requireSellingAllowed(seller.getId()));
+    }
+    @Test void firstConfirmedListingFraudWarnsWithoutCreatingBadOrders() throws Exception {
+        var seller=user("SELLER"); var reporter=user("BUYER"); var staff=user("STAFF");
+        UUID id=report(reporter,listing(seller).getId(),null,"FRAUD"); start(staff,id);
+        resolve(staff,id,"CONFIRMED","SELLER").andExpect(status().isOk());
+        var state=reputation.get(seller.getId());
+        assertEquals(1,state.seriousIncidents()); assertEquals(1,state.confirmedIncidents());
+        assertEquals(0,state.badTransactions()); assertEquals(0,state.evaluatedOrders());
+        assertFalse(state.sellingRestricted()); assertEquals("SERIOUS_VIOLATION_HISTORY",state.warningCode());
+        assertDoesNotThrow(()->reputation.requireSellingAllowed(seller.getId()));
+    }
+    @Test void multipleFraudReportsForSameListingRemainOneIncident() throws Exception {
+        var seller=user("SELLER"); var staff=user("STAFF"); var p=listing(seller);
+        UUID first=report(user("BUYER"),p.getId(),null,"FRAUD"); start(staff,first);
+        resolve(staff,first,"CONFIRMED","SELLER").andExpect(status().isOk());
+        UUID second=report(user("BUYER"),p.getId(),null,"FRAUD"); start(staff,second);
+        resolve(staff,second,"CONFIRMED","SELLER").andExpect(status().isOk());
+        resolve(staff,second,"CONFIRMED","SELLER").andExpect(status().isOk());
+        var state=reputation.get(seller.getId());
+        assertEquals(1,state.seriousIncidents()); assertEquals(1,state.confirmedIncidents());
+        assertFalse(state.sellingRestricted()); assertEquals(1,eventCount(seller));
+    }
+    @Test void nonFraudViolationDoesNotTurnFirstFraudWarningIntoRestriction() throws Exception {
+        var seller=user("SELLER"); var reporter=user("BUYER"); var staff=user("STAFF");
+        UUID fraud=report(reporter,listing(seller).getId(),null,"FRAUD"); start(staff,fraud);
+        resolve(staff,fraud,"CONFIRMED","SELLER").andExpect(status().isOk());
+        UUID other=report(reporter,listing(seller).getId(),null,"OTHER"); start(staff,other);
+        resolve(staff,other,"CONFIRMED","SELLER").andExpect(status().isOk());
+        var state=reputation.get(seller.getId());
+        assertEquals(2,state.confirmedIncidents()); assertEquals(1,state.seriousIncidents());
+        assertFalse(state.sellingRestricted());
+    }
+    @Test void orderFraudEscalationCountsOnceAndSecondOrderTriggersRestriction() throws Exception {
+        var seller=user("SELLER"); var buyer=user("BUYER"); var staff=user("STAFF");
+        var first=order(seller,buyer,true); recordGood(first);
+        UUID other=report(buyer,null,first.getId(),"OTHER"); start(staff,other);
+        resolve(staff,other,"CONFIRMED","SELLER").andExpect(status().isOk());
+        UUID fraud=report(buyer,null,first.getId(),"FRAUD"); start(staff,fraud);
+        resolve(staff,fraud,"CONFIRMED","SELLER").andExpect(status().isOk());
+        resolve(staff,fraud,"CONFIRMED","SELLER").andExpect(status().isOk());
+        var warning=reputation.get(seller.getId());
+        assertEquals(1,warning.seriousIncidents()); assertEquals(1,warning.badTransactions());
+        assertFalse(warning.sellingRestricted());
+        var second=order(seller,buyer,true); recordGood(second);
+        UUID secondFraud=report(buyer,null,second.getId(),"FRAUD"); start(staff,secondFraud);
+        resolve(staff,secondFraud,"CONFIRMED","SELLER").andExpect(status().isOk());
+        var restricted=reputation.get(seller.getId());
+        assertEquals(2,restricted.seriousIncidents()); assertEquals(2,restricted.badTransactions());
+        assertTrue(restricted.sellingRestricted());
     }
     @Test void onlyAssignedStaffMayResolveAndCannotReviewOwnReport() throws Exception {
         var seller=user("SELLER"); var buyer=user("BUYER"); var staff=user("STAFF"); var other=user("STAFF");

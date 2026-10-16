@@ -100,6 +100,28 @@ class NotificationServiceImplTest {
     }
 
     @Test
+    void reportNotificationsDoNotDispatchExternalChannels() {
+        UUID reporterId=UUID.randomUUID(),reportId=UUID.randomUUID();
+        User user=new User("reporter@example.test","hash",AccountStatus.ACTIVE);
+        when(userRepository.findById(reporterId)).thenReturn(Optional.of(user));
+        var saved=Notification.builder().id(UUID.randomUUID()).user(user).title("Report result").message("Reviewed")
+                .type("REPORT").referenceId(reportId).createdAt(Instant.now()).isRead(false).isDeleted(false).build();
+        when(notificationRepository.save(any(Notification.class))).thenReturn(saved);
+        var report=new com.secondlife.secondlife.dto.reputation.ReportResponse(reportId,UUID.randomUUID(),reporterId,
+                UUID.randomUUID(),UUID.randomUUID(),null,
+                com.secondlife.secondlife.dto.reputation.ReportRequests.ReasonCode.OTHER,"Report details",List.of(),
+                com.secondlife.secondlife.dto.reputation.ReportRequests.Status.DISMISSED,UUID.randomUUID(),
+                com.secondlife.secondlife.dto.reputation.ReportRequests.ResponsibleParty.NONE,"No violation found",
+                Instant.now(),Instant.now(),Instant.now(),null,
+                com.secondlife.secondlife.dto.reputation.ReportRequests.TargetType.LISTING);
+        new com.secondlife.secondlife.service.ListingReportNotifications(
+                mock(org.springframework.jdbc.core.JdbcTemplate.class),notificationService).resolved(report);
+        verify(notificationRepository).save(any(Notification.class));
+        verify(messagingTemplate).convertAndSendToUser(eq(reporterId.toString()),eq("/queue/notifications"),any(Object.class));
+        verifyNoInteractions(emailChannel,smsChannel,mailSender);
+    }
+
+    @Test
     void getUnreadCount_ShouldReturnCountFromRepository() {
         UUID userId = UUID.randomUUID();
         when(notificationRepository.countByUserIdAndIsReadFalseAndIsDeletedFalse(userId)).thenReturn(5L);

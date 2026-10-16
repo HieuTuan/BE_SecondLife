@@ -72,7 +72,7 @@ public class SellerReputationService {
 
     public void requireSellingAllowed(UUID sellerId) {
         var restricted = jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM seller_reputations WHERE seller_id=? AND selling_restricted)",Boolean.class,sellerId);
-        if (Boolean.TRUE.equals(restricted)) throw new ForbiddenException("Seller is restricted following a confirmed serious violation");
+        if (Boolean.TRUE.equals(restricted)) throw new ForbiddenException("Seller is restricted following repeated confirmed fraud");
     }
 
     @Transactional(propagation=Propagation.MANDATORY)
@@ -117,10 +117,12 @@ public class SellerReputationService {
         else if(escalation) jdbc.update("UPDATE reputation_incidents SET serious=TRUE,source_report_id=? WHERE incident_key=?",report.id(),key);
         boolean faultAdded=order!=null && fault(order,faultType,report.id(),reviewerId,decisionReason);
         if(!first && !escalation && !faultAdded) return;
+        int seriousIncrement=(first || escalation) && serious?1:0;
+        boolean restrictSelling=seriousIncrement>0 && before.serious()+seriousIncrement>=properties.fraudRestrictionThreshold();
         jdbc.update("""
             UPDATE seller_reputations SET confirmed_incidents=confirmed_incidents+?,serious_incidents=serious_incidents+?,
                 selling_restricted=CASE WHEN ? THEN TRUE ELSE selling_restricted END,updated_at=CURRENT_TIMESTAMP WHERE seller_id=?
-            """,first?1:0,(first || escalation) && serious?1:0,(first || escalation) && serious,sellerId);
+            """,first?1:0,seriousIncrement,restrictSelling,sellerId);
         if(order!=null) evaluate(order);
         event(sellerId,escalation?"SERIOUS_VIOLATION_CONFIRMED":"SELLER_FAULT_CONFIRMED",report.orderId(),report.id(),reviewerId,
                 decisionReason,before,state(sellerId,false).orElseThrow());

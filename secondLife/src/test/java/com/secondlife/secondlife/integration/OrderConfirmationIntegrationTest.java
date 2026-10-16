@@ -258,7 +258,7 @@ class OrderConfirmationIntegrationTest {
             com.secondlife.secondlife.dto.reputation.ReportRequests.ReasonCode.MISLEADING_DESCRIPTION,"Listing contains misleading details",List.of()));
         reports.startReview(staff.getId(),first.id());reports.resolve(staff.getId(),first.id(),sellerFault());
         var second=reports.create(other.getId(),new com.secondlife.secondlife.dto.reputation.ReportRequests.Create(UUID.randomUUID(),o.getPost().getId(),null,
-            com.secondlife.secondlife.dto.reputation.ReportRequests.ReasonCode.COUNTERFEIT,"Counterfeit listing evidence",List.of()));
+            com.secondlife.secondlife.dto.reputation.ReportRequests.ReasonCode.OTHER,"Other confirmed listing violation",List.of()));
         reports.startReview(staff.getId(),second.id());reports.resolve(staff.getId(),second.id(),sellerFault());
         var r=reputation.get(seller.getId());assertEquals(5,r.goodTransactions());assertEquals(0,r.badTransactions());
         assertEquals(2,r.confirmedIncidents());assertEquals("CONFIRMED_VIOLATION_HISTORY",r.warningCode());money("100.00",r.score());
