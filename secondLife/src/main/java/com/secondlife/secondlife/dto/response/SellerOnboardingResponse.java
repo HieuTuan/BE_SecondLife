@@ -1,6 +1,6 @@
 package com.secondlife.secondlife.dto.response;
 
-import com.secondlife.secondlife.dto.shipping.ShippingAddress;
+import com.secondlife.secondlife.dto.request.ShippingAddress;
 import java.time.Instant;
 
 public record SellerOnboardingResponse(String shopName, ShippingAddress pickupAddress, String email,

@@ -3,19 +3,23 @@ package com.secondlife.secondlife.service;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.mapper.PostMapper;
 import com.secondlife.secondlife.repository.PostRepository;
+import jakarta.persistence.criteria.*;
 import org.junit.jupiter.api.Test;
+import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
-import jakarta.persistence.criteria.*;
+
 import java.util.*;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class MarketplaceListingServiceTest {
     private final PostRepository posts = mock(PostRepository.class);
-    private final MarketplaceListingService service = new MarketplaceListingService(posts);
+    private final MarketplaceListingService service = new com.secondlife.secondlife.service.impl.MarketplaceListingServiceImpl(posts, MapperTestSupport.mapper(PostMapper.class));
 
     @Test
     void unavailableListingReturnsNotFound() {

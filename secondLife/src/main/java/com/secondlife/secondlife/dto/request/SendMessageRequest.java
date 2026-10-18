@@ -1,10 +1,9 @@
 package com.secondlife.secondlife.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
 
-@Data
-public class SendMessageRequest {
+public record SendMessageRequest(
     @NotBlank
-    private String messageContent;
+    String messageContent
+) {
 }

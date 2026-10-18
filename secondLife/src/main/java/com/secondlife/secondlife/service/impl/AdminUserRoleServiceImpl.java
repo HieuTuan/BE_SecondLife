@@ -1,12 +1,15 @@
 package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.common.PageResponse;
-import com.secondlife.secondlife.dto.rbac.*;
+import com.secondlife.secondlife.dto.request.ReplaceUserRolesRequest;
+import com.secondlife.secondlife.dto.response.UserRoleAuditResponse;
+import com.secondlife.secondlife.dto.response.UserRolesResponse;
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.enums.AccountStatus;
 import com.secondlife.secondlife.enums.RoleCode;
 import com.secondlife.secondlife.enums.SellerVerificationStatus;
 import com.secondlife.secondlife.exception.*;
+import com.secondlife.secondlife.mapper.RbacMapper;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.AdminUserRoleService;
 import com.secondlife.secondlife.service.TokenService;
@@ -14,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -21,11 +25,13 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class AdminUserRoleServiceImpl implements AdminUserRoleService {
+
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final UserRoleAuditRepository auditRepository;
     private final SellerVerificationRepository verificationRepository;
     private final TokenService tokenService;
+    private final RbacMapper rbacMapper;
 
     @Override
     @Transactional(readOnly = true)
@@ -93,8 +99,7 @@ public class AdminUserRoleServiceImpl implements AdminUserRoleService {
     public PageResponse<UserRoleAuditResponse> getUserRoleAudit(UUID userId, Pageable pageable) {
         if (!userRepository.existsById(userId)) throw new NotFoundException("User not found");
         return PageResponse.from(auditRepository.findByUserIdOrderByChangedAtDesc(userId, pageable)
-                .map(a -> new UserRoleAuditResponse(a.getId(), a.getRoleCode(), a.getAction(),
-                        a.getChangedBy(), a.getChangedAt())));
+                .map(rbacMapper::toUserRoleAuditResponse));
     }
 
     private Set<String> validateCodes(Set<String> codes) {
@@ -115,7 +120,7 @@ public class AdminUserRoleServiceImpl implements AdminUserRoleService {
     private UserRolesResponse response(User user) {
         Set<String> permissions = user.getRoles().stream().flatMap(r -> r.getPermissions().stream())
                 .map(Permission::getCode).collect(Collectors.toCollection(TreeSet::new));
-        return new UserRolesResponse(user.getId(), roleCodes(user), permissions);
+        return rbacMapper.toUserRolesResponse(user, roleCodes(user), permissions);
     }
 
     private void audit(UUID actorId, UUID userId, String roleCode, String action) {

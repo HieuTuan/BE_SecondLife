@@ -1,0 +1,48 @@
+package com.secondlife.secondlife.controller;
+
+import com.secondlife.secondlife.common.PageResponse;
+import com.secondlife.secondlife.dto.response.PostDto;
+import com.secondlife.secondlife.service.PostService;
+import org.springframework.data.domain.Pageable;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/api/v1/admin/posts")
+public class AdminPostController {
+
+    private final PostService postService;
+
+    public AdminPostController(PostService postService) {
+        this.postService = postService;
+    }
+
+    @GetMapping
+    @PreAuthorize("hasAuthority('POST_REVIEW')")
+    public ResponseEntity<PageResponse<PostDto>> getAdminPosts(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) UUID categoryId,
+            @RequestParam(required = false) UUID itemId,
+            Pageable pageable) {
+        return ResponseEntity.ok(PageResponse.from(postService.getAdminPosts(status, categoryId, itemId, pageable)));
+    }
+
+    @PostMapping("/{postId}/approve")
+    @PreAuthorize("hasAuthority('POST_REVIEW')")
+    public ResponseEntity<String> approvePost(@PathVariable UUID postId) {
+        postService.approvePost(postId);
+        return ResponseEntity.ok("Post approved successfully");
+    }
+
+    @PostMapping("/{postId}/reject")
+    @PreAuthorize("hasAuthority('POST_REVIEW')")
+    public ResponseEntity<String> rejectPost(
+            @PathVariable UUID postId,
+            @RequestParam(required = false) String reason) {
+        postService.rejectPost(postId, reason);
+        return ResponseEntity.ok("Post rejected successfully");
+    }
+}

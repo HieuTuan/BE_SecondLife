@@ -1,10 +1,9 @@
 package com.secondlife.secondlife.service;
 
-import com.secondlife.secondlife.dto.ekyc.EkycResult;
-import com.secondlife.secondlife.dto.risk.SellerRiskResult;
+import com.secondlife.secondlife.dto.response.EkycResult;
+import com.secondlife.secondlife.dto.response.SellerRiskResult;
 import com.secondlife.secondlife.entity.SellerVerification;
 import com.secondlife.secondlife.entity.User;
-
 import java.util.Optional;
 
 public interface SellerRiskService {

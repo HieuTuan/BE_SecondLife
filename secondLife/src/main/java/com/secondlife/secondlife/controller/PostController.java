@@ -1,25 +1,30 @@
 package com.secondlife.secondlife.controller;
 
+import com.secondlife.secondlife.common.ApiResponse;
+import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.dto.request.PostInitRequest;
 import com.secondlife.secondlife.dto.request.PostSubmitRequest;
+import com.secondlife.secondlife.dto.request.UpdateDraftRequest;
+import com.secondlife.secondlife.dto.response.MarketplaceListingResponse;
+import com.secondlife.secondlife.dto.response.PostDto;
 import com.secondlife.secondlife.dto.response.PostFinalizeResponse;
-import com.secondlife.secondlife.dto.response.PostSubmitResponse;
-import jakarta.validation.Valid;
 import com.secondlife.secondlife.dto.response.PostInitResponse;
+import com.secondlife.secondlife.dto.response.PostSubmitResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
-import com.secondlife.secondlife.service.PostService;
-import com.secondlife.secondlife.common.ApiResponse;
-import com.secondlife.secondlife.dto.response.MarketplaceListingResponse;
 import com.secondlife.secondlife.service.MarketplaceListingService;
+import com.secondlife.secondlife.service.PostService;
+import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -68,7 +73,7 @@ public class PostController {
     public ResponseEntity<PostFinalizeResponse> finalizeChat(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID sessionId,
-            @RequestBody(required = false) java.util.Map<String, String> body) {
+            @RequestBody(required = false) Map<String, String> body) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         String message = body != null ? body.get("message") : null;
         return ResponseEntity.ok(postService.finalizeChatAndDescription(userId, sessionId, message));
@@ -79,7 +84,7 @@ public class PostController {
     public ResponseEntity<PostFinalizeResponse> regenerateChat(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID sessionId,
-            @RequestBody(required = false) java.util.Map<String, String> body) {
+            @RequestBody(required = false) Map<String, String> body) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         String message = body != null ? body.get("message") : null;
         return ResponseEntity.ok(postService.regenerateChatAndDescription(userId, sessionId, message));
@@ -87,14 +92,14 @@ public class PostController {
 
     @PostMapping("/{postId}/suggest-title")
     @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
-    public ResponseEntity<java.util.Map<String, String>> suggestTitle(
+    public ResponseEntity<Map<String, String>> suggestTitle(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID postId,
-            @RequestBody(required = false) java.util.Map<String, String> body) {
+            @RequestBody(required = false) Map<String, String> body) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         String context = body != null ? body.get("context") : null;
         String title = postService.suggestTitle(userId, postId, context);
-        return ResponseEntity.ok(java.util.Map.of("title", title));
+        return ResponseEntity.ok(Map.of("title", title));
     }
 
     @PostMapping("/submit/{postId}")
@@ -109,20 +114,20 @@ public class PostController {
 
     @GetMapping("/my-posts")
     @PreAuthorize("hasAuthority('PROFILE_READ_SELF')")
-    public ResponseEntity<com.secondlife.secondlife.common.PageResponse<com.secondlife.secondlife.dto.response.PostDto>> getMyPosts(
+    public ResponseEntity<PageResponse<PostDto>> getMyPosts(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            org.springframework.data.domain.Pageable pageable) {
+            Pageable pageable) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        return ResponseEntity.ok(com.secondlife.secondlife.common.PageResponse.from(postService.getMyPosts(userId, pageable)));
+        return ResponseEntity.ok(PageResponse.from(postService.getMyPosts(userId, pageable)));
     }
 
 
     @PutMapping("/{postId}/draft")
     @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
-    public ResponseEntity<com.secondlife.secondlife.dto.response.PostDto> updateDraft(
+    public ResponseEntity<PostDto> updateDraft(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID postId,
-            @RequestBody com.secondlife.secondlife.dto.request.UpdateDraftRequest request) {
+            @RequestBody UpdateDraftRequest request) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(postService.updateDraft(userId, postId, request));
     }

@@ -1,6 +1,6 @@
 package com.secondlife.secondlife.integration;
 
-import com.secondlife.secondlife.dto.credit.UpdateCreditPricingRequest;
+import com.secondlife.secondlife.dto.request.UpdateCreditPricingRequest;
 import com.secondlife.secondlife.entity.CreditPurchase;
 import com.secondlife.secondlife.entity.PaymentIntent;
 import com.secondlife.secondlife.entity.Role;
@@ -8,7 +8,6 @@ import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.AccountStatus;
 import com.secondlife.secondlife.enums.CreditPurchaseStatus;
 import com.secondlife.secondlife.enums.CreditType;
-import com.secondlife.secondlife.repository.CreditBalanceGrantRepository;
 import com.secondlife.secondlife.repository.CreditBalanceRepository;
 import com.secondlife.secondlife.repository.CreditLedgerRepository;
 import com.secondlife.secondlife.repository.CreditPurchaseRepository;
@@ -19,7 +18,7 @@ import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
 import com.secondlife.secondlife.service.CreditPaymentCallbackService;
 import com.secondlife.secondlife.service.CreditPricingService;
-import com.secondlife.secondlife.service.payment.MockPaymentProvider;
+import com.secondlife.secondlife.integration.payment.MockPaymentProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -84,12 +83,11 @@ class Day06CreditPurchaseIntegrationTest {
     @Autowired private CreditPricingService pricingService;
     @Autowired private CreditPurchaseRepository purchaseRepository;
     @Autowired private PaymentIntentRepository intentRepository;
-    @Autowired private CreditBalanceRepository balanceRepository;
     @Autowired private CreditLedgerRepository ledgerRepository;
     @Autowired private PaymentCallbackEventRepository eventRepository;
     @Autowired private CreditPaymentCallbackService callbackService;
     @MockitoSpyBean private MockPaymentProvider mockProvider;
-    @MockitoSpyBean private CreditBalanceGrantRepository grantRepository;
+    @MockitoSpyBean private CreditBalanceRepository balanceRepository;
 
     @Test
     void purchaseUsesServerPriceSnapshotAndProtectsSellerData() throws Exception {
@@ -260,7 +258,7 @@ class Day06CreditPurchaseIntegrationTest {
         UUID purchaseId = createPurchase(seller, 1, 1);
         PaymentIntent intent = intentRepository.findByPurchaseId(purchaseId).orElseThrow();
         String success = callbackJson("event-" + UUID.randomUUID(), intent, "PAID", intent.getAmount());
-        doThrow(new IllegalStateException("grant unavailable")).when(grantRepository)
+        doThrow(new IllegalStateException("grant unavailable")).when(balanceRepository)
                 .grant(eq(seller.id()), eq(CreditType.VALUATION), eq(1));
         sendCallback(success, signature(success), 500);
         assertTrue(balanceRepository.findByUserId(seller.id()).isEmpty());
@@ -268,7 +266,7 @@ class Day06CreditPurchaseIntegrationTest {
                 purchaseRepository.findById(purchaseId).orElseThrow().getStatus());
         assertTrue(eventRepository.findByProviderAndProviderEventId("MOCK",
                 objectMapper.readTree(success).get("eventId").asText()).isEmpty());
-        reset(grantRepository);
+        reset(balanceRepository);
         sendCallback(success, signature(success), 200);
         assertEquals(1, balance(seller.id(), CreditType.LISTING));
         assertEquals(1, balance(seller.id(), CreditType.VALUATION));

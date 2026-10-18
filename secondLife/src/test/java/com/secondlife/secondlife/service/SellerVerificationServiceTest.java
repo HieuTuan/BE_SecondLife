@@ -1,17 +1,16 @@
 package com.secondlife.secondlife.service;
 
-import com.secondlife.secondlife.dto.ekyc.EkycResult;
 import com.secondlife.secondlife.config.EkycRecoveryProperties;
 import com.secondlife.secondlife.dto.request.SellerVerificationRequest;
 import com.secondlife.secondlife.dto.request.SellerVerificationResubmitRequest;
 import com.secondlife.secondlife.dto.request.SellerVerificationReviewRequest;
+import com.secondlife.secondlife.dto.response.EkycResult;
+import com.secondlife.secondlife.dto.response.SellerRiskResult;
 import com.secondlife.secondlife.dto.response.SellerVerificationResponse;
-import com.secondlife.secondlife.dto.risk.SellerRiskResult;
 import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.SellerVerification;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.*;
-import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.mapper.SellerVerificationMapper;
 import com.secondlife.secondlife.repository.SellerVerificationEventRepository;
@@ -22,15 +21,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import com.secondlife.secondlife.mapper.MapperTestSupport;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.lang.reflect.Field;
-import java.util.List;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import org.mockito.ArgumentCaptor;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -105,9 +105,10 @@ class SellerVerificationServiceTest {
         sellerRole = new Role(RoleCode.SELLER.name(), "Seller", "Seller role");
         verificationId = UUID.randomUUID();
 
+        SellerVerificationMapper realMapper = MapperTestSupport.mapper(SellerVerificationMapper.class);
         lenient().when(sellerVerificationMapper.toResponse(any())).thenAnswer(inv -> {
             SellerVerification sv = inv.getArgument(0);
-            return SellerVerificationResponse.from(sv);
+            return realMapper.toSellerResponse(sv);
         });
     }
 

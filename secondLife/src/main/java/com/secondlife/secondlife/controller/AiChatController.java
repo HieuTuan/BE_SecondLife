@@ -13,8 +13,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.beans.PropertyEditorSupport;
 import java.util.UUID;
 
 @RestController
@@ -27,8 +30,8 @@ public class AiChatController {
     private final CurrentUserProvider currentUserProvider;
 
     @InitBinder
-    public void bindOptionalImages(org.springframework.web.bind.WebDataBinder binder) {
-        binder.registerCustomEditor(org.springframework.web.multipart.MultipartFile.class, new java.beans.PropertyEditorSupport() {
+    public void bindOptionalImages(WebDataBinder binder) {
+        binder.registerCustomEditor(MultipartFile.class, new PropertyEditorSupport() {
             @Override public void setAsText(String text) {
                 if (text == null || text.isBlank()) setValue(null);
                 else throw new IllegalArgumentException("images must be uploaded files, not text");

@@ -6,13 +6,17 @@ import com.secondlife.secondlife.dto.response.DepositResponseDTO;
 import com.secondlife.secondlife.entity.DepositRequest;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.DepositStatus;
+import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.mapper.WalletMapper;
 import com.secondlife.secondlife.repository.DepositRequestRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.DepositService;
+import com.secondlife.secondlife.service.OrderBankPaymentService;
 import com.secondlife.secondlife.service.WalletService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,16 +31,17 @@ public class DepositServiceImpl implements DepositService {
     private final DepositRequestRepository depositRequestRepository;
     private final UserRepository userRepository;
     private final WalletService walletService;
-    private final com.secondlife.secondlife.service.payment.OrderBankPaymentService bankPayments;
-    private final com.secondlife.secondlife.service.payment.SePayTransferLedger ledger;
+    private final OrderBankPaymentService bankPayments;
+    private final SePayTransferLedger ledger;
+    private final WalletMapper walletMapper;
 
-    @org.springframework.beans.factory.annotation.Value("${app.sepay.bank-account-name}")
+    @Value("${app.sepay.bank-account-name}")
     private String bankAccountName;
 
-    @org.springframework.beans.factory.annotation.Value("${app.sepay.bank-account-number}")
+    @Value("${app.sepay.bank-account-number}")
     private String bankAccountNumber;
 
-    @org.springframework.beans.factory.annotation.Value("${app.sepay.bank-name}")
+    @Value("${app.sepay.bank-name}")
     private String bankName;
 
     @Override
@@ -47,7 +52,7 @@ public class DepositServiceImpl implements DepositService {
 
         DepositRequest depositRequest = new DepositRequest();
         depositRequest.setUser(user);
-        depositRequest.setAmount(requestDTO.getAmount());
+        depositRequest.setAmount(requestDTO.amount());
 
         // Generate a unique 6-digit code with prefix "SL"
         String code;
@@ -60,25 +65,15 @@ public class DepositServiceImpl implements DepositService {
         depositRequest.setCode(code);
         depositRequestRepository.save(depositRequest);
 
-        DepositResponseDTO response = new DepositResponseDTO();
-        response.setId(depositRequest.getId());
-        response.setAmount(depositRequest.getAmount());
-        response.setCode(depositRequest.getCode());
-        response.setStatus(depositRequest.getStatus());
-        response.setBankAccountName(bankAccountName);
-        response.setBankAccountNumber(bankAccountNumber);
-        response.setBankName(bankName);
-        response.setCreatedAt(depositRequest.getCreatedAt());
-
-        return response;
+        return walletMapper.toDepositResponse(depositRequest, bankAccountName, bankAccountNumber, bankName);
     }
 
     @Override
     @Transactional
     public void processSepayWebhook(SePayWebhookDTO webhookDTO) {
-        if (!"in".equalsIgnoreCase(webhookDTO.getTransferType())) return;
-        if(webhookDTO.getAccountNumber()==null || !bankAccountNumber.trim().equals(webhookDTO.getAccountNumber().trim()))
-            throw new com.secondlife.secondlife.exception.BadRequestException("SePay receiving bank account does not match configuration");
+        if (!"in".equalsIgnoreCase(webhookDTO.transferType())) return;
+        if(webhookDTO.accountNumber()==null || !bankAccountNumber.trim().equals(webhookDTO.accountNumber().trim()))
+            throw new BadRequestException("SePay receiving bank account does not match configuration");
         String code=ledger.reference(webhookDTO);
         if(code==null) return;
         var initial=depositRequestRepository.findReferenceByCode(code);
@@ -90,10 +85,10 @@ public class DepositServiceImpl implements DepositService {
 
         var request=depositRequestRepository.findByIdForUpdate(initial.get().getId()).orElseThrow();
         if(!ledger.claim(webhookDTO,code)) return;
-        walletService.deposit(request.getUser().getId(),webhookDTO.getTransferAmount(),request.getId());
-        request.setReceivedAmount(request.getReceivedAmount().add(webhookDTO.getTransferAmount()));
-        request.setWalletCreditedAmount(request.getWalletCreditedAmount().add(webhookDTO.getTransferAmount()));
-        request.setStatus(DepositStatus.COMPLETED);request.setSepayTransactionId(webhookDTO.getId());
+        walletService.deposit(request.getUser().getId(),webhookDTO.transferAmount(),request.getId());
+        request.setReceivedAmount(request.getReceivedAmount().add(webhookDTO.transferAmount()));
+        request.setWalletCreditedAmount(request.getWalletCreditedAmount().add(webhookDTO.transferAmount()));
+        request.setStatus(DepositStatus.COMPLETED);request.setSepayTransactionId(webhookDTO.id());
         depositRequestRepository.save(request);
     }
 }

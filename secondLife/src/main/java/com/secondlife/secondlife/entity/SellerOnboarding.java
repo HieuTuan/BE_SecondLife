@@ -1,9 +1,11 @@
 package com.secondlife.secondlife.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+
 import java.time.Instant;
 import java.util.UUID;
 
@@ -21,7 +23,7 @@ public class SellerOnboarding {
     private Integer pickupProvinceId;
     private Integer pickupWardId;
     private Instant emailVerifiedAt;
-    @com.fasterxml.jackson.annotation.JsonIgnore
+    @JsonIgnore
     @Column(length = 255) private String emailOtpHash;
     private Instant emailOtpExpiresAt;
     private Instant emailOtpSentAt;

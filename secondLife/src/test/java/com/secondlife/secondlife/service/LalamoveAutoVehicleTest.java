@@ -1,9 +1,12 @@
 package com.secondlife.secondlife.service;
 
+import com.secondlife.secondlife.integration.shipping.LalamoveShippingProvider;
+
 import com.secondlife.secondlife.config.LalamoveProperties;
-import com.secondlife.secondlife.dto.shipping.*;
+import com.secondlife.secondlife.dto.request.ShippingAddress;
+import com.secondlife.secondlife.dto.request.ShippingParcel;
 import com.secondlife.secondlife.exception.*;
-import com.secondlife.secondlife.service.shipping.*;
+import com.secondlife.secondlife.mapper.ShippingPayloads;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.*;
 import org.springframework.mock.http.client.MockClientHttpRequest;

@@ -1,26 +1,37 @@
 package com.secondlife.secondlife.dto.request;
 
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.secondlife.secondlife.enums.OrderPaymentMethod;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.Builder;
 
 import java.util.UUID;
 
-@Getter
-@Setter
-public class OrderRequestDTO {
+@Builder
+public record OrderRequestDTO(
     @NotNull(message = "Payment method is required")
-    @io.swagger.v3.oas.annotations.media.Schema(description="WALLET uses the existing balance; BANK_TRANSFER returns bank transfer instructions", example="BANK_TRANSFER", defaultValue="WALLET")
-    private com.secondlife.secondlife.enums.OrderPaymentMethod paymentMethod = com.secondlife.secondlife.enums.OrderPaymentMethod.WALLET;
-    @io.swagger.v3.oas.annotations.media.Schema(description="Server quote ID returned by /api/v1/shipping/quotes; required for new shipped orders")
+    @Schema(description="WALLET uses the existing balance; BANK_TRANSFER returns bank transfer instructions", example="BANK_TRANSFER", defaultValue="WALLET")
+    OrderPaymentMethod paymentMethod,
+    @Schema(description="Server quote ID returned by /api/v1/shipping/quotes; required for new shipped orders")
     @NotNull(message = "Shipping quote ID is required")
-    private UUID shippingQuoteId;
-    @io.swagger.v3.oas.annotations.media.Schema(description="Reuse the same UUID on order retries")
+    UUID shippingQuoteId,
+    @Schema(description="Reuse the same UUID on order retries")
     @NotNull(message = "Request ID is required")
-    private UUID requestId;
+    UUID requestId,
     @NotNull(message = "Post ID is required")
-    private UUID postId;
-
+    UUID postId,
     // Optional: Only if buying with a negotiated price
-    private UUID negotiationId;
+    UUID negotiationId
+) {
+    @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
+    public static OrderRequestDTO fromJson(OrderRequestDTOBuilder builder) {
+        return builder.build();
+    }
+
+    @JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.ANY)
+    public static class OrderRequestDTOBuilder {
+        private OrderPaymentMethod paymentMethod = OrderPaymentMethod.WALLET;
+    }
 }

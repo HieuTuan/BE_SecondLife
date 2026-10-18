@@ -1,18 +1,13 @@
 package com.secondlife.secondlife.service;
 
 import tools.jackson.databind.ObjectMapper;
-import com.secondlife.secondlife.service.shipping.ReverseGeocodingService;
-import com.secondlife.secondlife.dto.shipping.ShippingAddress;
-import com.secondlife.secondlife.dto.shipping.ShippingAddressRequest;
-import com.secondlife.secondlife.dto.shipping.ShippingQuoteRequest;
-import com.secondlife.secondlife.entity.Negotiation;
+import com.secondlife.secondlife.dto.request.ShippingAddressRequest;
+import com.secondlife.secondlife.dto.request.ShippingQuoteRequest;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
-import com.secondlife.secondlife.enums.NegotiationStatus;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.repository.*;
-import com.secondlife.secondlife.service.shipping.ShippingProvider;
-import com.secondlife.secondlife.service.shipping.ShippingQuoteService;
+import com.secondlife.secondlife.integration.shipping.ShippingProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -49,7 +44,7 @@ class ShippingQuoteReservedPostTest {
         provider = mock(ShippingProvider.class);
         geocoding = mock(ReverseGeocodingService.class);
         mapper = mock(ObjectMapper.class);
-        service = new ShippingQuoteService(posts, negotiations, addresses, quotes,
+        service = new com.secondlife.secondlife.service.impl.ShippingQuoteServiceImpl(posts, negotiations, addresses, quotes,
                 inspections, shipments, provider, mapper, geocoding);
     }
 

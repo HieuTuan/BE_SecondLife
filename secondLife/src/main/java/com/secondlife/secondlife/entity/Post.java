@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.GenericGenerator;
 
 import java.math.BigDecimal;
@@ -48,7 +49,7 @@ public class Post {
     @ElementCollection
     @CollectionTable(name = "post_images", joinColumns = @JoinColumn(name = "post_id"))
     @OrderColumn(name = "image_position")
-    @org.hibernate.annotations.BatchSize(size = 20)
+    @BatchSize(size = 20)
     private java.util.List<PostImage> images = new java.util.ArrayList<>();
 
     public java.util.List<String> getImageUrls() {

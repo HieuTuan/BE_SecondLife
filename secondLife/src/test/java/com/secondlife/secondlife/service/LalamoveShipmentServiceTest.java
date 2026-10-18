@@ -1,23 +1,29 @@
 package com.secondlife.secondlife.service;
 
-import com.secondlife.secondlife.dto.shipping.*;
+import com.secondlife.secondlife.dto.request.CreateShipmentRequest;
+import com.secondlife.secondlife.dto.request.ShippingAddress;
+import com.secondlife.secondlife.dto.request.ShippingParcel;
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.exception.*;
+import com.secondlife.secondlife.integration.shipping.ShippingProvider;
+import com.secondlife.secondlife.mapper.ShipmentMapper;
+import com.secondlife.secondlife.mapper.ShippingPayloads;
 import com.secondlife.secondlife.repository.*;
-import com.secondlife.secondlife.service.shipping.*;
-import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import tools.jackson.databind.ObjectMapper;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.*;
+
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 class LalamoveShipmentServiceTest {
     private final ObjectMapper mapper=new ObjectMapper();
@@ -29,7 +35,6 @@ class LalamoveShipmentServiceTest {
     private final ShippingQuoteService quoteService=mock(ShippingQuoteService.class);
     private final ShippingProvider router=mock(ShippingProvider.class), lala=mock(ShippingProvider.class), ghn=mock(ShippingProvider.class);
     private final WalletService wallets=mock(WalletService.class);
-    private final EntityManager em=mock(EntityManager.class);
     private final PlatformTransactionManager transactions=mock(PlatformTransactionManager.class);
     private final UUID seller=UUID.randomUUID(), buyer=UUID.randomUUID();
     private ShipmentService service;
@@ -60,7 +65,7 @@ class LalamoveShipmentServiceTest {
             "provider_quote",Map.of("quotationId","Q-FRESH","serviceType","MOTORCYCLE",
                 "scheduleAt",Instant.now().toString(),"expiresAt",Instant.now().plusSeconds(300).toString()))));
         when(lala.create(anyMap())).thenReturn(mapper.valueToTree(Map.of("order_code","1234567890123456789","status","ASSIGNING_DRIVER","total_fee",27000,"share_link","https://web.lalamove.com/track/example")));
-        service=new ShipmentService(shipments,events,orders,inspections,quotes,quoteService,mock(com.secondlife.secondlife.service.shipping.ReverseGeocodingService.class),router,mapper,em,wallets,transactions,mock(SystemWalletService.class),mock(com.secondlife.secondlife.service.SellerReputationService.class));
+        service=new com.secondlife.secondlife.service.impl.ShipmentServiceImpl(shipments,events,orders,inspections,quotes,quoteService,mock(com.secondlife.secondlife.service.ReverseGeocodingService.class),router,mapper,wallets,transactions,mock(SystemWalletService.class),mock(com.secondlife.secondlife.service.SellerReputationService.class),new com.secondlife.secondlife.service.impl.ListingFingerprintImpl(), MapperTestSupport.mapper(ShipmentMapper.class));
     }
     private CreateShipmentRequest request(UUID id) { return new CreateShipmentRequest(id,"SELLER_TO_BUYER",null,null,null); }
     private Shipment booked() { service.createForOrder(seller,false,order.getId(),request(UUID.randomUUID())); return rows.values().iterator().next(); }

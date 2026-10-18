@@ -18,6 +18,21 @@ import static org.junit.jupiter.api.Assertions.*;
 class RbacAuthorizationTest {
 
     @Test
+    void authorities_ShouldRejectExternalChangesAndKeepRoleAndPermissions() {
+        Role buyerRole = new Role(RoleCode.BUYER.name(), "Buyer", "Buyer role");
+        buyerRole.addPermission(new Permission(PermissionCode.PROFILE_READ_SELF.name(), "Read", ""));
+        User buyer = new User("buyer@example.com", "pass", AccountStatus.ACTIVE);
+        buyer.addRole(buyerRole);
+
+        CustomUserDetails userDetails = new CustomUserDetails(buyer);
+
+        assertThrows(UnsupportedOperationException.class, () -> userDetails.getAuthorities().clear());
+        assertEquals(Set.of("ROLE_BUYER", "PROFILE_READ_SELF"), userDetails.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .collect(Collectors.toSet()));
+    }
+
+    @Test
     void buyerAuthorities_ShouldIncludeBuyerPermissionsAndRole_ButExcludeAdminPermissions() {
         Role buyerRole = new Role(RoleCode.BUYER.name(), "Buyer", "Buyer role");
         buyerRole.addPermission(new Permission(PermissionCode.PROFILE_READ_SELF.name(), "Read", ""));

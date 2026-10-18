@@ -1,23 +1,26 @@
 package com.secondlife.secondlife.service;
 
-import com.secondlife.secondlife.dto.rbac.CreatePermissionRequest;
-import com.secondlife.secondlife.dto.rbac.ReplaceRolePermissionsRequest;
-import com.secondlife.secondlife.dto.rbac.UpdatePermissionRequest;
+import com.secondlife.secondlife.dto.request.CreatePermissionRequest;
+import com.secondlife.secondlife.dto.request.ReplaceRolePermissionsRequest;
+import com.secondlife.secondlife.dto.request.UpdatePermissionRequest;
 import com.secondlife.secondlife.entity.Permission;
 import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.RolePermissionAudit;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.mapper.RbacMapper;
 import com.secondlife.secondlife.repository.PermissionRepository;
 import com.secondlife.secondlife.repository.RolePermissionAuditRepository;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.service.impl.AdminRbacServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
@@ -32,6 +35,9 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class AdminRbacServiceTest {
+    @Spy
+    private RbacMapper rbacMapper = MapperTestSupport.mapper(RbacMapper.class);
+
     @Mock private PermissionRepository permissionRepository;
     @Mock private RoleRepository roleRepository;
     @Mock private RolePermissionAuditRepository auditRepository;

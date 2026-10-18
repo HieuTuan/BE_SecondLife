@@ -4,12 +4,14 @@ import com.secondlife.secondlife.dto.response.*;
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.mapper.SystemWalletMapper;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.SystemWalletService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
@@ -17,9 +19,11 @@ import java.time.Instant;
 @Service
 @RequiredArgsConstructor
 public class SystemWalletServiceImpl implements SystemWalletService {
+
     private final SystemWalletRepository wallets;
     private final SystemOrderFundsRepository funds;
     private final SystemWalletTransactionRepository transactions;
+    private final SystemWalletMapper systemWalletMapper;
 
     // Callers lock the order first, then this wallet, then the user's wallet, in one transaction.
     @Override @Transactional(propagation = Propagation.MANDATORY)
@@ -70,14 +74,14 @@ public class SystemWalletServiceImpl implements SystemWalletService {
 
     @Override @Transactional(readOnly = true)
     public SystemWalletResponse getWallet() {
-        return SystemWalletResponse.from(wallets.findById(SystemWallet.MAIN).orElseThrow(() ->
+        return systemWalletMapper.toResponse(wallets.findById(SystemWallet.MAIN).orElseThrow(() ->
                 new ConflictException("System wallet is not initialized")));
     }
 
     @Override @Transactional(readOnly = true)
     public Page<SystemWalletTransactionResponse> getTransactions(Pageable pageable) {
         return transactions.findAll(PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
-                Sort.by(Sort.Direction.DESC, "id"))).map(SystemWalletTransactionResponse::from);
+                Sort.by(Sort.Direction.DESC, "id"))).map(systemWalletMapper::toTransactionResponse);
     }
 
     private SystemWallet lock() {

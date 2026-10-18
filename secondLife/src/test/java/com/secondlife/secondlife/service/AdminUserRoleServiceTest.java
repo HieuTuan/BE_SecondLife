@@ -1,21 +1,29 @@
 package com.secondlife.secondlife.service;
 
-import com.secondlife.secondlife.dto.rbac.ReplaceUserRolesRequest;
+import com.secondlife.secondlife.dto.request.ReplaceUserRolesRequest;
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.exception.*;
+import com.secondlife.secondlife.mapper.RbacMapper;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.impl.AdminUserRoleServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.mockito.*;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+
 import java.util.*;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class AdminUserRoleServiceTest {
+    @Spy
+    private RbacMapper rbacMapper = MapperTestSupport.mapper(RbacMapper.class);
+
     @Mock UserRepository users;
     @Mock RoleRepository roles;
     @Mock UserRoleAuditRepository audits;

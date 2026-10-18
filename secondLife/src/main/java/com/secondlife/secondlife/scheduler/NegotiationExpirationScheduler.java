@@ -6,6 +6,8 @@ import com.secondlife.secondlife.enums.NegotiationStatus;
 import com.secondlife.secondlife.repository.NegotiationRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.service.ChatService;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -23,7 +25,7 @@ public class NegotiationExpirationScheduler {
     private final NegotiationRepository negotiationRepository;
     private final PostRepository postRepository;
     private final ChatService chatService;
-    @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager entityManager;
+    @PersistenceContext private EntityManager entityManager;
 
     // Run every 5 minutes
     @Scheduled(fixedRate = 300000)

@@ -3,6 +3,7 @@ package com.secondlife.secondlife.controller;
 import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.dto.request.ListingReviewRejectRequest;
 import com.secondlife.secondlife.dto.response.ListingDraftResponse;
+import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.ListingReviewService;
@@ -12,6 +13,7 @@ import org.springframework.data.domain.*;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.UUID;
 
 @RestController
@@ -32,7 +34,7 @@ public class StaffListingController {
     @GetMapping
     public ApiResponse<Page<ListingDraftResponse>> queue(@RequestParam(defaultValue = "${app.pagination.default-page}") int page,
             @RequestParam(defaultValue = "${app.pagination.default-size}") int size) {
-        if (page < 0 || size < 1 || size > maxPageSize) throw new com.secondlife.secondlife.exception.BadRequestException("Invalid page or size");
+        if (page < 0 || size < 1 || size > maxPageSize) throw new BadRequestException("Invalid page or size");
         return ApiResponse.success(reviews.queue(PageRequest.of(page, size, Sort.by("createdAt").ascending())));
     }
     @GetMapping("/{postId}")

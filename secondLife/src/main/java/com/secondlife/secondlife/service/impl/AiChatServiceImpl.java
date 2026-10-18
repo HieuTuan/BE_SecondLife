@@ -6,41 +6,52 @@ import com.secondlife.secondlife.dto.response.PostFinalizeResponse;
 import com.secondlife.secondlife.entity.AiChatMessage;
 import com.secondlife.secondlife.entity.AiChatSession;
 import com.secondlife.secondlife.entity.User;
-import com.secondlife.secondlife.repository.AiChatMessageRepository;
-import com.secondlife.secondlife.repository.AiChatSessionRepository;
-import com.secondlife.secondlife.repository.UserRepository;
-import com.secondlife.secondlife.repository.PostRepository;
+import com.secondlife.secondlife.enums.CreditType;
+import com.secondlife.secondlife.exception.AiProviderException;
+import com.secondlife.secondlife.exception.BadRequestException;
+import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.NotFoundException;
-import com.secondlife.secondlife.exception.ConflictException;
-import com.secondlife.secondlife.exception.AiProviderException;
+import com.secondlife.secondlife.integration.ai.AiChatGateway;
+import com.secondlife.secondlife.integration.ai.SpringAiChatGateway;
+import com.secondlife.secondlife.repository.AiChatMessageRepository;
+import com.secondlife.secondlife.repository.AiChatSessionRepository;
+import com.secondlife.secondlife.repository.PostRepository;
+import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.AiChatService;
-import org.springframework.ai.chat.client.ChatClient;
+import com.secondlife.secondlife.service.ListingCreditService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.content.Media;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import com.secondlife.secondlife.service.ListingCreditService;
-import com.secondlife.secondlife.enums.CreditType;
-import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.MimeTypeUtils;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Slf4j
 @Service
 public class AiChatServiceImpl implements AiChatService {
 
-    private final ChatClient ollamaChatClient;
-    private final ChatClient googleChatClient;
+    private final AiChatGateway ollamaChatGateway;
+    private final AiChatGateway googleChatGateway;
     private final AiChatSessionRepository sessionRepository;
     private final AiChatMessageRepository messageRepository;
     private final UserRepository userRepository;
@@ -54,8 +65,28 @@ public class AiChatServiceImpl implements AiChatService {
     private final ListingCreditService listingCreditService;
 
     public AiChatServiceImpl(
-            @org.springframework.beans.factory.annotation.Qualifier("ollamaChatModel") org.springframework.ai.chat.model.ChatModel ollamaChatModel,
-            @org.springframework.beans.factory.annotation.Qualifier("googleGenAiChatModel") org.springframework.ai.chat.model.ChatModel googleChatModel,
+            @Qualifier("ollamaChatModel") ChatModel ollamaChatModel,
+            @Qualifier("googleGenAiChatModel") ChatModel googleChatModel,
+            AiChatSessionRepository sessionRepository,
+            AiChatMessageRepository messageRepository,
+            UserRepository userRepository,
+            PostRepository postRepository,
+            @Value("${app.listing.max-image-bytes}") long maxImageBytes,
+            @Value("${app.listing.max-images}") int maxImages,
+            @Value("${app.ai.chat.rate-limit-max-messages}") int rateLimitMaxMessages,
+            @Value("${app.ai.chat.rate-limit-window-seconds}") long rateLimitWindowSeconds,
+            @Value("${app.ai.chat.session-max-messages}") int sessionMaxMessages,
+            @Value("${spring.ai.ollama.chat.options.model}") String ollamaModel,
+            ListingCreditService listingCreditService) {
+        this(new SpringAiChatGateway(ollamaChatModel), new SpringAiChatGateway(googleChatModel),
+                sessionRepository, messageRepository, userRepository, postRepository, maxImageBytes, maxImages,
+                rateLimitMaxMessages, rateLimitWindowSeconds, sessionMaxMessages, ollamaModel, listingCreditService);
+    }
+
+    @Autowired
+    public AiChatServiceImpl(
+            @Qualifier("ollamaChatGateway") AiChatGateway ollamaChatGateway,
+            @Qualifier("googleChatGateway") AiChatGateway googleChatGateway,
             AiChatSessionRepository sessionRepository,
             AiChatMessageRepository messageRepository,
             UserRepository userRepository,
@@ -75,8 +106,8 @@ public class AiChatServiceImpl implements AiChatService {
         if (ollamaModel == null || ollamaModel.isBlank()) {
             throw new IllegalArgumentException("spring.ai.ollama.chat.options.model must not be blank");
         }
-        this.ollamaChatClient = ChatClient.builder(ollamaChatModel).build();
-        this.googleChatClient = ChatClient.builder(googleChatModel).build();
+        this.ollamaChatGateway = ollamaChatGateway;
+        this.googleChatGateway = googleChatGateway;
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
         this.userRepository = userRepository;
@@ -92,24 +123,24 @@ public class AiChatServiceImpl implements AiChatService {
 
     @Override
     public AiChatResponse processChat(AiChatRequest request, UUID currentUserId) {
-        if (request.getMessage() == null || request.getMessage().isBlank() || request.getMessage().length() > 4000)
-            throw new com.secondlife.secondlife.exception.BadRequestException("Message is required and must not exceed 4000 characters");
+        if (request.message() == null || request.message().isBlank() || request.message().length() > 4000)
+            throw new BadRequestException("Message is required and must not exceed 4000 characters");
 
         // Build media list early (before any TX) so validation errors are thrown before DB writes
-        var files = new ArrayList<org.springframework.web.multipart.MultipartFile>();
-        if (request.getImages() != null) files.addAll(request.getImages());
+        var files = new ArrayList<MultipartFile>();
+        if (request.images() != null) files.addAll(request.images());
         files.removeIf(file -> file == null || file.isEmpty());
-        if (files.size() > maxImages) throw new com.secondlife.secondlife.exception.BadRequestException("At most " + maxImages + " images are allowed");
-        var media = new ArrayList<org.springframework.ai.content.Media>();
+        if (files.size() > maxImages) throw new BadRequestException("At most " + maxImages + " images are allowed");
+        var media = new ArrayList<Media>();
         for (var image : files) {
             if (image == null || image.isEmpty() || image.getContentType() == null || image.getSize() > maxImageBytes
-                    || !java.util.Set.of("image/jpeg", "image/png", "image/webp").contains(image.getContentType()))
-                throw new com.secondlife.secondlife.exception.BadRequestException("Image must be a non-empty JPEG, PNG or WebP no larger than " + maxImageBytes + " bytes");
+                    || !Set.of("image/jpeg", "image/png", "image/webp").contains(image.getContentType()))
+                throw new BadRequestException("Image must be a non-empty JPEG, PNG or WebP no larger than " + maxImageBytes + " bytes");
             try {
-                media.add(new org.springframework.ai.content.Media(
-                        org.springframework.util.MimeTypeUtils.parseMimeType(image.getContentType()),
-                        new org.springframework.core.io.ByteArrayResource(image.getBytes())));
-            } catch (java.io.IOException e) {
+                media.add(new Media(
+                        MimeTypeUtils.parseMimeType(image.getContentType()),
+                        new ByteArrayResource(image.getBytes())));
+            } catch (IOException e) {
                 throw new RuntimeException("Failed to read image file", e);
             }
         }
@@ -122,20 +153,20 @@ public class AiChatServiceImpl implements AiChatService {
         int currentMessageCount = sessionRepository.findById(sessionId).map(AiChatSession::getMessageCount).orElse(1);
 
         // Phase 2: Load history and call AI — OUTSIDE any transaction, no DB locks held
-        List<Message> aiMessages = buildAiMessageHistory(sessionId, request.getMessage(), media);
+        List<Message> aiMessages = buildAiMessageHistory(sessionId, request.message(), media);
 
         String aiReply;
         try {
             if (!media.isEmpty()) {
-                aiReply = googleChatClient.prompt(new Prompt(aiMessages)).call().content();
+                aiReply = googleChatGateway.complete(new Prompt(aiMessages));
             } else {
                 try {
-                    aiReply = ollamaChatClient.prompt(
+                    aiReply = ollamaChatGateway.complete(
                             new Prompt(aiMessages, OllamaChatOptions.builder().model(ollamaModel).build())
-                    ).call().content();
+                    );
                 } catch (Exception ollamaEx) {
                     log.warn("Ollama chat failed, falling back to Google Gemini: {}", ollamaEx.getMessage());
-                    aiReply = googleChatClient.prompt(new Prompt(aiMessages)).call().content();
+                    aiReply = googleChatGateway.complete(new Prompt(aiMessages));
                 }
             }
         } catch (Exception ex) {
@@ -166,8 +197,8 @@ public class AiChatServiceImpl implements AiChatService {
             throw new ConflictException("AI chat rate limit reached; retry after " + rateLimitWindowSeconds + " seconds");
 
         AiChatSession session;
-        if (request.getSessionId() != null) {
-            session = sessionRepository.findById(request.getSessionId())
+        if (request.sessionId() != null) {
+            session = sessionRepository.findById(request.sessionId())
                     .orElseThrow(() -> new NotFoundException("Session not found"));
             requireSessionOwner(session, currentUserId);
             requirePostOwner(session.getPostId(), currentUserId);
@@ -176,10 +207,10 @@ public class AiChatServiceImpl implements AiChatService {
             if (session.getMessageCount() >= sessionMaxMessages)
                 throw new ConflictException("AI chat session limit reached; finalize the current description");
         } else {
-            requirePostOwner(request.getPostId(), currentUserId);
+            requirePostOwner(request.postId(), currentUserId);
             session = new AiChatSession();
             session.setUser(user);
-            session.setPostId(request.getPostId());
+            session.setPostId(request.postId());
             session.setMessageCount(0);
             session.setCompleted(false);
             session = sessionRepository.save(session);
@@ -194,7 +225,7 @@ public class AiChatServiceImpl implements AiChatService {
         AiChatMessage userDbMessage = new AiChatMessage();
         userDbMessage.setSession(session);
         userDbMessage.setRole("USER");
-        userDbMessage.setMessageContent(request.getMessage());
+        userDbMessage.setMessageContent(request.message());
         messageRepository.save(userDbMessage);
 
         session.setMessageCount(session.getMessageCount() + 1);
@@ -218,7 +249,7 @@ public class AiChatServiceImpl implements AiChatService {
     /** Build prompt message list from persisted history + current user message. Read-only. */
     @Transactional(readOnly = true)
     protected List<Message> buildAiMessageHistory(UUID sessionId, String userMessage,
-                                                  java.util.List<org.springframework.ai.content.Media> media) {
+                                                  List<Media> media) {
         List<Message> aiMessages = new ArrayList<>();
         String systemPromptText = """
                 Bạn là trợ lý AI chuyên nghiệp của sàn SecondLife, chuyên hỗ trợ người bán mua bán đồ gia dụng cũ.
@@ -347,7 +378,7 @@ public class AiChatServiceImpl implements AiChatService {
         aiMessages.add(new UserMessage(finalizePrompt));
 
         Prompt prompt = new Prompt(aiMessages, OllamaChatOptions.builder().model(ollamaModel).build());
-        String rawOutput = call(ollamaChatClient, prompt);
+        String rawOutput = call(ollamaChatGateway, prompt);
         String finalTitle = null;
         String finalDescription = null;
 
@@ -407,15 +438,15 @@ public class AiChatServiceImpl implements AiChatService {
         }
     }
 
-    private String call(ChatClient client, Prompt prompt) {
+    private String call(AiChatGateway gateway, Prompt prompt) {
         try { 
-            return client.prompt(prompt).call().content(); 
+            return gateway.complete(prompt);
         } catch (Exception ex) { 
-            if (client != googleChatClient && googleChatClient != null) {
+            if (gateway != googleChatGateway && googleChatGateway != null) {
                 try {
                     log.warn("Ollama call failed in finalizeChat, falling back to Google Gemini: {}", ex.getMessage());
                     Prompt fallbackPrompt = new Prompt(prompt.getInstructions());
-                    return googleChatClient.prompt(fallbackPrompt).call().content();
+                    return googleChatGateway.complete(fallbackPrompt);
                 } catch (Exception geminiEx) {
                     log.error("Google Gemini fallback also failed: {}", geminiEx.getMessage(), geminiEx);
                 }

@@ -1,16 +1,19 @@
 package com.secondlife.secondlife.controller;
 
+import com.secondlife.secondlife.common.ApiResponse;
+import com.secondlife.secondlife.common.PageResponse;
+import com.secondlife.secondlife.dto.request.DeviceTokenRequest;
 import com.secondlife.secondlife.dto.response.NotificationActionResponseDTO;
 import com.secondlife.secondlife.dto.response.NotificationResponseDTO;
 import com.secondlife.secondlife.dto.response.UnreadCountResponseDTO;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
+import com.secondlife.secondlife.service.NotificationDeviceService;
 import com.secondlife.secondlife.service.NotificationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
+import jakarta.validation.Valid;
 import org.springdoc.core.annotations.ParameterObject;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.SortDefault;
@@ -28,34 +31,26 @@ public class NotificationController {
 
     private final NotificationService notificationService;
     private final CurrentUserProvider currentUserProvider;
-    private final com.secondlife.secondlife.repository.UserDeviceTokenRepository deviceTokenRepository;
-    private final com.secondlife.secondlife.repository.UserRepository userRepository;
+    private final NotificationDeviceService deviceService;
 
-    @org.springframework.beans.factory.annotation.Autowired
     public NotificationController(NotificationService notificationService,
                                   CurrentUserProvider currentUserProvider,
-                                  com.secondlife.secondlife.repository.UserDeviceTokenRepository deviceTokenRepository,
-                                  com.secondlife.secondlife.repository.UserRepository userRepository) {
+                                  NotificationDeviceService deviceService) {
         this.notificationService = notificationService;
         this.currentUserProvider = currentUserProvider;
-        this.deviceTokenRepository = deviceTokenRepository;
-        this.userRepository = userRepository;
-    }
-
-    public NotificationController(NotificationService notificationService, CurrentUserProvider currentUserProvider) {
-        this(notificationService, currentUserProvider, null, null);
+        this.deviceService = deviceService;
     }
 
     @GetMapping
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Xem danh sách thông báo của người dùng", description = "Hỗ trợ phân trang, lọc theo trạng thái chưa đọc (unreadOnly) và loại thông báo (type)")
-    public ResponseEntity<com.secondlife.secondlife.common.PageResponse<NotificationResponseDTO>> getNotifications(
+    public ResponseEntity<PageResponse<NotificationResponseDTO>> getNotifications(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @RequestParam(required = false) Boolean unreadOnly,
             @RequestParam(required = false) String type,
             @ParameterObject @SortDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        return ResponseEntity.ok(com.secondlife.secondlife.common.PageResponse.from(
+        return ResponseEntity.ok(PageResponse.from(
                 notificationService.getUserNotifications(userId, unreadOnly, type, pageable)));
     }
 
@@ -123,33 +118,20 @@ public class NotificationController {
     @PostMapping("/devices")
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Đăng ký hoặc cập nhật FCM device token cho thiết bị di động")
-    public ResponseEntity<com.secondlife.secondlife.common.ApiResponse<Void>> registerDevice(
+    public ResponseEntity<ApiResponse<Void>> registerDevice(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @jakarta.validation.Valid @RequestBody com.secondlife.secondlife.dto.request.DeviceTokenRequest request) {
+            @Valid @RequestBody DeviceTokenRequest request) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        com.secondlife.secondlife.entity.User user = userRepository.findById(userId).orElseThrow();
-
-        var existing = deviceTokenRepository.findByToken(request.getToken());
-        if (existing.isPresent()) {
-            var token = existing.get();
-            token.setUser(user);
-            token.setDeviceType(request.getDeviceType() != null ? request.getDeviceType().toUpperCase() : token.getDeviceType());
-            token.setLastUsedAt(java.time.Instant.now());
-            deviceTokenRepository.save(token);
-        } else {
-            deviceTokenRepository.save(new com.secondlife.secondlife.entity.UserDeviceToken(
-                    user, request.getToken(), request.getDeviceType()));
-        }
-        return ResponseEntity.ok(com.secondlife.secondlife.common.ApiResponse.success("Đăng ký token thiết bị thành công", null));
+        deviceService.registerDevice(userId, request);
+        return ResponseEntity.ok(ApiResponse.success("Đăng ký token thiết bị thành công", null));
     }
 
     @DeleteMapping("/devices/{token}")
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Hủy đăng ký FCM device token khi người dùng đăng xuất khỏi thiết bị")
-    @org.springframework.transaction.annotation.Transactional
-    public ResponseEntity<com.secondlife.secondlife.common.ApiResponse<Void>> unregisterDevice(
+    public ResponseEntity<ApiResponse<Void>> unregisterDevice(
             @PathVariable String token) {
-        deviceTokenRepository.deleteByToken(token);
-        return ResponseEntity.ok(com.secondlife.secondlife.common.ApiResponse.success("Hủy đăng ký token thiết bị thành công", null));
+        deviceService.unregisterDevice(token);
+        return ResponseEntity.ok(ApiResponse.success("Hủy đăng ký token thiết bị thành công", null));
     }
 }

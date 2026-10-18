@@ -6,10 +6,9 @@ import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.entity.PaymentCallbackEvent;
 import com.secondlife.secondlife.repository.PaymentCallbackEventRepository;
-import com.secondlife.secondlife.repository.PaymentCallbackInboxRepository;
 import com.secondlife.secondlife.repository.PaymentIntentRepository;
-import com.secondlife.secondlife.service.payment.NormalizedPaymentCallback;
-import com.secondlife.secondlife.service.payment.PaymentCallbackInboxService;
+import com.secondlife.secondlife.integration.payment.NormalizedPaymentCallback;
+import com.secondlife.secondlife.service.PaymentCallbackInboxService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,7 +19,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class PaymentCallbackInboxServiceImpl implements PaymentCallbackInboxService {
     private final PaymentIntentRepository paymentIntentRepository;
-    private final PaymentCallbackInboxRepository inboxRepository;
     private final PaymentCallbackEventRepository eventRepository;
 
     @Override
@@ -38,7 +36,7 @@ public class PaymentCallbackInboxServiceImpl implements PaymentCallbackInboxServ
             throw new BadRequestException("Payment callback does not match intent");
         }
         // This insert joins the caller's transaction so an unsuccessful grant also rolls it back.
-        if (inboxRepository.insertIfAbsent(paymentIntentId, callback)) {
+        if (eventRepository.insertIfAbsent(paymentIntentId, callback)) {
             return true;
         }
         PaymentCallbackEvent existing = eventRepository.findByProviderAndProviderEventId(

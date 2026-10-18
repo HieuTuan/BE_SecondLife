@@ -1,7 +1,7 @@
 package com.secondlife.secondlife.integration;
 
-import com.secondlife.secondlife.dto.credit.UpdateCreditPricingRequest;
-import com.secondlife.secondlife.dto.credit.CreditQuoteResponse;
+import com.secondlife.secondlife.dto.request.UpdateCreditPricingRequest;
+import com.secondlife.secondlife.dto.response.CreditQuoteResponse;
 import com.secondlife.secondlife.entity.CreditPurchase;
 import com.secondlife.secondlife.entity.PaymentIntent;
 import com.secondlife.secondlife.entity.Role;
@@ -20,11 +20,11 @@ import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
 import com.secondlife.secondlife.service.CreditPricingService;
-import com.secondlife.secondlife.service.payment.MockPaymentProvider;
-import com.secondlife.secondlife.service.payment.PaymentCallbackInboxService;
-import com.secondlife.secondlife.service.payment.PaymentCallbackPayload;
-import com.secondlife.secondlife.service.payment.NormalizedPaymentCallback;
-import com.secondlife.secondlife.service.payment.PaymentStatus;
+import com.secondlife.secondlife.integration.payment.MockPaymentProvider;
+import com.secondlife.secondlife.service.PaymentCallbackInboxService;
+import com.secondlife.secondlife.integration.payment.PaymentCallbackPayload;
+import com.secondlife.secondlife.integration.payment.NormalizedPaymentCallback;
+import com.secondlife.secondlife.enums.PaymentStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

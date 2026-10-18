@@ -7,6 +7,7 @@ import com.secondlife.secondlife.enums.AccountStatus;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
+import com.secondlife.secondlife.security.websocket.WebSocketAuthChannelInterceptor;
 import com.secondlife.secondlife.service.NotificationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +17,10 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.messaging.Message;
+import org.springframework.messaging.simp.stomp.StompCommand;
+import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
+import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -39,6 +44,8 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -71,6 +78,7 @@ class AuthRbacIntegrationTest {
     @Autowired private RoleRepository roleRepository;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JwtTokenProvider jwtTokenProvider;
+    @Autowired private WebSocketAuthChannelInterceptor webSocketAuthInterceptor;
 
     @MockitoBean private NotificationService notificationService;
 
@@ -192,6 +200,47 @@ class AuthRbacIntegrationTest {
         User disabled = saveUser("disabled", "BUYER", AccountStatus.DISABLED);
         mockMvc.perform(get("/api/v1/users/me").header("Authorization", bearer(disabled)))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void revokedTokenIsRejectedByHttpAndWebSocketUsingFreshDatabaseVersion() throws Exception {
+        User user = saveUser("revoked-access", "BUYER", AccountStatus.ACTIVE);
+        String authorization = bearer(user);
+        assertNotNull(connectWebSocket(authorization).getUser());
+
+        user.bumpTokenVersion();
+        userRepository.saveAndFlush(user);
+
+        mockMvc.perform(get("/api/v1/users/me").header("Authorization", authorization))
+                .andExpect(status().isUnauthorized());
+        assertNull(connectWebSocket(authorization).getUser());
+        assertNotNull(connectWebSocket(bearer(user)).getUser());
+    }
+
+    @Test
+    void accountStatusChangesAreRejectedByHttpAndWebSocketUsingFreshDatabaseState() throws Exception {
+        User user = saveUser("status-change", "BUYER", AccountStatus.ACTIVE);
+        String authorization = bearer(user);
+        assertEquals(user.getId().toString(), connectWebSocket(authorization).getUser().getName());
+
+        for (AccountStatus accountStatus : AccountStatus.values()) {
+            if (accountStatus == AccountStatus.ACTIVE) continue;
+            user.setAccountStatus(accountStatus);
+            userRepository.saveAndFlush(user);
+
+            mockMvc.perform(get("/api/v1/users/me").header("Authorization", authorization))
+                    .andExpect(status().isUnauthorized());
+            assertNull(connectWebSocket(authorization).getUser());
+        }
+    }
+
+    private StompHeaderAccessor connectWebSocket(String authorization) {
+        StompHeaderAccessor headers = StompHeaderAccessor.create(StompCommand.CONNECT);
+        headers.setNativeHeader("Authorization", authorization);
+        headers.setLeaveMutable(true);
+        Message<byte[]> message = MessageBuilder.createMessage(new byte[0], headers.getMessageHeaders());
+        webSocketAuthInterceptor.preSend(message, null);
+        return headers;
     }
 
     private User saveUser(String prefix, String roleCode, AccountStatus status) {

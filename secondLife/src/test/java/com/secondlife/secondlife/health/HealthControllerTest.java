@@ -1,5 +1,7 @@
 package com.secondlife.secondlife.health;
 
+import com.secondlife.secondlife.controller.HealthController;
+
 import com.secondlife.secondlife.exception.GlobalExceptionHandler;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;

@@ -1,11 +1,11 @@
 package com.secondlife.secondlife.service.impl;
 
-import com.secondlife.secondlife.dto.ekyc.EkycRequest;
-import com.secondlife.secondlife.dto.ekyc.EkycResult;
+import com.secondlife.secondlife.dto.request.EkycRequest;
+import com.secondlife.secondlife.dto.response.EkycResult;
 import com.secondlife.secondlife.enums.EkycStatus;
 import com.secondlife.secondlife.enums.ReasonCode;
 import com.secondlife.secondlife.service.EkycService;
-import com.secondlife.secondlife.service.ekyc.EkycProviderClient;
+import com.secondlife.secondlife.integration.ekyc.EkycProviderClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;

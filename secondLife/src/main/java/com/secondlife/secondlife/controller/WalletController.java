@@ -1,17 +1,27 @@
 package com.secondlife.secondlife.controller;
 
+import com.secondlife.secondlife.common.PageResponse;
+import com.secondlife.secondlife.dto.request.DepositCreateRequestDTO;
+import com.secondlife.secondlife.dto.request.WalletWithdrawalRequest;
+import com.secondlife.secondlife.dto.request.WalletWithdrawalReviewRequest;
+import com.secondlife.secondlife.dto.response.DepositResponseDTO;
 import com.secondlife.secondlife.dto.response.WalletResponseDTO;
-import com.secondlife.secondlife.entity.UserWallet;
+import com.secondlife.secondlife.dto.response.WalletTransactionResponseDTO;
+import com.secondlife.secondlife.dto.response.WalletWithdrawalResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.DepositService;
+import com.secondlife.secondlife.service.WalletQueryService;
 import com.secondlife.secondlife.service.WalletService;
+import io.swagger.v3.oas.annotations.Operation;
+import jakarta.validation.Valid;
+import org.springdoc.core.annotations.ParameterObject;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
-import java.math.BigDecimal;
 import java.util.UUID;
 
 @RestController
@@ -19,13 +29,16 @@ import java.util.UUID;
 public class WalletController {
 
     private final WalletService walletService;
+    private final WalletQueryService walletQueryService;
     private final DepositService depositService;
     private final CurrentUserProvider currentUserProvider;
 
     public WalletController(WalletService walletService,
                             DepositService depositService,
+                            WalletQueryService walletQueryService,
                             CurrentUserProvider currentUserProvider) {
         this.walletService = walletService;
+        this.walletQueryService = walletQueryService;
         this.depositService = depositService;
         this.currentUserProvider = currentUserProvider;
     }
@@ -35,83 +48,65 @@ public class WalletController {
     public ResponseEntity<WalletResponseDTO> getMyWallet(
             @AuthenticationPrincipal CustomUserDetails userDetails) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        UserWallet wallet = walletService.getWalletByUserId(userId);
-        
-        WalletResponseDTO dto = new WalletResponseDTO();
-        dto.setId(wallet.getId());
-        dto.setUserId(wallet.getUser().getId());
-        dto.setBalance(wallet.getBalance());
-        dto.setUpdatedAt(wallet.getUpdatedAt());
-        
-        return ResponseEntity.ok(dto);
+        return ResponseEntity.ok(walletQueryService.getWallet(userId));
     }
 
     @PostMapping("/deposit-request")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<com.secondlife.secondlife.dto.response.DepositResponseDTO> createDepositRequest(
+    public ResponseEntity<DepositResponseDTO> createDepositRequest(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @jakarta.validation.Valid @RequestBody com.secondlife.secondlife.dto.request.DepositCreateRequestDTO requestDTO) {
+            @Valid @RequestBody DepositCreateRequestDTO requestDTO) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(depositService.createDepositRequest(userId, requestDTO));
     }
 
     @GetMapping("/me/transactions")
     @PreAuthorize("isAuthenticated()")
-    @io.swagger.v3.oas.annotations.Operation(summary = "Get wallet transaction history")
-    public ResponseEntity<com.secondlife.secondlife.common.PageResponse<com.secondlife.secondlife.dto.response.WalletTransactionResponseDTO>> getMyTransactions(
+    @Operation(summary = "Get wallet transaction history")
+    public ResponseEntity<PageResponse<WalletTransactionResponseDTO>> getMyTransactions(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @org.springdoc.core.annotations.ParameterObject org.springframework.data.domain.Pageable pageable) {
+            @ParameterObject Pageable pageable) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        org.springframework.data.domain.Page<com.secondlife.secondlife.entity.WalletTransaction> page = walletService.getTransactions(userId, pageable);
-        
-        org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.WalletTransactionResponseDTO> dtoPage = page.map(t -> com.secondlife.secondlife.dto.response.WalletTransactionResponseDTO.builder()
-                .id(t.getId())
-                .walletId(t.getWallet().getId())
-                .amount(t.getAmount())
-                .type(t.getType())
-                .referenceId(t.getReferenceId())
-                .createdAt(t.getCreatedAt())
-                .build());
-                
-        return ResponseEntity.ok(com.secondlife.secondlife.common.PageResponse.from(dtoPage));
+        return ResponseEntity.ok(PageResponse.from(
+                walletQueryService.getTransactions(userId, pageable)));
     }
 
     @PostMapping("/withdrawals")
     @PreAuthorize("isAuthenticated()")
-    @io.swagger.v3.oas.annotations.Operation(summary = "Yêu cầu rút tiền từ ví về tài khoản ngân hàng")
-    public ResponseEntity<com.secondlife.secondlife.dto.response.WalletWithdrawalResponse> requestWithdrawal(
+    @Operation(summary = "Yêu cầu rút tiền từ ví về tài khoản ngân hàng")
+    public ResponseEntity<WalletWithdrawalResponse> requestWithdrawal(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @jakarta.validation.Valid @RequestBody com.secondlife.secondlife.dto.request.WalletWithdrawalRequest request) {
+            @Valid @RequestBody WalletWithdrawalRequest request) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(walletService.requestWithdrawal(userId, request));
     }
 
     @GetMapping("/withdrawals")
     @PreAuthorize("isAuthenticated()")
-    @io.swagger.v3.oas.annotations.Operation(summary = "Lịch sử yêu cầu rút tiền của người dùng")
-    public ResponseEntity<com.secondlife.secondlife.common.PageResponse<com.secondlife.secondlife.dto.response.WalletWithdrawalResponse>> getMyWithdrawals(
+    @Operation(summary = "Lịch sử yêu cầu rút tiền của người dùng")
+    public ResponseEntity<PageResponse<WalletWithdrawalResponse>> getMyWithdrawals(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @org.springdoc.core.annotations.ParameterObject org.springframework.data.domain.Pageable pageable) {
+            @ParameterObject Pageable pageable) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        return ResponseEntity.ok(com.secondlife.secondlife.common.PageResponse.from(walletService.getMyWithdrawals(userId, pageable)));
+        return ResponseEntity.ok(PageResponse.from(walletService.getMyWithdrawals(userId, pageable)));
     }
 
     @GetMapping("/admin/withdrawals")
     @PreAuthorize("hasRole('ADMIN') or hasAuthority('ADMIN_RBAC_MANAGE')")
-    @io.swagger.v3.oas.annotations.Operation(summary = "Admin xem danh sách yêu cầu rút tiền")
-    public ResponseEntity<com.secondlife.secondlife.common.PageResponse<com.secondlife.secondlife.dto.response.WalletWithdrawalResponse>> getAllWithdrawals(
+    @Operation(summary = "Admin xem danh sách yêu cầu rút tiền")
+    public ResponseEntity<PageResponse<WalletWithdrawalResponse>> getAllWithdrawals(
             @RequestParam(required = false) String status,
-            @org.springdoc.core.annotations.ParameterObject org.springframework.data.domain.Pageable pageable) {
-        return ResponseEntity.ok(com.secondlife.secondlife.common.PageResponse.from(walletService.getAllWithdrawals(status, pageable)));
+            @ParameterObject Pageable pageable) {
+        return ResponseEntity.ok(PageResponse.from(walletService.getAllWithdrawals(status, pageable)));
     }
 
     @PostMapping("/admin/withdrawals/{id}/review")
     @PreAuthorize("hasRole('ADMIN') or hasAuthority('ADMIN_RBAC_MANAGE')")
-    @io.swagger.v3.oas.annotations.Operation(summary = "Admin phê duyệt hoặc từ chối yêu cầu rút tiền")
-    public ResponseEntity<com.secondlife.secondlife.dto.response.WalletWithdrawalResponse> reviewWithdrawal(
+    @Operation(summary = "Admin phê duyệt hoặc từ chối yêu cầu rút tiền")
+    public ResponseEntity<WalletWithdrawalResponse> reviewWithdrawal(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID id,
-            @jakarta.validation.Valid @RequestBody com.secondlife.secondlife.dto.request.WalletWithdrawalReviewRequest request) {
+            @Valid @RequestBody WalletWithdrawalReviewRequest request) {
         UUID adminId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(walletService.reviewWithdrawal(adminId, id, request));
     }

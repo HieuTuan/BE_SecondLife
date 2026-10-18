@@ -1,12 +1,14 @@
 package com.secondlife.secondlife.config;
 
-import com.secondlife.secondlife.security.jwt.JwtAccessDeniedHandler;
-import com.secondlife.secondlife.security.jwt.JwtAuthenticationEntryPoint;
+import com.secondlife.secondlife.security.handler.RestAccessDeniedHandler;
+import com.secondlife.secondlife.security.handler.RestAuthenticationEntryPoint;
 import com.secondlife.secondlife.security.jwt.JwtAuthenticationFilter;
+import com.secondlife.secondlife.security.filter.InspectionSealRateLimitingFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authorization.AuthorityAuthorizationManager;
 import org.springframework.security.authorization.AuthorizationManagers;
@@ -33,13 +35,13 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
-    private final com.secondlife.secondlife.security.filter.InspectionSealRateLimitingFilter sealRateLimitingFilter;
-    private final JwtAuthenticationEntryPoint authenticationEntryPoint;
-    private final JwtAccessDeniedHandler accessDeniedHandler;
+    private final InspectionSealRateLimitingFilter sealRateLimitingFilter;
+    private final RestAuthenticationEntryPoint authenticationEntryPoint;
+    private final RestAccessDeniedHandler accessDeniedHandler;
     private final CorsProperties corsProperties;
 
     @Bean
-    public SecurityFilterChain  filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
@@ -64,10 +66,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/health").permitAll()
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/v1/webhooks/sepay").permitAll()
-                        .requestMatchers(org.springframework.http.HttpMethod.POST,"/api/v1/shipping/lalamove/callback").permitAll()
-                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/posts", "/api/v1/posts/*", "/api/v1/sellers/*/reputation").permitAll()
+                        .requestMatchers(HttpMethod.POST,"/api/v1/shipping/lalamove/callback").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/posts", "/api/v1/posts/*", "/api/v1/sellers/*/reputation").permitAll()
                         .requestMatchers("/api/v1/inspection/quote").permitAll()
-                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/inspection/seal/*", "/api/v1/inspections/seal/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/inspection/seal/*", "/api/v1/inspections/seal/*").permitAll()
                         .requestMatchers("/error").permitAll()
                         // Administrative role assignment is also guarded at the filter boundary.
                         .requestMatchers("/api/v1/admin/permissions", "/api/v1/admin/permissions/**",

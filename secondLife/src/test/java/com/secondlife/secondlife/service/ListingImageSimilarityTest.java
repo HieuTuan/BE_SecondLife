@@ -13,7 +13,7 @@ import java.util.Random;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ListingImageSimilarityTest {
-    private static final ListingImageSimilarity similarity = new ListingImageSimilarity(
+    private static final ListingImageSimilarity similarity = new com.secondlife.secondlife.service.impl.ListingImageSimilarityImpl(
             16_000, 25_000_000L, 20 * 1024 * 1024L, 100, 8, 12, 90);
 
     @Test
@@ -84,8 +84,8 @@ class ListingImageSimilarityTest {
     void usesConfiguredSimilarityTolerances() {
         String first = "v1:00000000000000000000000000000000101010";
         String second = "v1:00000000000000010000000000000001111010";
-        var strict = new ListingImageSimilarity(16_000, 25_000_000L, 20 * 1024 * 1024L, 100, 0, 0, 0);
-        var tolerant = new ListingImageSimilarity(16_000, 25_000_000L, 20 * 1024 * 1024L, 100, 1, 1, 1);
+        var strict = new com.secondlife.secondlife.service.impl.ListingImageSimilarityImpl(16_000, 25_000_000L, 20 * 1024 * 1024L, 100, 0, 0, 0);
+        var tolerant = new com.secondlife.secondlife.service.impl.ListingImageSimilarityImpl(16_000, 25_000_000L, 20 * 1024 * 1024L, 100, 1, 1, 1);
 
         assertFalse(strict.similar(first, second));
         assertTrue(tolerant.similar(first, second));
@@ -96,9 +96,9 @@ class ListingImageSimilarityTest {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         assertTrue(ImageIO.write(scene(17), "png", bytes));
         byte[] png = bytes.toByteArray();
-        var dimensionLimit = new ListingImageSimilarity(300, 25_000_000L, 20 * 1024 * 1024L, 100, 8, 12, 90);
-        var pixelLimit = new ListingImageSimilarity(16_000, 100_000L, 20 * 1024 * 1024L, 100, 8, 12, 90);
-        var byteLimit = new ListingImageSimilarity(16_000, 25_000_000L, png.length - 1L, 100, 8, 12, 90);
+        var dimensionLimit = new com.secondlife.secondlife.service.impl.ListingImageSimilarityImpl(300, 25_000_000L, 20 * 1024 * 1024L, 100, 8, 12, 90);
+        var pixelLimit = new com.secondlife.secondlife.service.impl.ListingImageSimilarityImpl(16_000, 100_000L, 20 * 1024 * 1024L, 100, 8, 12, 90);
+        var byteLimit = new com.secondlife.secondlife.service.impl.ListingImageSimilarityImpl(16_000, 25_000_000L, png.length - 1L, 100, 8, 12, 90);
 
         assertThrows(IllegalArgumentException.class, () -> dimensionLimit.fingerprint(png));
         assertThrows(IllegalArgumentException.class, () -> pixelLimit.fingerprint(png));

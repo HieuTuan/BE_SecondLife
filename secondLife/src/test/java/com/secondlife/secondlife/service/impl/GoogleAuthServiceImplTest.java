@@ -1,8 +1,9 @@
 package com.secondlife.secondlife.service.impl;
 
+import com.secondlife.secondlife.integration.auth.GoogleAuthServiceImpl;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
-import com.secondlife.secondlife.dto.GoogleUserInfo;
+import com.secondlife.secondlife.dto.response.GoogleUserInfo;
 import com.secondlife.secondlife.exception.UnauthorizedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

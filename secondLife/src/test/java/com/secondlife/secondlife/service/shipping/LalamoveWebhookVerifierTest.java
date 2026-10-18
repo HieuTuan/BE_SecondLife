@@ -1,5 +1,7 @@
 package com.secondlife.secondlife.service.shipping;
 
+import com.secondlife.secondlife.integration.shipping.LalamoveWebhookVerifier;
+
 import com.secondlife.secondlife.config.LalamoveProperties;
 import com.secondlife.secondlife.controller.LalamoveWebhookController;
 import com.secondlife.secondlife.exception.BadRequestException;

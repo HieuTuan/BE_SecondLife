@@ -10,6 +10,7 @@ import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.DepositService;
 import com.secondlife.secondlife.service.WalletService;
+import com.secondlife.secondlife.service.WalletQueryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -45,6 +46,9 @@ class WalletControllerTest {
     private WalletService walletService;
 
     @Mock
+    private WalletQueryService walletQueryService;
+
+    @Mock
     private DepositService depositService;
 
     @Mock
@@ -59,7 +63,7 @@ class WalletControllerTest {
 
     @BeforeEach
     void setUp() {
-        walletController = new WalletController(walletService, depositService, currentUserProvider);
+        walletController = new WalletController(walletService, depositService, walletQueryService, currentUserProvider);
 
         objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
@@ -71,6 +75,52 @@ class WalletControllerTest {
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
+    }
+
+    @Test
+    void getMyWalletKeepsTheWalletResponseShape() throws Exception {
+        UUID walletId = UUID.randomUUID();
+        var response = new com.secondlife.secondlife.dto.response.WalletResponseDTO(
+                walletId,
+                userId,
+                new BigDecimal("125000.00"),
+                Instant.parse("2026-01-01T00:00:00Z")
+        );
+        when(currentUserProvider.resolveUserId(any())).thenReturn(userId);
+        when(walletQueryService.getWallet(userId)).thenReturn(response);
+
+        mockMvc.perform(get("/api/v1/wallets/me"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(walletId.toString()))
+                .andExpect(jsonPath("$.userId").value(userId.toString()))
+                .andExpect(jsonPath("$.balance").value(125000))
+                .andExpect(jsonPath("$.updatedAt").exists());
+    }
+
+    @Test
+    void getMyTransactionsKeepsThePageMetadataAndResponseFields() throws Exception {
+        UUID transactionId = UUID.randomUUID();
+        UUID walletId = UUID.randomUUID();
+        var response = com.secondlife.secondlife.dto.response.WalletTransactionResponseDTO.builder()
+                .id(transactionId)
+                .walletId(walletId)
+                .amount(new BigDecimal("50000.00"))
+                .referenceId(UUID.randomUUID())
+                .createdAt(Instant.parse("2026-01-01T00:00:00Z"))
+                .build();
+        when(currentUserProvider.resolveUserId(any())).thenReturn(userId);
+        when(walletQueryService.getTransactions(eq(userId), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(response), PageRequest.of(1, 10), 35));
+
+        mockMvc.perform(get("/api/v1/wallets/me/transactions").param("page", "1").param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].id").value(transactionId.toString()))
+                .andExpect(jsonPath("$.items[0].walletId").value(walletId.toString()))
+                .andExpect(jsonPath("$.items[0].amount").value(50000))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(10))
+                .andExpect(jsonPath("$.totalElements").value(35))
+                .andExpect(jsonPath("$.totalPages").value(4));
     }
 
     @Test

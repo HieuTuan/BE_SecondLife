@@ -1,9 +1,12 @@
 package com.secondlife.secondlife.controller;
 
+import com.secondlife.secondlife.dto.request.CancelOrderRequest;
 import com.secondlife.secondlife.dto.request.OrderRequestDTO;
+import com.secondlife.secondlife.dto.response.OrderBankPaymentResponse;
 import com.secondlife.secondlife.dto.response.OrderResponseDTO;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
+import com.secondlife.secondlife.service.OrderBankPaymentService;
 import com.secondlife.secondlife.service.OrderService;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
@@ -27,12 +30,12 @@ public class OrderController {
 
     private final OrderService orderService;
     private final CurrentUserProvider currentUserProvider;
-    private final com.secondlife.secondlife.service.payment.OrderBankPaymentService bankPayments;
+    private final OrderBankPaymentService bankPayments;
 
     @GetMapping("/{id}/payment")
     @Operation(summary="BUYER reads bank transfer instructions and polls payment status", description="Read only; payment is confirmed exclusively by authenticated SePay webhooks")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<com.secondlife.secondlife.dto.response.OrderBankPaymentResponse> payment(
+    public ResponseEntity<OrderBankPaymentResponse> payment(
             @AuthenticationPrincipal CustomUserDetails userDetails,@PathVariable UUID id) {
         return ResponseEntity.ok(bankPayments.get(currentUserProvider.resolveUserId(userDetails),id));
     }
@@ -89,7 +92,7 @@ public class OrderController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<OrderResponseDTO> cancelOrder(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @PathVariable UUID id,@Valid @RequestBody(required=false) com.secondlife.secondlife.dto.reputation.CancelOrderRequest request) {
+            @PathVariable UUID id,@Valid @RequestBody(required=false) CancelOrderRequest request) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(orderService.cancelOrder(userId,id,request));
     }

@@ -4,12 +4,9 @@ import com.secondlife.secondlife.dto.request.InspectionResultRequest;
 import com.secondlife.secondlife.dto.response.InspectionChecklistItemResponse;
 import com.secondlife.secondlife.dto.response.InspectionChecklistResponse;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
-import com.secondlife.secondlife.entity.InspectionOrder;
-import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.exception.GlobalExceptionHandler;
-import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.security.CurrentUserProvider;
-import com.secondlife.secondlife.service.InspectionChecklistService;
+import com.secondlife.secondlife.service.InspectionOrderChecklistService;
 import com.secondlife.secondlife.service.InspectionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,7 +22,6 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -43,10 +39,7 @@ class InspectorControllerTest {
     private InspectionService inspectionService;
 
     @Mock
-    private InspectionChecklistService checklistService;
-
-    @Mock
-    private InspectionOrderRepository orderRepository;
+    private InspectionOrderChecklistService orderChecklistService;
 
     @Mock
     private CurrentUserProvider currentUserProvider;
@@ -89,15 +82,6 @@ class InspectorControllerTest {
         UUID orderId = UUID.randomUUID();
         UUID categoryId = UUID.randomUUID();
 
-        Post post = new Post();
-        post.setCategoryId(categoryId);
-
-        InspectionOrder order = new InspectionOrder();
-        order.setId(orderId);
-        order.setPost(post);
-
-        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
-
         InspectionChecklistResponse checklist = InspectionChecklistResponse.builder()
                 .title("Checklist Điện thoại di động")
                 .categoryId(categoryId)
@@ -109,7 +93,7 @@ class InspectorControllerTest {
                 ))
                 .build();
 
-        when(checklistService.getByCategoryId(categoryId)).thenReturn(checklist);
+        when(orderChecklistService.getForOrder(orderId)).thenReturn(checklist);
 
         mockMvc.perform(get("/api/v1/inspector/orders/" + orderId + "/checklist"))
                 .andExpect(status().isOk())
@@ -125,10 +109,19 @@ class InspectorControllerTest {
 
         when(currentUserProvider.resolveUserId(any())).thenReturn(inspectorId);
 
-        InspectionResultRequest request = new InspectionResultRequest();
-        request.setStatus("PASSED");
-        request.setNote("Máy zin 100%, pin tốt");
-        request.setVideoProofUrl("https://res.cloudinary.com/test/video.mp4");
+        InspectionResultRequest request = new InspectionResultRequest(
+                "PASSED",
+                "Máy zin 100%, pin tốt",
+                "https://res.cloudinary.com/test/video.mp4",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        );
 
         InspectionOrderResponse response = InspectionOrderResponse.builder()
                 .id(orderId)
@@ -155,13 +148,19 @@ class InspectorControllerTest {
 
         when(currentUserProvider.resolveUserId(any())).thenReturn(inspectorId);
 
-        InspectionResultRequest request = new InspectionResultRequest();
-        request.setStatus("PASSED");
-        request.setNote("Bo mạch nguyên bản");
-        request.setConditionScore(95);
-        request.setConditionGrade("Like New");
-        request.setTamperSealId("SL-SEAL-8829102");
-        request.setBarcode("SL-BC-998877");
+        InspectionResultRequest request = new InspectionResultRequest(
+                "PASSED",
+                "Bo mạch nguyên bản",
+                null,
+                null,
+                null,
+                null,
+                95,
+                "Like New",
+                "SL-SEAL-8829102",
+                "SL-BC-998877",
+                null
+        );
 
         InspectionOrderResponse response = InspectionOrderResponse.builder()
                 .id(orderId)

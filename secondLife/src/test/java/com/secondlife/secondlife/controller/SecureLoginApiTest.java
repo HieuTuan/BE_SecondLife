@@ -23,6 +23,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
@@ -89,7 +90,7 @@ class SecureLoginApiTest {
         provider.setPasswordEncoder(passwordEncoder);
         AuthServiceImpl authService = new AuthServiceImpl(
                 userRepository, roleRepository, passwordEncoder, new ProviderManager(provider), tokenService,
-                notificationService, new UserMapper(), googleAuthService);
+                notificationService, MapperTestSupport.mapper(UserMapper.class), googleAuthService);
 
         validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();

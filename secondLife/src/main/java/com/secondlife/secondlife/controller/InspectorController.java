@@ -1,20 +1,17 @@
 package com.secondlife.secondlife.controller;
 
+import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
 import com.secondlife.secondlife.dto.response.InspectionChecklistResponse;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
-import com.secondlife.secondlife.entity.InspectionOrder;
-import com.secondlife.secondlife.exception.NotFoundException;
-import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
-import com.secondlife.secondlife.service.InspectionChecklistService;
+import com.secondlife.secondlife.service.InspectionOrderChecklistService;
 import com.secondlife.secondlife.service.InspectionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -29,17 +26,14 @@ import java.util.UUID;
 public class InspectorController {
 
     private final InspectionService inspectionService;
-    private final InspectionChecklistService checklistService;
-    private final InspectionOrderRepository orderRepository;
+    private final InspectionOrderChecklistService orderChecklistService;
     private final CurrentUserProvider currentUserProvider;
 
     public InspectorController(InspectionService inspectionService,
-                               InspectionChecklistService checklistService,
-                               InspectionOrderRepository orderRepository,
+                               InspectionOrderChecklistService orderChecklistService,
                                CurrentUserProvider currentUserProvider) {
         this.inspectionService = inspectionService;
-        this.checklistService = checklistService;
-        this.orderRepository = orderRepository;
+        this.orderChecklistService = orderChecklistService;
         this.currentUserProvider = currentUserProvider;
     }
 
@@ -66,11 +60,7 @@ public class InspectorController {
     @Operation(summary = "Lấy biểu mẫu checklist theo danh mục của sản phẩm trong đơn để KTV thực hiện chấm điểm")
     public ResponseEntity<InspectionChecklistResponse> getChecklistForOrder(
             @PathVariable UUID orderId) {
-        InspectionOrder order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
-
-        UUID categoryId = order.getPost() != null ? order.getPost().getCategoryId() : null;
-        return ResponseEntity.ok(checklistService.getByCategoryId(categoryId));
+        return ResponseEntity.ok(orderChecklistService.getForOrder(orderId));
     }
 
     @PostMapping("/orders/{orderId}/start")
@@ -97,11 +87,11 @@ public class InspectorController {
     @PostMapping("/orders/{orderId}/generate-seal")
     @PreAuthorize("hasAuthority('INSPECTION_REPORT_SUBMIT')")
     @Operation(summary = "Kỹ thuật viên yêu cầu hệ thống tự sinh mã tem niêm phong số chuẩn kèm checksum")
-    public ResponseEntity<com.secondlife.secondlife.common.ApiResponse<String>> generateSeal(
+    public ResponseEntity<ApiResponse<String>> generateSeal(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID orderId) {
         UUID inspectorId = currentUserProvider.resolveUserId(userDetails);
         String sealCode = inspectionService.generateSealForOrder(inspectorId, orderId);
-        return ResponseEntity.ok(com.secondlife.secondlife.common.ApiResponse.success("Sinh mã tem thành công", sealCode));
+        return ResponseEntity.ok(ApiResponse.success("Sinh mã tem thành công", sealCode));
     }
 }

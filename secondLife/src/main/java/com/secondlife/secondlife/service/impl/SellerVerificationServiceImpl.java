@@ -2,14 +2,14 @@ package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.config.EkycRecoveryProperties;
-import com.secondlife.secondlife.dto.ekyc.EkycRequest;
-import com.secondlife.secondlife.dto.ekyc.EkycResult;
+import com.secondlife.secondlife.dto.request.EkycRequest;
+import com.secondlife.secondlife.dto.response.EkycResult;
 import com.secondlife.secondlife.dto.request.SellerVerificationRequest;
 import com.secondlife.secondlife.dto.request.SellerVerificationResubmitRequest;
 import com.secondlife.secondlife.dto.request.SellerVerificationReviewRequest;
 import com.secondlife.secondlife.dto.response.AdminSellerVerificationDetailResponse;
 import com.secondlife.secondlife.dto.response.SellerVerificationResponse;
-import com.secondlife.secondlife.dto.risk.SellerRiskResult;
+import com.secondlife.secondlife.dto.response.SellerRiskResult;
 import com.secondlife.secondlife.entity.SellerVerification;
 import com.secondlife.secondlife.entity.SellerVerificationEvent;
 import com.secondlife.secondlife.entity.User;

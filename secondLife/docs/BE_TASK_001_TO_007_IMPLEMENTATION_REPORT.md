@@ -156,7 +156,7 @@
        - Nếu đăng ký kênh cá nhân (`/user/`, `/queue/`, `/topic/notifications/`), interceptor so sánh userId trong topic với userId của người đang kết nối.
        - Nếu không khớp hoặc người dùng chưa xác thực, lập tức từ chối và ngắt kết nối STOMP.
 - **Files liên quan**:
-  - `src/main/java/com/secondlife/secondlife/config/WebSocketAuthChannelInterceptor.java`
+  - `src/main/java/com/secondlife/secondlife/security/websocket/WebSocketAuthChannelInterceptor.java`
 
 ---
 

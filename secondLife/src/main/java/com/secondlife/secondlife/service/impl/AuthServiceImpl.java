@@ -1,6 +1,6 @@
 package com.secondlife.secondlife.service.impl;
 
-import com.secondlife.secondlife.dto.GoogleUserInfo;
+import com.secondlife.secondlife.dto.response.GoogleUserInfo;
 import com.secondlife.secondlife.dto.request.*;
 import com.secondlife.secondlife.dto.response.AuthResponse;
 import com.secondlife.secondlife.dto.response.TokenResponse;

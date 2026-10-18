@@ -1,8 +1,10 @@
 package com.secondlife.secondlife.service;
+
+import com.secondlife.secondlife.integration.geocoding.GeoapifyGeocodingClient;
 import com.secondlife.secondlife.config.*;
-import com.secondlife.secondlife.dto.shipping.*;
+import com.secondlife.secondlife.dto.request.ShippingAddressRequest;
 import com.secondlife.secondlife.exception.*;
-import com.secondlife.secondlife.service.shipping.*;
+import com.secondlife.secondlife.service.impl.ShippingCatalogPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -18,14 +20,14 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class ReverseGeocodingServiceTest {
     private static final String URL="https://api.geoapify.com/v1/geocode/reverse";
     private final ObjectMapper mapper=new ObjectMapper();
-    private record Module(ReverseGeocodingService service,MockRestServiceServer server,GeocodingProperties properties) {}
+    private record Module(GeoapifyGeocodingClient service,MockRestServiceServer server,GeocodingProperties properties) {}
     private Module module() { return module(null); }
     private Module module(com.secondlife.secondlife.repository.GeocodedLocationCacheRepository cache) {
         var properties=new GeocodingProperties(); properties.setEnabled(true); properties.setApiKey("private-test-key");
         properties.setFallbackBaseUrl("https://nominatim.openstreetmap.org/reverse"); properties.setFallbackUserAgent("SecondLife-Test/1.0");
         properties.setBaseUrl(URL); properties.setLanguage("vi"); properties.setTimeoutMs(5000); properties.setMaxResponseCharacters(1048576);
         var cities=new ShippingCatalogProperties();cities.setAllowedCities(List.of(ShippingCatalogProperties.City.HANOI,ShippingCatalogProperties.City.DANANG,ShippingCatalogProperties.City.HO_CHI_MINH));
-        var builder=RestClient.builder();var service=new ReverseGeocodingService(properties,new ShippingCatalogPolicy(cities,mapper),mapper,builder,cache);
+        var builder=RestClient.builder();var service=new GeoapifyGeocodingClient(properties,new ShippingCatalogPolicy(cities,mapper),mapper,builder,cache);
         return new Module(service,MockRestServiceServer.bindTo(builder).build(),properties);
     }
     private com.secondlife.secondlife.entity.GeocodedLocationCache cached(String address) {

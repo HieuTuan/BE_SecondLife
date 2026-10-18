@@ -1,10 +1,16 @@
 package com.secondlife.secondlife.integration;
 
+import com.secondlife.secondlife.scheduler.OrderBankPaymentScheduler;
+
+import com.secondlife.secondlife.integration.ai.AiPriceProvider;
+
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
-import com.secondlife.secondlife.service.*;
+import com.secondlife.secondlife.service.ChatService;
+import com.secondlife.secondlife.service.CloudinaryService;
+import com.secondlife.secondlife.service.WalletService;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.ai.chat.model.ChatModel;
@@ -56,8 +62,8 @@ class OrderBankTransferIntegrationTest {
     @MockitoBean CloudinaryService cloudinary;
     @MockitoBean(name="ollamaChatModel") ChatModel ollama;
     @MockitoBean(name="googleGenAiChatModel") ChatModel google;
-    @Autowired com.secondlife.secondlife.service.payment.OrderBankPaymentService bankPayments;
-    @Autowired com.secondlife.secondlife.service.payment.OrderBankPaymentScheduler bankScheduler;
+    @Autowired com.secondlife.secondlife.service.OrderBankPaymentService bankPayments;
+    @Autowired com.secondlife.secondlife.scheduler.OrderBankPaymentScheduler bankScheduler;
     @Autowired OrderRepository orders;
     @MockitoBean(name="bankPaymentClock") Clock clock;
     private static final Instant NOW=Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);

@@ -1,11 +1,15 @@
 package com.secondlife.secondlife.service.impl;
 
-import com.secondlife.secondlife.dto.credit.*;
+import com.secondlife.secondlife.dto.request.UpdateCreditPricingRequest;
+import com.secondlife.secondlife.dto.response.CreditPricingResponse;
+import com.secondlife.secondlife.dto.response.CreditPricingRuleResponse;
+import com.secondlife.secondlife.dto.response.CreditQuoteResponse;
 import com.secondlife.secondlife.entity.CreditPricingRule;
 import com.secondlife.secondlife.enums.CreditType;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.mapper.CreditMapper;
 import com.secondlife.secondlife.repository.CreditPricingRuleRepository;
 import com.secondlife.secondlife.service.CreditPricingService;
 import lombok.RequiredArgsConstructor;
@@ -22,7 +26,9 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class CreditPricingServiceImpl implements CreditPricingService {
+
     private final CreditPricingRuleRepository priceRepository;
+    private final CreditMapper creditMapper;
 
     @Override
     @Transactional(readOnly = true)
@@ -71,7 +77,7 @@ public class CreditPricingServiceImpl implements CreditPricingService {
     public List<CreditPricingRuleResponse> getAdminPrices() {
         return priceRepository.findAll().stream()
                 .sorted(Comparator.comparing(CreditPricingRule::getCreditType))
-                .map(this::toPriceResponse).toList();
+                .map(creditMapper::toPriceResponse).toList();
     }
 
     @Override
@@ -88,7 +94,7 @@ public class CreditPricingServiceImpl implements CreditPricingService {
         rule.setActive(true);
         rule.setUpdatedBy(adminId);
         rule.setUpdatedAt(Instant.now());
-        return toPriceResponse(priceRepository.save(rule));
+        return creditMapper.toPriceResponse(priceRepository.save(rule));
     }
 
     private CreditPricingRule activeRule(CreditType type) {
@@ -100,8 +106,4 @@ public class CreditPricingServiceImpl implements CreditPricingService {
         return rule;
     }
 
-    private CreditPricingRuleResponse toPriceResponse(CreditPricingRule rule) {
-        return new CreditPricingRuleResponse(rule.getCreditType(), rule.getUnitPrice(),
-                rule.getCurrency(), rule.isActive());
-    }
 }

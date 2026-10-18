@@ -1,6 +1,12 @@
 package com.secondlife.secondlife.service;
 
+import com.secondlife.secondlife.dto.request.WalletWithdrawalRequest;
+import com.secondlife.secondlife.dto.request.WalletWithdrawalReviewRequest;
+import com.secondlife.secondlife.dto.response.WalletWithdrawalResponse;
 import com.secondlife.secondlife.entity.UserWallet;
+import com.secondlife.secondlife.entity.WalletTransaction;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -12,10 +18,10 @@ public interface WalletService {
     void processPayment(UUID userId, BigDecimal amount, UUID orderId);
     void processEarning(UUID userId, BigDecimal amount, UUID orderId);
     void processRefund(UUID userId, BigDecimal amount, UUID orderId);
-    org.springframework.data.domain.Page<com.secondlife.secondlife.entity.WalletTransaction> getTransactions(UUID userId, org.springframework.data.domain.Pageable pageable);
+    Page<WalletTransaction> getTransactions(UUID userId, Pageable pageable);
 
-    com.secondlife.secondlife.dto.response.WalletWithdrawalResponse requestWithdrawal(UUID userId, com.secondlife.secondlife.dto.request.WalletWithdrawalRequest request);
-    com.secondlife.secondlife.dto.response.WalletWithdrawalResponse reviewWithdrawal(UUID adminId, UUID withdrawalId, com.secondlife.secondlife.dto.request.WalletWithdrawalReviewRequest request);
-    org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.WalletWithdrawalResponse> getMyWithdrawals(UUID userId, org.springframework.data.domain.Pageable pageable);
-    org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.WalletWithdrawalResponse> getAllWithdrawals(String status, org.springframework.data.domain.Pageable pageable);
+    WalletWithdrawalResponse requestWithdrawal(UUID userId, WalletWithdrawalRequest request);
+    WalletWithdrawalResponse reviewWithdrawal(UUID adminId, UUID withdrawalId, WalletWithdrawalReviewRequest request);
+    Page<WalletWithdrawalResponse> getMyWithdrawals(UUID userId, Pageable pageable);
+    Page<WalletWithdrawalResponse> getAllWithdrawals(String status, Pageable pageable);
 }

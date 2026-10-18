@@ -1,4 +1,7 @@
 package com.secondlife.secondlife.dto.request;
 
-public record ListingReviewRejectRequest(@jakarta.validation.constraints.NotBlank
-        @jakarta.validation.constraints.Size(max = 2000) String reason) { }
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+
+public record ListingReviewRejectRequest(@NotBlank
+        @Size(max = 2000) String reason) { }

@@ -1,21 +1,23 @@
 package com.secondlife.secondlife.service.impl;
 
+import com.secondlife.secondlife.common.PageableUtils;
 import com.secondlife.secondlife.dto.request.NegotiationRequestDTO;
 import com.secondlife.secondlife.dto.response.NegotiationResponseDTO;
 import com.secondlife.secondlife.entity.Negotiation;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.NegotiationStatus;
+import com.secondlife.secondlife.enums.NotificationType;
 import com.secondlife.secondlife.exception.BadRequestException;
+import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.mapper.NegotiationMapper;
 import com.secondlife.secondlife.repository.NegotiationRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
-import com.secondlife.secondlife.service.NegotiationService;
 import com.secondlife.secondlife.service.ChatService;
+import com.secondlife.secondlife.service.NegotiationService;
 import com.secondlife.secondlife.service.NotificationService;
-import com.secondlife.secondlife.notification.NotificationType;
-import com.secondlife.secondlife.common.PageableUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -33,6 +35,7 @@ import java.util.UUID;
 
 @Service
 public class NegotiationServiceImpl implements NegotiationService {
+    private final NegotiationMapper negotiationMapper;
 
     private static final Set<String> ALLOWED_NEGOTIATION_SORT_PROPERTIES = Set.of(
             "id", "offeredPrice", "status", "createdAt", "updatedAt", "expiredAt"
@@ -45,15 +48,14 @@ public class NegotiationServiceImpl implements NegotiationService {
     private final ChatService chatService;
     private final NotificationService notificationService;
 
-    @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager entityManager;
     private final int maxRejections;
     private final long acceptedTtlHours;
 
     public NegotiationServiceImpl(NegotiationRepository negotiationRepository, PostRepository postRepository,
                                   UserRepository userRepository, ChatService chatService,
                                   @Value("${app.negotiation.max-rejections}") int maxRejections,
-                                  @Value("${app.negotiation.accepted-ttl-hours}") long acceptedTtlHours) {
-        this(negotiationRepository, postRepository, userRepository, chatService, null, maxRejections, acceptedTtlHours);
+                                  @Value("${app.negotiation.accepted-ttl-hours}") long acceptedTtlHours, NegotiationMapper negotiationMapper) {
+        this(negotiationRepository, postRepository, userRepository, chatService, null, maxRejections, acceptedTtlHours, negotiationMapper);
     }
 
     @Autowired
@@ -61,7 +63,9 @@ public class NegotiationServiceImpl implements NegotiationService {
                                   UserRepository userRepository, ChatService chatService,
                                   @Autowired(required = false) NotificationService notificationService,
                                   @Value("${app.negotiation.max-rejections}") int maxRejections,
-                                  @Value("${app.negotiation.accepted-ttl-hours}") long acceptedTtlHours) {
+                                  @Value("${app.negotiation.accepted-ttl-hours}") long acceptedTtlHours, NegotiationMapper negotiationMapper) {
+        this.negotiationMapper = negotiationMapper;
+
         if (maxRejections <= 0 || acceptedTtlHours <= 0)
             throw new IllegalArgumentException("Negotiation rejection limit and accepted TTL must be positive");
         this.negotiationRepository = negotiationRepository;
@@ -76,7 +80,7 @@ public class NegotiationServiceImpl implements NegotiationService {
     @Override
     @Transactional
     public NegotiationResponseDTO createNegotiation(UUID buyerId, NegotiationRequestDTO requestDTO) {
-        Post post = postRepository.findById(requestDTO.getPostId())
+        Post post = postRepository.findById(requestDTO.postId())
                 .orElseThrow(() -> new NotFoundException("Post not found"));
 
         if (!"ACTIVE".equals(post.getStatus())) {
@@ -104,7 +108,7 @@ public class NegotiationServiceImpl implements NegotiationService {
             throw new BadRequestException("You have reached the maximum number of rejected negotiations for this post");
         }
 
-        BigDecimal offeredPrice = requestDTO.getOfferedPrice();
+        BigDecimal offeredPrice = requestDTO.offeredPrice();
 
         // Check max rejected price
         BigDecimal maxRejectedPrice = negotiationRepository.findMaxRejectedPrice(post.getId(), buyerId).orElse(BigDecimal.ZERO);
@@ -140,7 +144,7 @@ public class NegotiationServiceImpl implements NegotiationService {
             );
         }
 
-        return mapToDTO(negotiation);
+        return negotiationMapper.toResponse(negotiation);
     }
 
     @Override
@@ -151,9 +155,10 @@ public class NegotiationServiceImpl implements NegotiationService {
 
         Post post=postRepository.findByIdForUpdate(negotiation.getPost().getId())
                 .orElseThrow(() -> new NotFoundException("Post not found"));
-        if(entityManager!=null) { entityManager.refresh(post);entityManager.refresh(negotiation); }
+        postRepository.refreshManaged(post);
+        negotiationRepository.refreshManaged(negotiation);
         if(!"ACTIVE".equals(post.getStatus()))
-            throw new com.secondlife.secondlife.exception.ConflictException("Post is reserved, awaiting payment or no longer available");
+            throw new ConflictException("Post is reserved, awaiting payment or no longer available");
 
         if (!negotiation.getPost().getUser().getId().equals(sellerId)) {
             throw new BadRequestException("You are not the seller of this post");
@@ -212,7 +217,7 @@ public class NegotiationServiceImpl implements NegotiationService {
             );
         }
 
-        return mapToDTO(negotiation);
+        return negotiationMapper.toResponse(negotiation);
     }
 
     @Override
@@ -249,7 +254,7 @@ public class NegotiationServiceImpl implements NegotiationService {
             );
         }
 
-        return mapToDTO(negotiation);
+        return negotiationMapper.toResponse(negotiation);
     }
 
     @Override
@@ -286,32 +291,19 @@ public class NegotiationServiceImpl implements NegotiationService {
             );
         }
 
-        return mapToDTO(negotiation);
+        return negotiationMapper.toResponse(negotiation);
     }
 
     @Override
     public Page<NegotiationResponseDTO> getBuyerNegotiations(UUID buyerId, Pageable pageable) {
         Pageable safePageable = PageableUtils.sanitize(pageable, ALLOWED_NEGOTIATION_SORT_PROPERTIES, DEFAULT_NEGOTIATION_SORT);
-        return negotiationRepository.findByBuyerId(buyerId, safePageable).map(this::mapToDTO);
+        return negotiationRepository.findByBuyerId(buyerId, safePageable).map(negotiationMapper::toResponse);
     }
 
     @Override
     public Page<NegotiationResponseDTO> getSellerNegotiations(UUID sellerId, Pageable pageable) {
         Pageable safePageable = PageableUtils.sanitize(pageable, ALLOWED_NEGOTIATION_SORT_PROPERTIES, DEFAULT_NEGOTIATION_SORT);
-        return negotiationRepository.findByPostUserId(sellerId, safePageable).map(this::mapToDTO);
+        return negotiationRepository.findByPostUserId(sellerId, safePageable).map(negotiationMapper::toResponse);
     }
 
-    private NegotiationResponseDTO mapToDTO(Negotiation negotiation) {
-        NegotiationResponseDTO dto = new NegotiationResponseDTO();
-        dto.setId(negotiation.getId());
-        dto.setPostId(negotiation.getPost().getId());
-        dto.setPostTitle(negotiation.getPost().getTitle());
-        dto.setBuyerId(negotiation.getBuyer().getId());
-        dto.setSellerId(negotiation.getPost().getUser().getId());
-        dto.setOfferedPrice(negotiation.getOfferedPrice());
-        dto.setStatus(negotiation.getStatus());
-        dto.setCreatedAt(negotiation.getCreatedAt());
-        dto.setExpiredAt(negotiation.getExpiredAt());
-        return dto;
-    }
 }

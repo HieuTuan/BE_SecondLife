@@ -1,5 +1,6 @@
 package com.secondlife.secondlife.dto.request;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
@@ -19,7 +20,7 @@ public record UpdateProfileRequest(
     String streetAddress,
     Double latitude,
     Double longitude,
-    @io.swagger.v3.oas.annotations.media.Schema(description="Gender selection",example="MALE",allowableValues={"MALE","FEMALE","OTHER"})
+    @Schema(description="Gender selection",example="MALE",allowableValues={"MALE","FEMALE","OTHER"})
     com.secondlife.secondlife.enums.Gender gender
 ) {
     public UpdateProfileRequest(String fullName,String phone,String avatarUrl,String province,String district,String ward,

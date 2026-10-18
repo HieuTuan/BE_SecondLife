@@ -1,7 +1,7 @@
 package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.dto.request.SellerPickupAddressRequest;
-import com.secondlife.secondlife.dto.shipping.ShippingAddress;
+import com.secondlife.secondlife.dto.request.ShippingAddress;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import jakarta.validation.ValidatorFactory;

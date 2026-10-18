@@ -1,10 +1,12 @@
 package com.secondlife.secondlife.service.impl;
 
+import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.mapper.InspectionOrderMapper;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.service.InspectionEscrowService;
@@ -26,6 +28,13 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
     private final InspectionOrderRepository inspectionOrderRepository;
     private final WalletService walletService;
     private final PostRepository postRepository;
+    private final InspectionOrderMapper inspectionOrderMapper;
+
+    @Override
+    @Transactional
+    public InspectionOrderResponse payInspectionFeeResponse(UUID userId, UUID inspectionOrderId) {
+        return inspectionOrderMapper.toResponse(payInspectionFee(userId, inspectionOrderId));
+    }
 
     @Override
     @Transactional

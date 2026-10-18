@@ -128,9 +128,11 @@ class InspectionCenterControllerTest {
         UUID managerId = UUID.randomUUID();
         when(currentUserProvider.resolveUserId(any())).thenReturn(managerId);
 
-        InspectionFeeProposalRequest request = new InspectionFeeProposalRequest();
-        request.setBaseInspectionFee(BigDecimal.valueOf(120000));
-        request.setTiers(List.of());
+        InspectionFeeProposalRequest request = new InspectionFeeProposalRequest(
+                null,
+                BigDecimal.valueOf(120000),
+                List.of()
+        );
 
         InspectionFeeProposalResponse response = InspectionFeeProposalResponse.builder()
                 .id(UUID.randomUUID())

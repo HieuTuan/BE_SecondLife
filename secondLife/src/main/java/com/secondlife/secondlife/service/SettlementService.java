@@ -1,5 +1,6 @@
 package com.secondlife.secondlife.service;
-import com.secondlife.secondlife.dto.commission.*;
+import com.secondlife.secondlife.dto.response.OrderCommissionResponse;
+import com.secondlife.secondlife.dto.response.SettlementResponse;
 import com.secondlife.secondlife.entity.Order;
 import java.util.UUID;
 public interface SettlementService {

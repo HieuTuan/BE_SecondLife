@@ -1,11 +1,18 @@
 package com.secondlife.secondlife.integration;
 
+import com.secondlife.secondlife.integration.notification.PushNotificationChannel;
+
+import com.secondlife.secondlife.integration.ai.AiPriceProvider;
+
+import com.secondlife.secondlife.integration.storage.ReportEvidenceStorage;
+
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.entity.Order;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
-import com.secondlife.secondlife.service.*;
+import com.secondlife.secondlife.service.CloudinaryService;
+import com.secondlife.secondlife.service.SellerReputationService;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.ai.chat.model.ChatModel;
@@ -55,7 +62,7 @@ class ListingReportIntegrationTest {
 
     @MockitoBean org.springframework.mail.javamail.JavaMailSender mail;
     @MockitoBean org.springframework.messaging.simp.SimpMessagingTemplate messages;
-    @MockitoBean com.secondlife.secondlife.notification.channel.PushNotificationChannel pushes;
+    @MockitoBean com.secondlife.secondlife.integration.notification.PushNotificationChannel pushes;
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings={"FRAUD","MISLEADING_DESCRIPTION","DUPLICATE_LISTING","OTHER"})

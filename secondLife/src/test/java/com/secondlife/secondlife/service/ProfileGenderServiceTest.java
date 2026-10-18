@@ -8,14 +8,17 @@ import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.impl.UserServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.springframework.security.crypto.password.PasswordEncoder;
+
 import java.util.*;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ProfileGenderServiceTest {
     private final UserRepository users=mock(UserRepository.class);
-    private final UserMapper mapper=new UserMapper();
+    private final UserMapper mapper=MapperTestSupport.mapper(UserMapper.class);
     private final User user=new User("gender@example.test","hash",AccountStatus.ACTIVE);
     private UserServiceImpl service;
     @BeforeEach void setup() {

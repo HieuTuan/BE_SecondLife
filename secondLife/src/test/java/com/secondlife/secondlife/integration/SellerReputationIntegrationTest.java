@@ -1,11 +1,16 @@
 package com.secondlife.secondlife.integration;
 
+import com.secondlife.secondlife.integration.ai.AiPriceProvider;
+
+import com.secondlife.secondlife.integration.storage.ReportEvidenceStorage;
+
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.entity.Order;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
-import com.secondlife.secondlife.service.*;
+import com.secondlife.secondlife.service.CloudinaryService;
+import com.secondlife.secondlife.service.SellerReputationService;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.ai.chat.model.ChatModel;
@@ -44,6 +49,7 @@ class SellerReputationIntegrationTest {
     @Autowired PostRepository posts;
     @Autowired OrderRepository orders;
     @Autowired SellerReputationService reputation;
+    @Autowired SellerReputationRepository reputationRows;
     @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
     @Autowired JwtTokenProvider jwt;
     @Autowired ObjectMapper mapper;
@@ -104,6 +110,29 @@ class SellerReputationIntegrationTest {
             .andExpect(jsonPath("$.data.items.length()").value(2))
             .andExpect(jsonPath("$.data.items[0].formulaVersion").value("TRANSACTION_SUCCESS_RATE_V3"))
             .andExpect(jsonPath("$.data.items[0].actorId").doesNotExist());
+    }
+    @Test void nativeReputationUpdatesAndHistoryStayFreshWithAManagedEntityInTheSameTransaction() {
+        var seller=user("SELLER"); var completed=order(seller,user("BUYER"),true);
+        new org.springframework.transaction.support.TransactionTemplate(transactions).executeWithoutResult(tx -> {
+            reputationRows.initializeSellerState(seller.getId());
+            assertEquals(0,reputationRows.findById(seller.getId()).orElseThrow().getGoodTransactions());
+            reputation.recordCompletedSale(completed);
+            assertEquals(1,reputation.get(seller.getId()).goodTransactions());
+            var points=new java.math.BigDecimal("2.50");
+            assertTrue(reputation.recordConfirmationPenalty(completed,"LATE",points));
+            assertFalse(reputation.recordConfirmationPenalty(completed,"LATE",points));
+            var state=reputation.get(seller.getId());
+            assertEquals(1,state.goodTransactions()); assertEquals(points,state.confirmationPenaltyPoints());
+            assertNotNull(state.updatedAt());
+            var history=reputation.history(seller.getId(),org.springframework.data.domain.PageRequest.of(0,10));
+            assertEquals(2,history.totalElements());
+            var latest=history.items().getFirst();
+            assertEquals("ORDER_CONFIRMATION_LATE",latest.eventType());
+            assertEquals(1,latest.goodBefore()); assertEquals(1,latest.goodAfter());
+            assertEquals(0,latest.penaltyBefore().signum()); assertEquals(points,latest.penaltyAfter());
+            assertNull(latest.priorGood()); assertNull(latest.priorTotal());
+            assertNotNull(latest.createdAt()); assertNotNull(latest.eventSequence());
+        });
     }
     @Test void confirmedSellerFaultConvertsGoodToBadOnceAndResolutionRetryCannotChangeDecision() throws Exception {
         var seller=user("SELLER"); var buyer=user("BUYER"); var staff=user("STAFF");

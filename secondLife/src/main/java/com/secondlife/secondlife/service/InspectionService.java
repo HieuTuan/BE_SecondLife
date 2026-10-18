@@ -3,8 +3,11 @@ package com.secondlife.secondlife.service;
 import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
+import com.secondlife.secondlife.dto.request.InspectionSealScanRequest;
 import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
+import com.secondlife.secondlife.dto.response.InspectionSealLogResponse;
+import com.secondlife.secondlife.dto.response.InspectionSealVerificationResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -86,12 +89,12 @@ public interface InspectionService {
     /**
      * Tra cứu và xác thực thông tin tem niêm phong QR
      */
-    com.secondlife.secondlife.dto.response.InspectionSealVerificationResponse getSealVerification(String tamperSealId);
+    InspectionSealVerificationResponse getSealVerification(String tamperSealId);
 
     /**
      * Ghi nhận lịch sử các lần quét mã QR tem niêm phong (KTV, Shipper, Buyer)
      */
-    com.secondlife.secondlife.dto.response.InspectionSealLogResponse recordSealScan(UUID actorId, com.secondlife.secondlife.dto.request.InspectionSealScanRequest request);
+    InspectionSealLogResponse recordSealScan(UUID actorId, InspectionSealScanRequest request);
 
     /**
      * Sinh mã tem niêm phong chuẩn cho đơn kiểm định

@@ -1,5 +1,9 @@
 package com.secondlife.secondlife.service;
 
+import com.secondlife.secondlife.integration.ai.AiPriceProvider;
+
+import com.secondlife.secondlife.integration.ai.OllamaAiPriceProvider;
+
 import com.secondlife.secondlife.exception.AiProviderException;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;

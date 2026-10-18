@@ -1,6 +1,6 @@
 package com.secondlife.secondlife.service;
 
-import com.secondlife.secondlife.dto.ekyc.EkycResult;
+import com.secondlife.secondlife.dto.response.EkycResult;
 import com.secondlife.secondlife.entity.SellerVerification;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.AccountStatus;

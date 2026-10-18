@@ -7,18 +7,19 @@ import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.entity.UserWallet;
 import com.secondlife.secondlife.entity.WalletTransaction;
 import com.secondlife.secondlife.entity.WalletWithdrawal;
-import com.secondlife.secondlife.enums.WalletTransactionType;
+import com.secondlife.secondlife.enums.NotificationType;
 import com.secondlife.secondlife.exception.BadRequestException;
+import com.secondlife.secondlife.mapper.WalletMapper;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.repository.UserWalletRepository;
 import com.secondlife.secondlife.repository.WalletTransactionRepository;
 import com.secondlife.secondlife.repository.WalletWithdrawalRepository;
 import com.secondlife.secondlife.service.impl.WalletServiceImpl;
-import com.secondlife.secondlife.notification.NotificationType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
@@ -69,7 +70,7 @@ class WalletServiceWithdrawalTest {
                 userRepository,
                 notificationService,
                 walletWithdrawalRepository
-        );
+        , MapperTestSupport.mapper(WalletMapper.class));
 
         user = new User();
         user.setId(userId);
@@ -106,11 +107,11 @@ class WalletServiceWithdrawalTest {
         WalletWithdrawalResponse response = walletService.requestWithdrawal(userId, request);
 
         assertNotNull(response);
-        assertEquals(new BigDecimal("200000"), response.getAmount());
-        assertEquals("PENDING_REVIEW", response.getStatus());
-        assertEquals("VCB", response.getBankCode());
-        assertEquals("1234567890", response.getAccountNumber());
-        assertEquals("NGUYEN VAN A", response.getAccountHolderName());
+        assertEquals(new BigDecimal("200000"), response.amount());
+        assertEquals("PENDING_REVIEW", response.status());
+        assertEquals("VCB", response.bankCode());
+        assertEquals("1234567890", response.accountNumber());
+        assertEquals("NGUYEN VAN A", response.accountHolderName());
 
         // Wallet balance should be reduced from 1,000,000 to 800,000
         assertEquals(new BigDecimal("800000"), userWallet.getBalance());
@@ -157,10 +158,10 @@ class WalletServiceWithdrawalTest {
         WalletWithdrawalResponse response = walletService.reviewWithdrawal(adminId, withdrawalId, reviewRequest);
 
         assertNotNull(response);
-        assertEquals("APPROVED", response.getStatus());
-        assertEquals("Đã chuyển tiền qua banking", response.getAdminNote());
-        assertEquals(adminId, response.getReviewedBy());
-        assertNotNull(response.getReviewedAt());
+        assertEquals("APPROVED", response.status());
+        assertEquals("Đã chuyển tiền qua banking", response.adminNote());
+        assertEquals(adminId, response.reviewedBy());
+        assertNotNull(response.reviewedAt());
 
         verify(walletWithdrawalRepository).save(withdrawal);
         verify(notificationService).notifyWithEmail(eq(userId), contains("phê duyệt"), anyString(), any(NotificationType.class), eq(withdrawalId), anyString(), anyString());
@@ -190,8 +191,8 @@ class WalletServiceWithdrawalTest {
         WalletWithdrawalResponse response = walletService.reviewWithdrawal(adminId, withdrawalId, reviewRequest);
 
         assertNotNull(response);
-        assertEquals("REJECTED", response.getStatus());
-        assertEquals("Tài khoản ngân hàng sai thông tin", response.getAdminNote());
+        assertEquals("REJECTED", response.status());
+        assertEquals("Tài khoản ngân hàng sai thông tin", response.adminNote());
 
         // Refunded 200,000 back to wallet (800,000 + 200,000 = 1,000,000)
         assertEquals(new BigDecimal("1000000"), userWallet.getBalance());
@@ -235,7 +236,7 @@ class WalletServiceWithdrawalTest {
 
         assertNotNull(result);
         assertEquals(1, result.getTotalElements());
-        assertEquals("MB", result.getContent().get(0).getBankCode());
+        assertEquals("MB", result.getContent().get(0).bankCode());
     }
 
     @Test

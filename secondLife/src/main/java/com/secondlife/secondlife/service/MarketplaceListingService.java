@@ -1,69 +1,13 @@
 package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.dto.response.MarketplaceListingResponse;
-import com.secondlife.secondlife.entity.Post;
-import com.secondlife.secondlife.exception.NotFoundException;
-import com.secondlife.secondlife.repository.PostRepository;
-import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.domain.Specification;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import java.util.UUID;
 
-@Service
-@RequiredArgsConstructor
-@Transactional(readOnly = true)
-public class MarketplaceListingService {
-    private final PostRepository posts;
+public interface MarketplaceListingService {
+    Page<MarketplaceListingResponse> list(UUID categoryId, UUID itemId, Pageable pageable);
 
-    public Page<MarketplaceListingResponse> list(UUID categoryId, UUID itemId, Pageable pageable) {
-        Specification<Post> filter = (root, query, cb) -> cb.equal(root.get("status"), "ACTIVE");
-        if (categoryId != null) filter = filter.and((root, query, cb) -> cb.equal(root.get("categoryId"), categoryId));
-        if (itemId != null) filter = filter.and((root, query, cb) -> cb.equal(root.get("itemId"), itemId));
-        Page<Post> page = posts.findAll(filter, pageable);
-        if (!page.isEmpty()) {
-            // Hydrate images for the managed page entities after database pagination.
-            // Fetching a collection in the paged query would paginate in memory.
-            posts.findAllWithImagesByIdIn(page.getContent().stream().map(Post::getId).toList());
-        }
-        return page.map(this::response);
-    }
+    MarketplaceListingResponse get(UUID postId);
 
-    public MarketplaceListingResponse get(UUID postId) {
-        Post post = posts.findById(postId)
-                .orElseThrow(() -> new NotFoundException("Listing not found"));
-        if (!"ACTIVE".equals(post.getStatus()) && !"RESERVED".equals(post.getStatus())) {
-            throw new NotFoundException("Listing is not available for purchase");
-        }
-        return response(post);
-    }
-
-    private MarketplaceListingResponse response(Post post) {
-        String sellerName = null;
-        String sellerAvatar = null;
-        String sellerAddress = null;
-        if (post.getUser() != null && post.getUser().getProfile() != null) {
-            com.secondlife.secondlife.entity.UserProfile profile = post.getUser().getProfile();
-            sellerName = profile.getFullName();
-            sellerAvatar = profile.getAvatarUrl();
-            
-            java.util.List<String> addressParts = new java.util.ArrayList<>();
-            if (profile.getStreetAddress() != null && !profile.getStreetAddress().isBlank()) addressParts.add(profile.getStreetAddress());
-            if (profile.getWard() != null && !profile.getWard().isBlank()) addressParts.add(profile.getWard());
-            if (profile.getDistrict() != null && !profile.getDistrict().isBlank()) addressParts.add(profile.getDistrict());
-            if (profile.getProvince() != null && !profile.getProvince().isBlank()) addressParts.add(profile.getProvince());
-            
-            if (!addressParts.isEmpty()) {
-                sellerAddress = String.join(", ", addressParts);
-            }
-        }
-        
-        return new MarketplaceListingResponse(post.getId(), post.getId(), post.getUser().getId(),
-                sellerName, sellerAvatar, sellerAddress,
-                post.getCategoryId(),
-                post.getItemId(), post.getTitle(), post.getDescription(), post.getItemCondition(),
-                post.getImageUrl(), post.getImageUrls(), post.getPrice(), post.getStatus(), post.getPublishedAt());
-    }
 }

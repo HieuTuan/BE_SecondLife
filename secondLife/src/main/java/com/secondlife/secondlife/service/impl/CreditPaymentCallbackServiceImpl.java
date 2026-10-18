@@ -7,15 +7,15 @@ import com.secondlife.secondlife.enums.CreditPurchaseStatus;
 import com.secondlife.secondlife.enums.CreditType;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.NotFoundException;
-import com.secondlife.secondlife.repository.CreditBalanceGrantRepository;
+import com.secondlife.secondlife.repository.CreditBalanceRepository;
 import com.secondlife.secondlife.repository.CreditLedgerRepository;
 import com.secondlife.secondlife.repository.CreditPurchaseRepository;
 import com.secondlife.secondlife.repository.PaymentIntentRepository;
 import com.secondlife.secondlife.service.CreditPaymentCallbackService;
-import com.secondlife.secondlife.service.payment.NormalizedPaymentCallback;
-import com.secondlife.secondlife.service.payment.PaymentCallbackInboxService;
-import com.secondlife.secondlife.service.payment.PaymentProvider;
-import com.secondlife.secondlife.service.payment.PaymentStatus;
+import com.secondlife.secondlife.integration.payment.NormalizedPaymentCallback;
+import com.secondlife.secondlife.service.PaymentCallbackInboxService;
+import com.secondlife.secondlife.integration.payment.PaymentProvider;
+import com.secondlife.secondlife.enums.PaymentStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,7 +29,7 @@ public class CreditPaymentCallbackServiceImpl implements CreditPaymentCallbackSe
     private final PaymentIntentRepository intentRepository;
     private final CreditPurchaseRepository purchaseRepository;
     private final PaymentCallbackInboxService callbackInbox;
-    private final CreditBalanceGrantRepository balanceGrantRepository;
+    private final CreditBalanceRepository balanceRepository;
     private final CreditLedgerRepository ledgerRepository;
 
     @Override
@@ -72,7 +72,7 @@ public class CreditPaymentCallbackServiceImpl implements CreditPaymentCallbackSe
         if (quantity == 0) {
             return;
         }
-        long balanceAfter = balanceGrantRepository.grant(purchase.getUserId(), type, quantity);
+        long balanceAfter = balanceRepository.grant(purchase.getUserId(), type, quantity);
         CreditLedgerEntry entry = new CreditLedgerEntry();
         entry.setUserId(purchase.getUserId());
         entry.setCreditType(type);

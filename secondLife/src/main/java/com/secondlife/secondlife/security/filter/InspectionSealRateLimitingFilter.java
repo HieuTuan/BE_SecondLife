@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentMap;
 
 @Slf4j
 @Component
-public class InspectionSealRateLimitingFilter extends OncePerRequestFilter {
+public class    InspectionSealRateLimitingFilter extends OncePerRequestFilter {
 
     public static final int MAX_REQUESTS_PER_MINUTE = 30;
     private static final long WINDOW_MS = 60_000L;

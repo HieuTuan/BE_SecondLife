@@ -1,18 +1,26 @@
 package com.secondlife.secondlife.dto.request;
 
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.JsonCreator;
 import jakarta.validation.constraints.NotBlank;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.Builder;
 
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-public class InspectionChecklistItemRequest {
+@Builder
+public record InspectionChecklistItemRequest(
     @NotBlank(message = "itemTitle is required")
-    private String itemTitle;
+    String itemTitle,
+    String criteriaDescription,
+    boolean mandatory,
+    Integer orderIndex
+) {
+    @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
+    public static InspectionChecklistItemRequest fromJson(InspectionChecklistItemRequestBuilder builder) {
+        return builder.build();
+    }
 
-    private String criteriaDescription;
-    private boolean mandatory = true;
-    private Integer orderIndex = 0;
+    @JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.ANY)
+    public static class InspectionChecklistItemRequestBuilder {
+        private boolean mandatory = true;
+        private Integer orderIndex = 0;
+    }
 }

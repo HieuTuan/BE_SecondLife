@@ -1,41 +1,41 @@
 package com.secondlife.secondlife.dto.response;
 
 import com.secondlife.secondlife.enums.EscrowStatus;
+import com.secondlife.secondlife.enums.OrderPaymentMethod;
 import com.secondlife.secondlife.enums.OrderStatus;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.Builder;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
-@Getter
-@Setter
-public class OrderResponseDTO {
-    private com.secondlife.secondlife.enums.OrderPaymentMethod paymentMethod;
-    private BigDecimal totalAmount;
-    private OrderBankPaymentResponse payment;
-    private UUID shippingQuoteId;
-    private BigDecimal shippingFee;
-    private BigDecimal totalPaid;
-    private Instant shippingDeliveredAt;
-    private UUID id;
-    private UUID postId;
-    private String postTitle;
-    private UUID buyerId;
-    private UUID sellerId;
-    private UUID negotiationId;
-    private BigDecimal finalPrice;
-    private OrderStatus status;
-    private EscrowStatus escrowStatus;
-    private Instant createdAt;
-    private Instant paidAt;
-    private Instant sellerConfirmedAt;
-    private Instant confirmationDeadline;
-    private Instant confirmationCancelAt;
-    private String confirmationStatus;
-    private Instant handoverDeadline;
-    private Instant sellerReadyAt;
-    private Instant carrierPickedUpAt;
-    private String cancellationReasonCode;
+@Builder
+public record OrderResponseDTO(
+    OrderPaymentMethod paymentMethod,
+    BigDecimal totalAmount,
+    OrderBankPaymentResponse payment,
+    UUID shippingQuoteId,
+    BigDecimal shippingFee,
+    BigDecimal totalPaid,
+    Instant shippingDeliveredAt,
+    UUID id,
+    UUID postId,
+    String postTitle,
+    UUID buyerId,
+    UUID sellerId,
+    UUID negotiationId,
+    BigDecimal finalPrice,
+    OrderStatus status,
+    EscrowStatus escrowStatus,
+    Instant createdAt,
+    Instant paidAt,
+    Instant sellerConfirmedAt,
+    Instant confirmationDeadline,
+    Instant confirmationCancelAt,
+    String confirmationStatus,
+    Instant handoverDeadline,
+    Instant sellerReadyAt,
+    Instant carrierPickedUpAt,
+    String cancellationReasonCode
+) {
 }

@@ -7,22 +7,28 @@ import com.secondlife.secondlife.enums.AccountStatus;
 import com.secondlife.secondlife.exception.GlobalExceptionHandler;
 import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.*;
-import com.secondlife.secondlife.service.*;
+import com.secondlife.secondlife.service.GoogleAuthService;
+import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.service.TokenService;
+import com.secondlife.secondlife.service.UserService;
 import com.secondlife.secondlife.service.impl.AuthServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
 import java.util.Optional;
 import java.util.UUID;
+
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -31,7 +37,7 @@ class RegistrationGenderApiTest {
     private final RoleRepository roles=mock(RoleRepository.class);
     private final TokenService tokens=mock(TokenService.class);
     private final NotificationService notifications=mock(NotificationService.class);
-    private final UserMapper mapper=new UserMapper();
+    private final UserMapper mapper=MapperTestSupport.mapper(UserMapper.class);
     private MockMvc mvc;
     private User saved;
     @BeforeEach void setup() {

@@ -1,7 +1,7 @@
 package com.secondlife.secondlife.exception;
 
 import com.secondlife.secondlife.common.ErrorResponse;
-import com.secondlife.secondlife.service.ekyc.vnpt.VnptApiException;
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptApiException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;

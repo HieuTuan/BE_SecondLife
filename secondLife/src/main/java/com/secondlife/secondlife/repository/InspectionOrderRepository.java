@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.repository;
 
 import com.secondlife.secondlife.entity.InspectionOrder;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -18,7 +19,7 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
     @Query("select o.post.user.id from InspectionOrder o where o.id = :id")
     Optional<UUID> findOwnerId(@Param("id") UUID id);
 
-    @Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from InspectionOrder o where o.id = :id")
     Optional<InspectionOrder> findByIdForUpdate(@Param("id") UUID id);
 

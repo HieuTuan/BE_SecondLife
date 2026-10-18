@@ -2,7 +2,6 @@ package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.dto.response.TokenResponse;
 import com.secondlife.secondlife.entity.User;
-
 import java.util.UUID;
 
 public interface TokenService {

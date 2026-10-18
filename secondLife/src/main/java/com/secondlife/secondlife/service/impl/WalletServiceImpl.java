@@ -1,28 +1,28 @@
 package com.secondlife.secondlife.service.impl;
 
-import com.secondlife.secondlife.entity.User;
-import com.secondlife.secondlife.entity.UserWallet;
-import com.secondlife.secondlife.entity.WalletTransaction;
-import com.secondlife.secondlife.enums.WalletTransactionType;
-import com.secondlife.secondlife.exception.BadRequestException;
-import com.secondlife.secondlife.exception.NotFoundException;
-import com.secondlife.secondlife.repository.UserRepository;
-import com.secondlife.secondlife.repository.UserWalletRepository;
-import com.secondlife.secondlife.repository.WalletTransactionRepository;
-import com.secondlife.secondlife.notification.NotificationType;
-import com.secondlife.secondlife.service.NotificationService;
-import com.secondlife.secondlife.service.WalletService;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import com.secondlife.secondlife.dto.request.WalletWithdrawalRequest;
 import com.secondlife.secondlife.dto.request.WalletWithdrawalReviewRequest;
 import com.secondlife.secondlife.dto.response.WalletWithdrawalResponse;
+import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.entity.UserWallet;
+import com.secondlife.secondlife.entity.WalletTransaction;
 import com.secondlife.secondlife.entity.WalletWithdrawal;
+import com.secondlife.secondlife.enums.NotificationType;
+import com.secondlife.secondlife.enums.WalletTransactionType;
+import com.secondlife.secondlife.exception.BadRequestException;
+import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.mapper.WalletMapper;
+import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.repository.UserWalletRepository;
+import com.secondlife.secondlife.repository.WalletTransactionRepository;
 import com.secondlife.secondlife.repository.WalletWithdrawalRepository;
+import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.service.WalletService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -30,6 +30,7 @@ import java.util.UUID;
 
 @Service
 public class WalletServiceImpl implements WalletService {
+    private final WalletMapper walletMapper;
 
     private final UserWalletRepository userWalletRepository;
     private final WalletTransactionRepository walletTransactionRepository;
@@ -39,15 +40,15 @@ public class WalletServiceImpl implements WalletService {
 
     public WalletServiceImpl(UserWalletRepository userWalletRepository,
                              WalletTransactionRepository walletTransactionRepository,
-                             UserRepository userRepository) {
-        this(userWalletRepository, walletTransactionRepository, userRepository, null, null);
+                             UserRepository userRepository, WalletMapper walletMapper) {
+        this(userWalletRepository, walletTransactionRepository, userRepository, null, null, walletMapper);
     }
 
     public WalletServiceImpl(UserWalletRepository userWalletRepository,
                              WalletTransactionRepository walletTransactionRepository,
                              UserRepository userRepository,
-                             NotificationService notificationService) {
-        this(userWalletRepository, walletTransactionRepository, userRepository, notificationService, null);
+                             NotificationService notificationService, WalletMapper walletMapper) {
+        this(userWalletRepository, walletTransactionRepository, userRepository, notificationService, null, walletMapper);
     }
 
     @Autowired
@@ -55,7 +56,9 @@ public class WalletServiceImpl implements WalletService {
                              WalletTransactionRepository walletTransactionRepository,
                              UserRepository userRepository,
                              @Autowired(required = false) NotificationService notificationService,
-                             @Autowired(required = false) WalletWithdrawalRepository walletWithdrawalRepository) {
+                             @Autowired(required = false) WalletWithdrawalRepository walletWithdrawalRepository, WalletMapper walletMapper) {
+        this.walletMapper = walletMapper;
+
         this.userWalletRepository = userWalletRepository;
         this.walletTransactionRepository = walletTransactionRepository;
         this.userRepository = userRepository;
@@ -204,7 +207,7 @@ public class WalletServiceImpl implements WalletService {
 
     @Override
     @Transactional(readOnly = true)
-    public org.springframework.data.domain.Page<WalletTransaction> getTransactions(UUID userId, org.springframework.data.domain.Pageable pageable) {
+    public Page<WalletTransaction> getTransactions(UUID userId, Pageable pageable) {
         UserWallet wallet = getWalletByUserId(userId);
         return walletTransactionRepository.findByWalletId(wallet.getId(), pageable);
     }
@@ -215,17 +218,17 @@ public class WalletServiceImpl implements WalletService {
         if (walletWithdrawalRepository == null) {
             throw new IllegalStateException("WalletWithdrawalRepository is not available");
         }
-        if (request.getAmount() == null || request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+        if (request.amount() == null || request.amount().compareTo(BigDecimal.ZERO) <= 0) {
             throw new BadRequestException("Số tiền rút phải lớn hơn 0");
         }
 
         UserWallet wallet = getWalletWithLock(userId);
-        if (wallet.getBalance().compareTo(request.getAmount()) < 0) {
+        if (wallet.getBalance().compareTo(request.amount()) < 0) {
             throw new BadRequestException("Số dư khả dụng không đủ để thực hiện rút tiền");
         }
 
         // Deduct balance from wallet
-        wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
+        wallet.setBalance(wallet.getBalance().subtract(request.amount()));
         userWalletRepository.save(wallet);
 
         User user = userRepository.findById(userId)
@@ -233,20 +236,20 @@ public class WalletServiceImpl implements WalletService {
 
         WalletWithdrawal withdrawal = new WalletWithdrawal(
                 user,
-                request.getAmount(),
-                request.getBankCode().trim().toUpperCase(),
-                request.getAccountNumber().trim(),
-                request.getAccountHolderName().trim().toUpperCase()
+                request.amount(),
+                request.bankCode().trim().toUpperCase(),
+                request.accountNumber().trim(),
+                request.accountHolderName().trim().toUpperCase()
         );
         withdrawal = walletWithdrawalRepository.save(withdrawal);
 
-        createTransaction(wallet, request.getAmount().negate(), WalletTransactionType.WITHDRAW, withdrawal.getId());
+        createTransaction(wallet, request.amount().negate(), WalletTransactionType.WITHDRAW, withdrawal.getId());
 
         if (notificationService != null) {
             notificationService.notifyWithEmail(
                 userId,
                 "Yêu cầu rút tiền đang chờ xử lý",
-                "Yêu cầu rút " + request.getAmount() + " VND về tài khoản " + request.getBankCode() + " - " + request.getAccountNumber() + " đã được tiếp nhận và đang chờ duyệt.",
+                "Yêu cầu rút " + request.amount() + " VND về tài khoản " + request.bankCode() + " - " + request.accountNumber() + " đã được tiếp nhận và đang chờ duyệt.",
                 NotificationType.WALLET,
                 withdrawal.getId(),
                 "WALLET_WITHDRAWAL",
@@ -254,7 +257,7 @@ public class WalletServiceImpl implements WalletService {
             );
         }
 
-        return WalletWithdrawalResponse.from(withdrawal);
+        return walletMapper.toWithdrawalResponse(withdrawal);
     }
 
     @Override
@@ -277,9 +280,9 @@ public class WalletServiceImpl implements WalletService {
         withdrawal.setReviewedBy(admin);
         withdrawal.setReviewedAt(Instant.now());
         withdrawal.setUpdatedAt(Instant.now());
-        withdrawal.setAdminNote(request.getAdminNote());
+        withdrawal.setAdminNote(request.adminNote());
 
-        if ("APPROVE".equalsIgnoreCase(request.getAction())) {
+        if ("APPROVE".equalsIgnoreCase(request.action())) {
             withdrawal.setStatus("APPROVED");
             withdrawal = walletWithdrawalRepository.save(withdrawal);
 
@@ -294,7 +297,7 @@ public class WalletServiceImpl implements WalletService {
                     "/wallet"
                 );
             }
-        } else if ("REJECT".equalsIgnoreCase(request.getAction())) {
+        } else if ("REJECT".equalsIgnoreCase(request.action())) {
             withdrawal.setStatus("REJECTED");
 
             // Refund amount back to user's wallet
@@ -306,8 +309,8 @@ public class WalletServiceImpl implements WalletService {
             withdrawal = walletWithdrawalRepository.save(withdrawal);
 
             if (notificationService != null) {
-                String note = (request.getAdminNote() != null && !request.getAdminNote().isBlank())
-                        ? request.getAdminNote() : "Không có lý do cụ thể";
+                String note = (request.adminNote() != null && !request.adminNote().isBlank())
+                        ? request.adminNote() : "Không có lý do cụ thể";
                 notificationService.notifyWithEmail(
                     withdrawal.getUser().getId(),
                     "Yêu cầu rút tiền đã bị từ chối",
@@ -319,10 +322,10 @@ public class WalletServiceImpl implements WalletService {
                 );
             }
         } else {
-            throw new BadRequestException("Hành động không hợp lệ: " + request.getAction());
+            throw new BadRequestException("Hành động không hợp lệ: " + request.action());
         }
 
-        return WalletWithdrawalResponse.from(withdrawal);
+        return walletMapper.toWithdrawalResponse(withdrawal);
     }
 
     @Override
@@ -332,7 +335,7 @@ public class WalletServiceImpl implements WalletService {
             throw new IllegalStateException("WalletWithdrawalRepository is not available");
         }
         return walletWithdrawalRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable)
-                .map(WalletWithdrawalResponse::from);
+                .map(walletMapper::toWithdrawalResponse);
     }
 
     @Override
@@ -343,9 +346,9 @@ public class WalletServiceImpl implements WalletService {
         }
         if (status != null && !status.isBlank()) {
             return walletWithdrawalRepository.findByStatusOrderByCreatedAtDesc(status.trim().toUpperCase(), pageable)
-                    .map(WalletWithdrawalResponse::from);
+                    .map(walletMapper::toWithdrawalResponse);
         }
         return walletWithdrawalRepository.findAllByOrderByCreatedAtDesc(pageable)
-                .map(WalletWithdrawalResponse::from);
+                .map(walletMapper::toWithdrawalResponse);
     }
 }

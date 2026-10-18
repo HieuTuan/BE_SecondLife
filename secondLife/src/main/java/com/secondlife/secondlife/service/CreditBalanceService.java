@@ -1,7 +1,6 @@
 package com.secondlife.secondlife.service;
 
-import com.secondlife.secondlife.dto.credit.CreditBalanceResponse;
-
+import com.secondlife.secondlife.dto.response.CreditBalanceResponse;
 import java.util.UUID;
 
 public interface CreditBalanceService {

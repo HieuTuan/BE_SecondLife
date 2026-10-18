@@ -1,9 +1,10 @@
 package com.secondlife.secondlife.service;
 
+import com.secondlife.secondlife.integration.shipping.ShippingProvider;
+
 import com.secondlife.secondlife.config.ShippingCatalogProperties;
-import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ShippingProviderException;
-import com.secondlife.secondlife.service.shipping.*;
+import com.secondlife.secondlife.service.impl.ShippingCatalogPolicy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
@@ -18,7 +19,7 @@ class ShippingCatalogServiceTest {
     @BeforeEach void setup() {
         var properties=new ShippingCatalogProperties(); properties.setAllowedCities(List.of(
                 ShippingCatalogProperties.City.HANOI,ShippingCatalogProperties.City.DANANG,ShippingCatalogProperties.City.HO_CHI_MINH));
-        service=new ShippingCatalogService(provider,new ShippingCatalogPolicy(properties,mapper));
+        service=new com.secondlife.secondlife.service.impl.ShippingCatalogServiceImpl(provider,new ShippingCatalogPolicy(properties,mapper));
     }
     @Test void citiesKeepOnlyAllowedVietnamLocodesAndRetainServiceMetadata() {
         when(provider.cities()).thenReturn(mapper.readTree("""
@@ -44,7 +45,7 @@ class ShippingCatalogServiceTest {
     }
     @Test void configuredSubsetAlsoRestrictsCatalogues() {
         var properties=new ShippingCatalogProperties(); properties.setAllowedCities(List.of(ShippingCatalogProperties.City.HANOI));
-        var restricted=new ShippingCatalogService(provider,new ShippingCatalogPolicy(properties,mapper));
+        var restricted=new com.secondlife.secondlife.service.impl.ShippingCatalogServiceImpl(provider,new ShippingCatalogPolicy(properties,mapper));
         when(provider.cities()).thenReturn(mapper.readTree("[{\"locode\":\"VN HAN\"},{\"locode\":\"VN SGN\"}]"));
         assertEquals(1,restricted.cities().size());
     }
