@@ -1,7 +1,10 @@
 package com.secondlife.secondlife.repository;
 
 import com.secondlife.secondlife.entity.User;
+
 import jakarta.persistence.LockModeType;
+
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
@@ -9,6 +12,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -50,6 +54,10 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
            "JOIN ur.role r " +
            "WHERE r.code = 'ADMIN' AND u.accountStatus = 'ACTIVE'")
     long countActiveAdmins();
+
+    @EntityGraph(attributePaths = {"profile", "userRoles.role"})
+    @Query("select u from User u where u.id in :ids")
+    List<User> findAllWithRolesByIdIn(@Param("ids") Collection<UUID> ids);
 
     List<User> findByManagerId(UUID managerId);
     @Query("""

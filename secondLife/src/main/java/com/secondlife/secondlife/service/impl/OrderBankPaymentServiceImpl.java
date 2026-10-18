@@ -7,11 +7,13 @@ import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.exception.*;
 import com.secondlife.secondlife.mapper.OrderMapper;
-import jakarta.persistence.LockModeType;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.OrderBankPaymentService;
 import com.secondlife.secondlife.service.PaidOrderService;
 import com.secondlife.secondlife.service.WalletService;
+
+import jakarta.persistence.LockModeType;
+
 import org.springframework.beans.factory.annotation.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
@@ -19,6 +21,9 @@ import org.springframework.transaction.annotation.*;
 import java.math.BigDecimal;
 import java.security.SecureRandom;
 import java.time.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service("orderBankPaymentService")
@@ -136,6 +141,27 @@ public class OrderBankPaymentServiceImpl implements OrderBankPaymentService {
     @Transactional(readOnly=true)
     public OrderBankPaymentResponse details(Order order) {
         var r=requests.findByOrderId(order.getId()).orElseThrow(()->new NotFoundException("Bank payment not found"));
+        return details(order, r);
+    }
+
+    @Transactional(readOnly=true)
+    public Map<UUID, OrderBankPaymentResponse> detailsForOrders(List<Order> orders) {
+        var bankOrders = orders.stream().filter(order -> order.getPaymentMethod() == OrderPaymentMethod.BANK_TRANSFER).toList();
+        if (bankOrders.isEmpty()) return Map.of();
+        Map<UUID, DepositRequest> deposits = new HashMap<>();
+        for (DepositRequest deposit : requests.findByOrderIdIn(bankOrders.stream().map(Order::getId).toList())) {
+            deposits.put(deposit.getOrderId(), deposit);
+        }
+        Map<UUID, OrderBankPaymentResponse> result = new HashMap<>();
+        for (Order order : bankOrders) {
+            DepositRequest deposit = deposits.get(order.getId());
+            if (deposit == null) throw new NotFoundException("Bank payment not found");
+            result.put(order.getId(), details(order, deposit));
+        }
+        return result;
+    }
+
+    private OrderBankPaymentResponse details(Order order, DepositRequest r) {
         String status=r.getAllocatedAmount().signum()>0?"PAID":order.getStatus()==OrderStatus.CANCELLED?
             ("PAYMENT_EXPIRED".equals(order.getCancellationReasonCode())?"EXPIRED":"CANCELLED"):
             !clock.instant().isBefore(r.getExpiresAt())?"EXPIRED":r.getReceivedAmount().signum()>0?"PARTIALLY_PAID":"PENDING";

@@ -6,7 +6,11 @@ import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.PostMapper;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.service.MarketplaceListingService;
+
+import jakarta.persistence.criteria.JoinType;
+
 import lombok.RequiredArgsConstructor;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -24,7 +28,12 @@ public class MarketplaceListingServiceImpl implements MarketplaceListingService 
     private final PostMapper postMapper;
 
     public Page<MarketplaceListingResponse> list(UUID categoryId, UUID itemId, Pageable pageable) {
-        Specification<Post> filter = (root, query, cb) -> cb.equal(root.get("status"), "ACTIVE");
+        Specification<Post> filter = (root, query, cb) -> {
+            if (Long.class != query.getResultType() && long.class != query.getResultType()) {
+                root.fetch("user", JoinType.LEFT).fetch("profile", JoinType.LEFT);
+            }
+            return cb.equal(root.get("status"), "ACTIVE");
+        };
         if (categoryId != null) filter = filter.and((root, query, cb) -> cb.equal(root.get("categoryId"), categoryId));
         if (itemId != null) filter = filter.and((root, query, cb) -> cb.equal(root.get("itemId"), itemId));
         Page<Post> page = posts.findAll(filter, pageable);

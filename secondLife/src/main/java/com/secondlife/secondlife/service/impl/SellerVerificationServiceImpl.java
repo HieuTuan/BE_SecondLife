@@ -3,13 +3,14 @@ package com.secondlife.secondlife.service.impl;
 import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.config.EkycRecoveryProperties;
 import com.secondlife.secondlife.dto.request.EkycRequest;
-import com.secondlife.secondlife.dto.response.EkycResult;
 import com.secondlife.secondlife.dto.request.SellerVerificationRequest;
 import com.secondlife.secondlife.dto.request.SellerVerificationResubmitRequest;
 import com.secondlife.secondlife.dto.request.SellerVerificationReviewRequest;
 import com.secondlife.secondlife.dto.response.AdminSellerVerificationDetailResponse;
-import com.secondlife.secondlife.dto.response.SellerVerificationResponse;
+import com.secondlife.secondlife.dto.response.EkycResult;
+import com.secondlife.secondlife.dto.response.SellerOnboardingResponse;
 import com.secondlife.secondlife.dto.response.SellerRiskResult;
+import com.secondlife.secondlife.dto.response.SellerVerificationResponse;
 import com.secondlife.secondlife.entity.SellerVerification;
 import com.secondlife.secondlife.entity.SellerVerificationEvent;
 import com.secondlife.secondlife.entity.User;
@@ -21,8 +22,8 @@ import com.secondlife.secondlife.enums.RoleCode;
 import com.secondlife.secondlife.enums.SellerVerificationStatus;
 import com.secondlife.secondlife.enums.VerificationEventType;
 import com.secondlife.secondlife.exception.BadRequestException;
-import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.SellerVerificationMapper;
 import com.secondlife.secondlife.repository.SellerVerificationEventRepository;
@@ -31,10 +32,12 @@ import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.EkycService;
 import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.RoleAssignmentService;
+import com.secondlife.secondlife.service.SellerOnboardingService;
 import com.secondlife.secondlife.service.SellerRiskService;
 import com.secondlife.secondlife.service.SellerVerificationService;
-import com.secondlife.secondlife.service.SellerOnboardingService;
+
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -50,6 +53,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -144,34 +148,29 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
         return executeDecisionPipeline(saved, user, rawDocNumber, "USER");
     }
 
-        private SellerVerificationResponse mapToSellerVerificationResponse(SellerVerification verification, UUID userId) {
+    private SellerVerificationResponse mapToSellerVerificationResponse(SellerVerification verification, UUID userId) {
         if (verification == null) return null;
-        String shopName = null;
-        String shopEmail = null;
-        String phone = null;
-        String pickupAddressText = null;
-
         UUID targetUserId = userId != null ? userId : (verification.getUser() != null ? verification.getUser().getId() : null);
-        if (targetUserId != null) {
-            try {
-                var onbResp = onboarding.get(targetUserId);
-                if (onbResp != null) {
-                    shopName = onbResp.shopName();
-                    shopEmail = onbResp.email();
-                    phone = onbResp.phone();
-                    if (onbResp.pickupAddress() != null) {
-                        var pa = onbResp.pickupAddress();
-                        StringBuilder sb = new StringBuilder();
-                        if (pa.address() != null && !pa.address().isBlank()) sb.append(pa.address().trim());
-                        pickupAddressText = sb.toString();
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-        }
+        var shop = onboardingOrNull(targetUserId);
+        var events = sellerVerificationEventRepository.findByVerificationIdOrderByCreatedAtAsc(verification.getId());
+        return mapToSellerVerificationResponse(verification, shop, events);
+    }
 
-        List<SellerVerificationEvent> events = sellerVerificationEventRepository.findByVerificationIdOrderByCreatedAtAsc(verification.getId());
-        return sellerVerificationMapper.toResponse(verification, shopName, shopEmail, phone, pickupAddressText, events);
+    private SellerOnboardingResponse onboardingOrNull(UUID userId) {
+        if (userId == null) return null;
+        try { return onboarding.get(userId); }
+        catch (Exception ignored) { return null; }
+    }
+
+    private SellerVerificationResponse mapToSellerVerificationResponse(SellerVerification verification,
+            SellerOnboardingResponse shop, List<SellerVerificationEvent> events) {
+        String address = null;
+        if (shop != null && shop.pickupAddress() != null) {
+            String rawAddress = shop.pickupAddress().address();
+            address = rawAddress == null || rawAddress.isBlank() ? "" : rawAddress.trim();
+        }
+        return sellerVerificationMapper.toResponse(verification, shop == null ? null : shop.shopName(),
+                shop == null ? null : shop.email(), shop == null ? null : shop.phone(), address, events);
     }
 
     @Override
@@ -189,9 +188,13 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
     @Transactional(readOnly = true)
     public List<SellerVerificationResponse> getVerificationHistory(UUID userId) {
         List<SellerVerification> list = sellerVerificationRepository.findAllByUserIdOrderBySubmittedAtDesc(userId);
-        return list.stream()
-                .map(v -> mapToSellerVerificationResponse(v, userId))
-                .toList();
+        if (list.isEmpty()) return List.of();
+        var shop = onboardingOrNull(userId);
+        var eventsByVerification = sellerVerificationEventRepository
+                .findByVerificationIdInOrderByCreatedAtAsc(list.stream().map(SellerVerification::getId).toList()).stream()
+                .collect(Collectors.groupingBy(event -> event.getVerification().getId()));
+        return list.stream().map(verification -> mapToSellerVerificationResponse(verification, shop,
+                eventsByVerification.getOrDefault(verification.getId(), List.of()))).toList();
     }
 
     @Override

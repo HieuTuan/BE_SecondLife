@@ -14,13 +14,16 @@ import com.secondlife.secondlife.repository.ChatRoomRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.ChatService;
+
 import lombok.RequiredArgsConstructor;
+
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -74,14 +77,21 @@ public class ChatServiceImpl implements ChatService {
 
     @Transactional(readOnly = true)
     public List<ChatRoomDto> getUserRooms(UUID userId) {
+        List<ChatRoom> rooms = chatRoomRepository.findUserChatRooms(userId);
+        Map<UUID, String> lastMessages = new HashMap<>();
+        if (!rooms.isEmpty()) {
+            for (ChatMessage message : chatMessageRepository.findLatestByRoomIds(rooms.stream().map(ChatRoom::getId).toList())) {
+                lastMessages.put(message.getChatRoom().getId(), message.getMessageContent());
+            }
+        }
         Map<String, ChatRoomDto> uniqueRooms = new LinkedHashMap<>();
-        for (ChatRoom room : chatRoomRepository.findUserChatRooms(userId)) {
+        for (ChatRoom room : rooms) {
             UUID otherUserId = room.getBuyer().getId().equals(userId)
                     ? room.getSeller().getId()
                     : room.getBuyer().getId();
             String key = room.getPost().getId() + "_" + otherUserId;
             if (!uniqueRooms.containsKey(key)) {
-                uniqueRooms.put(key, toDto(room));
+                uniqueRooms.put(key, chatMapper.toRoom(room, lastMessages.getOrDefault(room.getId(), "New Conversation")));
             }
         }
         return new ArrayList<>(uniqueRooms.values());

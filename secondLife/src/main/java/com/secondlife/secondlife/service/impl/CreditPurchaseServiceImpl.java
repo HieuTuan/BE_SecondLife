@@ -7,6 +7,7 @@ import com.secondlife.secondlife.dto.response.CreditPurchaseResponse;
 import com.secondlife.secondlife.dto.response.CreditQuoteResponse;
 import com.secondlife.secondlife.entity.CreditLedgerEntry;
 import com.secondlife.secondlife.entity.CreditPurchase;
+import com.secondlife.secondlife.entity.PaymentIntent;
 import com.secondlife.secondlife.enums.CreditPurchaseStatus;
 import com.secondlife.secondlife.enums.CreditType;
 import com.secondlife.secondlife.exception.BadRequestException;
@@ -19,13 +20,18 @@ import com.secondlife.secondlife.repository.PaymentIntentRepository;
 import com.secondlife.secondlife.service.CreditPricingService;
 import com.secondlife.secondlife.service.CreditPurchaseService;
 import com.secondlife.secondlife.service.WalletService;
+
 import lombok.RequiredArgsConstructor;
+
+import org.springframework.dao.IncorrectResultSizeDataAccessException;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -104,9 +110,16 @@ public class CreditPurchaseServiceImpl implements CreditPurchaseService {
     @Override
     @Transactional(readOnly = true)
     public PageResponse<CreditPurchaseResponse> getPurchases(UUID sellerId, Pageable pageable) {
-        return PageResponse.from(purchaseRepository.findByUserIdOrderByCreatedAtDesc(sellerId, pageable)
-                .map(purchase -> creditMapper.toPurchaseResponse(purchase,
-                        intentRepository.findByPurchaseId(purchase.getId()).orElse(null))));
+        var page = purchaseRepository.findByUserIdOrderByCreatedAtDesc(sellerId, pageable);
+        Map<UUID, PaymentIntent> intents = new HashMap<>();
+        if (!page.isEmpty()) {
+            for (PaymentIntent intent : intentRepository.findByPurchaseIdIn(page.stream().map(CreditPurchase::getId).toList())) {
+                if (intents.putIfAbsent(intent.getPurchaseId(), intent) != null) {
+                    throw new IncorrectResultSizeDataAccessException(1);
+                }
+            }
+        }
+        return PageResponse.from(page.map(purchase -> creditMapper.toPurchaseResponse(purchase, intents.get(purchase.getId()))));
     }
 
     @Override

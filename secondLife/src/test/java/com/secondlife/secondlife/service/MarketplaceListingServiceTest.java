@@ -49,6 +49,8 @@ class MarketplaceListingServiceTest {
         when(posts.findAll(any(Specification.class), eq(pageable))).thenAnswer(call -> {
             Specification<Post> spec = call.getArgument(0);
             Root<Post> root = mock(Root.class);
+            Fetch<Object, Object> seller = mock(Fetch.class);
+            when(root.fetch("user", JoinType.LEFT)).thenReturn(seller);
             CriteriaQuery<?> query = mock(CriteriaQuery.class);
             CriteriaBuilder cb = mock(CriteriaBuilder.class);
             Path<Object> statusPath = mock(Path.class), categoryPath = mock(Path.class), itemPath = mock(Path.class);

@@ -22,7 +22,9 @@ import com.secondlife.secondlife.repository.ShippingQuoteRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.ReputationCalculator;
 import com.secondlife.secondlife.service.SellerReputationService;
+
 import lombok.RequiredArgsConstructor;
+
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
@@ -54,8 +56,7 @@ public class SellerReputationServiceImpl implements SellerReputationService {
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public ReputationResponse get(UUID sellerId) {
         var state = state(sellerId, false).orElse(new State(0,0,0,0,false,null,BigDecimal.ZERO));
-        var user = users.findByIdWithAuthorities(sellerId).orElseThrow(() -> new NotFoundException("Seller not found"));
-        if (!user.hasRole("SELLER") && state.updated() == null) throw new NotFoundException("Seller not found");
+        requireSeller(sellerId, state);
         long evaluated = state.good() + state.bad();
         var metrics=reputationMapper.metrics(reputations.findMetrics(sellerId));
         long cancellations=metrics.cancellations(),returns=metrics.returns();
@@ -71,10 +72,16 @@ public class SellerReputationServiceImpl implements SellerReputationService {
 
     @Transactional(readOnly=true)
     public PageResponse<ReputationHistoryResponse> history(UUID sellerId, Pageable page) {
-        get(sellerId);
+        var state = state(sellerId, false).orElse(new State(0,0,0,0,false,null,BigDecimal.ZERO));
+        requireSeller(sellerId, state);
         long count = reputations.countHistory(sellerId);
         var rows = reputations.findHistory(sellerId,page.getPageSize(),page.getOffset()).stream().map(reputationMapper::history).toList();
         return PageResponse.from(new PageImpl<>(rows,page,count));
+    }
+
+    private void requireSeller(UUID sellerId, State state) {
+        var user = users.findByIdWithAuthorities(sellerId).orElseThrow(() -> new NotFoundException("Seller not found"));
+        if (!user.hasRole("SELLER") && state.updated() == null) throw new NotFoundException("Seller not found");
     }
 
     public void requireSellingAllowed(UUID sellerId) {

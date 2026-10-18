@@ -4,9 +4,12 @@ import com.secondlife.secondlife.config.JpaRepositoryConfiguration.RefreshOperat
 import com.secondlife.secondlife.entity.Order;
 import com.secondlife.secondlife.enums.EscrowStatus;
 import com.secondlife.secondlife.enums.OrderStatus;
+
 import jakarta.persistence.LockModeType;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -49,6 +52,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, RefreshOper
     @Query("select o.post.id from Order o where o.id=:id")
     Optional<UUID> findPostId(@Param("id") UUID id);
     Optional<Order> findByBuyerIdAndRequestId(UUID buyerId, UUID requestId);
+    @EntityGraph(attributePaths = "post")
     Page<Order> findByBuyerId(UUID buyerId, Pageable pageable);
     Page<Order> findByConfirmationDeadlineIsNotNull(Pageable pageable);
     Page<Order> findByConfirmationDeadlineIsNotNullAndStatus(OrderStatus status, Pageable pageable);
@@ -77,6 +81,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, RefreshOper
         @Param("cutoff") Instant cutoff,
         @Param("afterDeadline") Instant afterDeadline,
         @Param("afterId") UUID afterId, Pageable page);
+    @EntityGraph(attributePaths = "post")
     Page<Order> findBySellerId(UUID sellerId, Pageable pageable);
 
     interface DueConfirmationOrder {

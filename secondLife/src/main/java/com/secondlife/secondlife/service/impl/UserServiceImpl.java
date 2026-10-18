@@ -22,11 +22,14 @@ import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.TokenService;
 import com.secondlife.secondlife.service.UserService;
+
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -137,6 +140,7 @@ public class UserServiceImpl implements UserService {
         Specification<User> spec = (root, query, cb) -> {
             if (Long.class != query.getResultType() && long.class != query.getResultType()) {
                 query.distinct(true);
+                root.fetch("profile", JoinType.LEFT);
             }
             List<Predicate> predicates = new ArrayList<>();
 
@@ -156,6 +160,9 @@ public class UserServiceImpl implements UserService {
         };
 
         Page<User> page = userRepository.findAll(spec, pageable);
+        if (!page.isEmpty()) {
+            userRepository.findAllWithRolesByIdIn(page.stream().map(User::getId).toList());
+        }
         Page<UserAdminResponse> dtoPage = page.map(userMapper::toAdminResponse);
         return PageResponse.from(dtoPage);
     }

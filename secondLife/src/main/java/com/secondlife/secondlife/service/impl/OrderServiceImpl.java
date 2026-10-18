@@ -3,6 +3,7 @@ package com.secondlife.secondlife.service.impl;
 import com.secondlife.secondlife.common.PageableUtils;
 import com.secondlife.secondlife.dto.request.CancelOrderRequest;
 import com.secondlife.secondlife.dto.request.OrderRequestDTO;
+import com.secondlife.secondlife.dto.response.OrderBankPaymentResponse;
 import com.secondlife.secondlife.dto.response.OrderResponseDTO;
 import com.secondlife.secondlife.entity.Negotiation;
 import com.secondlife.secondlife.entity.Order;
@@ -32,7 +33,9 @@ import com.secondlife.secondlife.service.SettlementService;
 import com.secondlife.secondlife.service.ShippingQuoteService;
 import com.secondlife.secondlife.service.SystemWalletService;
 import com.secondlife.secondlife.service.WalletService;
+
 import jakarta.persistence.LockModeType;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -388,19 +391,29 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public Page<OrderResponseDTO> getBuyerOrders(UUID buyerId, Pageable pageable) {
         Pageable safePageable = PageableUtils.sanitize(pageable, ALLOWED_ORDER_SORT_PROPERTIES, DEFAULT_ORDER_SORT);
-        return orderRepository.findByBuyerId(buyerId, safePageable).map(this::mapToDTO);
+        return mapPage(orderRepository.findByBuyerId(buyerId, safePageable));
     }
 
     @Override
     public Page<OrderResponseDTO> getSellerOrders(UUID sellerId, Pageable pageable) {
         Pageable safePageable = PageableUtils.sanitize(pageable, ALLOWED_ORDER_SORT_PROPERTIES, DEFAULT_ORDER_SORT);
-        return orderRepository.findBySellerId(sellerId, safePageable).map(this::mapToDTO);
+        return mapPage(orderRepository.findBySellerId(sellerId, safePageable));
+    }
+
+    private Page<OrderResponseDTO> mapPage(Page<Order> page) {
+        if (page.isEmpty()) return page.map(this::mapToDTO);
+        var payments = bankPayments.detailsForOrders(page.getContent());
+        return page.map(order -> mapToDTO(order, payments.get(order.getId())));
     }
 
     private OrderResponseDTO mapToDTO(Order order) {
-        BigDecimal totalAmount = order.getFinalPrice().add(order.getShippingFee());
         var payment = order.getPaymentMethod() == OrderPaymentMethod.BANK_TRANSFER
                 ? bankPayments.details(order) : null;
+        return mapToDTO(order, payment);
+    }
+
+    private OrderResponseDTO mapToDTO(Order order, OrderBankPaymentResponse payment) {
+        BigDecimal totalAmount = order.getFinalPrice().add(order.getShippingFee());
         return orderMapper.toResponse(order, payment, totalAmount);
     }
 }

@@ -1,6 +1,8 @@
 package com.secondlife.secondlife.repository;
 
 import com.secondlife.secondlife.entity.InspectionChecklistTemplate;
+
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
@@ -12,6 +14,7 @@ public interface InspectionChecklistTemplateRepository extends JpaRepository<Ins
 
     List<InspectionChecklistTemplate> findByCategoryIdAndActiveTrue(UUID categoryId);
 
+    @EntityGraph(attributePaths = {"category", "items"})
     List<InspectionChecklistTemplate> findByActiveTrueOrderByCreatedAtDesc();
 
     @Query("SELECT t FROM InspectionChecklistTemplate t LEFT JOIN FETCH t.items WHERE t.id = :id")
