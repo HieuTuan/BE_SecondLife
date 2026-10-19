@@ -6,6 +6,7 @@ import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetailsService;
 import com.secondlife.secondlife.security.userdetails.UserPrincipalCache;
 import io.jsonwebtoken.JwtException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.stereotype.Component;
@@ -23,6 +24,7 @@ public class AccessTokenAuthenticator {
         this(tokenProvider, userDetailsService, new UserPrincipalCache());
     }
 
+    @Autowired
     public AccessTokenAuthenticator(JwtTokenProvider tokenProvider,
                                     CustomUserDetailsService userDetailsService,
                                     UserPrincipalCache userPrincipalCache) {
