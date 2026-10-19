@@ -43,7 +43,6 @@ import com.secondlife.secondlife.service.ListingPublicationService;
 import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.TamperSealService;
 import com.secondlife.secondlife.service.WalletService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -66,7 +65,6 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class InspectionServiceImpl implements InspectionService {
 
     private final InspectionOrderRepository inspectionOrderRepository;
@@ -88,6 +86,42 @@ public class InspectionServiceImpl implements InspectionService {
     private final AiChatGateway googleChatGateway;
     private final InspectionOrderMapper inspectionOrderMapper;
     private final InspectionSealLogMapper inspectionSealLogMapper;
+
+    public InspectionServiceImpl(InspectionOrderRepository inspectionOrderRepository,
+                                PostRepository postRepository,
+                                ShipmentRepository shipments,
+                                UserRepository userRepository,
+                                RoleRepository roleRepository,
+                                PasswordEncoder passwordEncoder,
+                                UserMapper userMapper,
+                                ListingPublicationService publication,
+                                InspectionPricingService inspectionPricingService,
+                                WalletService walletService,
+                                ObjectMapper objectMapper,
+                                NotificationService notificationService,
+                                InspectionSealLogRepository inspectionSealLogRepository,
+                                TamperSealService tamperSealService,
+                                @Qualifier("googleChatGateway") AiChatGateway googleChatGateway,
+                                InspectionOrderMapper inspectionOrderMapper,
+                                InspectionSealLogMapper inspectionSealLogMapper) {
+        this.inspectionOrderRepository = inspectionOrderRepository;
+        this.postRepository = postRepository;
+        this.shipments = shipments;
+        this.userRepository = userRepository;
+        this.roleRepository = roleRepository;
+        this.passwordEncoder = passwordEncoder;
+        this.userMapper = userMapper;
+        this.publication = publication;
+        this.inspectionPricingService = inspectionPricingService;
+        this.walletService = walletService;
+        this.objectMapper = objectMapper;
+        this.notificationService = notificationService;
+        this.inspectionSealLogRepository = inspectionSealLogRepository;
+        this.tamperSealService = tamperSealService;
+        this.googleChatGateway = googleChatGateway;
+        this.inspectionOrderMapper = inspectionOrderMapper;
+        this.inspectionSealLogMapper = inspectionSealLogMapper;
+    }
 
     @Override
     @Transactional

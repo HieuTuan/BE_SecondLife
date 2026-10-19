@@ -21,7 +21,6 @@ import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.InspectionPricingService;
 import com.secondlife.secondlife.service.ShippingQuoteService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -39,7 +38,6 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class InspectionPricingServiceImpl implements InspectionPricingService {
 
     private final PostRepository postRepository;
@@ -51,6 +49,26 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
     private final ShippingQuoteService shippingQuoteService;
     private final ObjectMapper objectMapper;
     private final InspectionPricingMapper inspectionPricingMapper;
+
+    public InspectionPricingServiceImpl(PostRepository postRepository,
+                                       InspectionTravelFeeCalculator travelFeeCalculator,
+                                       InspectionFeeProposalRepository proposalRepository,
+                                       InspectionTravelTierRepository travelTierRepository,
+                                       UserRepository userRepository,
+                                       CategoryRepository categoryRepository,
+                                       ShippingQuoteService shippingQuoteService,
+                                       ObjectMapper objectMapper,
+                                       InspectionPricingMapper inspectionPricingMapper) {
+        this.postRepository = postRepository;
+        this.travelFeeCalculator = travelFeeCalculator;
+        this.proposalRepository = proposalRepository;
+        this.travelTierRepository = travelTierRepository;
+        this.userRepository = userRepository;
+        this.categoryRepository = categoryRepository;
+        this.shippingQuoteService = shippingQuoteService;
+        this.objectMapper = objectMapper;
+        this.inspectionPricingMapper = inspectionPricingMapper;
+    }
 
     @Value("${app.inspection.inspection-fee:100000}")
     private BigDecimal defaultBaseInspectionFee;

@@ -3,10 +3,6 @@ package com.secondlife.secondlife.service.impl;
 import com.secondlife.secondlife.dto.response.InspectionTravelTierDto;
 import com.secondlife.secondlife.entity.InspectionTravelTier;
 import com.secondlife.secondlife.repository.InspectionTravelTierRepository;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -16,10 +12,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
-@RequiredArgsConstructor
 public class InspectionTravelFeeCalculator {
 
     private final InspectionTravelTierRepository tierRepository;
+
+    public InspectionTravelFeeCalculator(InspectionTravelTierRepository tierRepository) {
+        this.tierRepository = tierRepository;
+    }
 
     @Value("${app.inspection.center.latitude:10.7300}")
     private double defaultCenterLatitude;
@@ -30,14 +29,41 @@ public class InspectionTravelFeeCalculator {
     private static final double EARTH_RADIUS_KM = 6371.0;
     private static final double ROAD_CURVATURE_FACTOR = 1.25;
 
-    @Data
-    @Builder
-    @AllArgsConstructor
     public static class TravelFeeResult {
-        private BigDecimal distanceKm;
-        private BigDecimal oneWayFee;
-        private BigDecimal roundTripFee;
-        private List<InspectionTravelTierDto> appliedTiers;
+        private final BigDecimal distanceKm;
+        private final BigDecimal oneWayFee;
+        private final BigDecimal roundTripFee;
+        private final List<InspectionTravelTierDto> appliedTiers;
+
+        public TravelFeeResult(BigDecimal distanceKm, BigDecimal oneWayFee, BigDecimal roundTripFee, List<InspectionTravelTierDto> appliedTiers) {
+            this.distanceKm = distanceKm;
+            this.oneWayFee = oneWayFee;
+            this.roundTripFee = roundTripFee;
+            this.appliedTiers = appliedTiers;
+        }
+
+        public BigDecimal getDistanceKm() { return distanceKm; }
+        public BigDecimal getOneWayFee() { return oneWayFee; }
+        public BigDecimal getRoundTripFee() { return roundTripFee; }
+        public List<InspectionTravelTierDto> getAppliedTiers() { return appliedTiers; }
+
+        public static Builder builder() { return new Builder(); }
+
+        public static class Builder {
+            private BigDecimal distanceKm;
+            private BigDecimal oneWayFee;
+            private BigDecimal roundTripFee;
+            private List<InspectionTravelTierDto> appliedTiers;
+
+            public Builder distanceKm(BigDecimal distanceKm) { this.distanceKm = distanceKm; return this; }
+            public Builder oneWayFee(BigDecimal oneWayFee) { this.oneWayFee = oneWayFee; return this; }
+            public Builder roundTripFee(BigDecimal roundTripFee) { this.roundTripFee = roundTripFee; return this; }
+            public Builder appliedTiers(List<InspectionTravelTierDto> appliedTiers) { this.appliedTiers = appliedTiers; return this; }
+
+            public TravelFeeResult build() {
+                return new TravelFeeResult(distanceKm, oneWayFee, roundTripFee, appliedTiers);
+            }
+        }
     }
 
     /**

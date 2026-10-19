@@ -14,7 +14,6 @@ import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.enums.NegotiationStatus;
 import com.secondlife.secondlife.exception.*;
 import com.secondlife.secondlife.repository.*;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
@@ -22,7 +21,7 @@ import java.util.*;
 import java.time.Instant;
 import java.math.BigDecimal;
 
-@Service("shippingQuoteService") @RequiredArgsConstructor
+@Service("shippingQuoteService")
 public class ShippingQuoteServiceImpl implements ShippingQuoteService {
     private final PostRepository posts;
     private final NegotiationRepository negotiations;
@@ -33,6 +32,26 @@ public class ShippingQuoteServiceImpl implements ShippingQuoteService {
     private final ShippingProvider provider;
     private final ObjectMapper mapper;
     private final ReverseGeocodingService geocoding;
+
+    public ShippingQuoteServiceImpl(PostRepository posts,
+                                  NegotiationRepository negotiations,
+                                  ShippingPickupAddressRepository addresses,
+                                  ShippingQuoteRepository quotes,
+                                  InspectionOrderRepository inspections,
+                                  ShipmentRepository shipments,
+                                  ShippingProvider provider,
+                                  ObjectMapper mapper,
+                                  ReverseGeocodingService geocoding) {
+        this.posts = posts;
+        this.negotiations = negotiations;
+        this.addresses = addresses;
+        this.quotes = quotes;
+        this.inspections = inspections;
+        this.shipments = shipments;
+        this.provider = provider;
+        this.mapper = mapper;
+        this.geocoding = geocoding;
+    }
 
     @Transactional public ShippingAddress savePickup(UUID userId,ShippingAddress address) {
         if ("LALAMOVE".equals(provider.code())) ShippingPayloads.requireCoordinates(address,"Seller pickup");

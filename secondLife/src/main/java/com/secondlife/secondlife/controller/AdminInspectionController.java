@@ -12,7 +12,6 @@ import com.secondlife.secondlife.service.InspectionPricingService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -24,13 +23,18 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/admin")
-@RequiredArgsConstructor
 @Tag(name = "Admin Inspection Governance", description = "APIs dành cho Admin Sàn quản lý biểu phí và bảng giá bậc thang kiểm định")
 @PreAuthorize("hasRole('ADMIN') and hasAuthority('INSPECTION_FEE_MANAGE')")
 public class AdminInspectionController {
 
     private final InspectionPricingService pricingService;
     private final CurrentUserProvider currentUserProvider;
+
+    public AdminInspectionController(InspectionPricingService pricingService,
+                                   CurrentUserProvider currentUserProvider) {
+        this.pricingService = pricingService;
+        this.currentUserProvider = currentUserProvider;
+    }
 
     @GetMapping(value = {"/inspection/fee-proposals", "/inspection-fee-proposals"})
     @Operation(summary = "Admin xem danh sách các đề xuất biểu phí từ Trung tâm kiểm định (lọc theo status)")
