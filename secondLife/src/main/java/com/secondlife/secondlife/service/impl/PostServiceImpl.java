@@ -242,7 +242,7 @@ public class PostServiceImpl implements PostService {
 
     public PostInitResponse initPost(UUID userId, PostInitRequest request) {
 
-        User user = userRepository.findByIdForRoleUpdate(userId)
+        User user = userRepository.findById(userId)
 
                 .orElseThrow(() -> new NotFoundException("User not found"));
 

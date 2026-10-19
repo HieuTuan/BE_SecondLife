@@ -3,7 +3,9 @@ package com.secondlife.secondlife.service.impl;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.SellerVerificationStatus;
-import com.secondlife.secondlife.exception.*;
+import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.exception.ForbiddenException;
+import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.SellerVerificationRepository;
 import com.secondlife.secondlife.repository.UserRepository;
@@ -35,7 +37,6 @@ public class ListingAccessServiceImpl implements ListingAccessService {
     }
 
     public Post owned(UUID userId, UUID postId, boolean lock) {
-        if (lock) users.findByIdForRoleUpdate(userId).orElseThrow(() -> new NotFoundException("User not found"));
         Post post = (lock ? posts.findByIdForUpdate(postId) : posts.findById(postId))
                 .orElseThrow(() -> new NotFoundException("Post not found"));
         if (post.getUser() == null || !userId.equals(post.getUser().getId()))

@@ -4,6 +4,10 @@ import com.secondlife.secondlife.common.ErrorResponse;
 import com.secondlife.secondlife.integration.ekyc.vnpt.VnptApiException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -188,6 +192,18 @@ public class GlobalExceptionHandler {
         log.warn("Authentication failed at {}", request.getRequestURI());
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(ErrorResponse.of("Authentication failed", request.getRequestURI()));
+    }
+
+    @ExceptionHandler({
+            QueryTimeoutException.class,
+            CannotAcquireLockException.class,
+            PessimisticLockingFailureException.class
+    })
+    public ResponseEntity<ErrorResponse> handleDatabaseTimeoutAndLockConflict(
+            TransientDataAccessException ex, HttpServletRequest request) {
+        log.warn("Database timeout or lock conflict at {}: {}", request.getRequestURI(), ex.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ErrorResponse.of("Database operation timed out or lock conflict occurred. Please retry.", request.getRequestURI()));
     }
 
     @ExceptionHandler(Exception.class)
