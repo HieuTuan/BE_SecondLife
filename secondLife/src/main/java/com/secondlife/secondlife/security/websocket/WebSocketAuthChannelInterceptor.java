@@ -2,7 +2,6 @@ package com.secondlife.secondlife.security.websocket;
 
 import com.secondlife.secondlife.security.authentication.AccessTokenAuthenticator;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.messaging.Message;
@@ -17,10 +16,13 @@ import org.springframework.stereotype.Component;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
 
     private final AccessTokenAuthenticator authenticator;
+
+    public WebSocketAuthChannelInterceptor(AccessTokenAuthenticator authenticator) {
+        this.authenticator = authenticator;
+    }
 
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {

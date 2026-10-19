@@ -5,17 +5,20 @@ import com.secondlife.secondlife.security.jwt.JwtTokenProvider.AccessToken;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetailsService;
 import io.jsonwebtoken.JwtException;
-import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.stereotype.Component;
 
 @Component
-@RequiredArgsConstructor
 public class AccessTokenAuthenticator {
 
     private final JwtTokenProvider tokenProvider;
     private final CustomUserDetailsService userDetailsService;
+
+    public AccessTokenAuthenticator(JwtTokenProvider tokenProvider, CustomUserDetailsService userDetailsService) {
+        this.tokenProvider = tokenProvider;
+        this.userDetailsService = userDetailsService;
+    }
 
     public CustomUserDetails authenticate(String token) {
         AccessToken accessToken;
