@@ -13,7 +13,6 @@ import com.secondlife.secondlife.service.SellerReputationService;
 import com.secondlife.secondlife.service.SettlementService;
 import com.secondlife.secondlife.service.SystemWalletService;
 import com.secondlife.secondlife.service.WalletService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
@@ -22,7 +21,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
-@Service @RequiredArgsConstructor
+@Service
 public class SettlementServiceImpl implements SettlementService {
 
     private final OrderRepository orders;
@@ -36,6 +35,24 @@ public class SettlementServiceImpl implements SettlementService {
 
     @Autowired(required = false)
     private InspectionOrderRepository inspectionOrders;
+
+    public SettlementServiceImpl(OrderRepository orders,
+                                 OrderSettlementRepository settlements,
+                                 CommissionService commissions,
+                                 CommissionCalculator calculator,
+                                 WalletService wallets,
+                                 SystemWalletService systemWallet,
+                                 SellerReputationService reputation,
+                                 SettlementMapper settlementMapper) {
+        this.orders = orders;
+        this.settlements = settlements;
+        this.commissions = commissions;
+        this.calculator = calculator;
+        this.wallets = wallets;
+        this.systemWallet = systemWallet;
+        this.reputation = reputation;
+        this.settlementMapper = settlementMapper;
+    }
 
     @Override @Transactional(propagation = Propagation.MANDATORY)
     public SettlementResponse settle(Order requestedOrder) {

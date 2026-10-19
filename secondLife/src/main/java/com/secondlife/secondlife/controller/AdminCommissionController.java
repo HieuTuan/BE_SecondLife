@@ -13,7 +13,6 @@ import com.secondlife.secondlife.service.SettlementService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.*;
 import org.springframework.http.*;
@@ -22,13 +21,21 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
-@RestController @RequestMapping("/api/v1/admin") @RequiredArgsConstructor
+@RestController @RequestMapping("/api/v1/admin")
 @PreAuthorize("hasRole('ADMIN') and hasAuthority('ADMIN_COMMISSION_MANAGE')")
 @Tag(name = "Admin - Commission", description = "Default commission for all products with optional fee limits. Rates are fractions; 0.05 means 5%.")
 public class AdminCommissionController {
     private final CommissionService commissions;
     private final SettlementService settlements;
     private final CurrentUserProvider currentUser;
+
+    public AdminCommissionController(CommissionService commissions,
+                                     SettlementService settlements,
+                                     CurrentUserProvider currentUser) {
+        this.commissions = commissions;
+        this.settlements = settlements;
+        this.currentUser = currentUser;
+    }
 
     @GetMapping("/commission-rules")
     public ApiResponse<PageResponse<CommissionRuleResponse>> list(@ParameterObject Pageable pageable) {

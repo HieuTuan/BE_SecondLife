@@ -11,7 +11,6 @@ import com.secondlife.secondlife.mapper.CommissionMapper;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.CommissionCalculator;
 import com.secondlife.secondlife.service.CommissionService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -22,7 +21,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.*;
 
-@Service @RequiredArgsConstructor
+@Service
 public class CommissionServiceImpl implements CommissionService {
 
     private final CommissionRuleRepository rules;
@@ -31,6 +30,20 @@ public class CommissionServiceImpl implements CommissionService {
     private final CommissionCalculator calculator;
     private final ObjectMapper mapper;
     private final CommissionMapper commissionMapper;
+
+    public CommissionServiceImpl(CommissionRuleRepository rules,
+                                 CommissionRuleAuditRepository audits,
+                                 OrderCommissionSnapshotRepository snapshots,
+                                 CommissionCalculator calculator,
+                                 ObjectMapper mapper,
+                                 CommissionMapper commissionMapper) {
+        this.rules = rules;
+        this.audits = audits;
+        this.snapshots = snapshots;
+        this.calculator = calculator;
+        this.mapper = mapper;
+        this.commissionMapper = commissionMapper;
+    }
 
     @Override @Transactional(readOnly = true)
     public Page<CommissionRuleResponse> list(Pageable pageable) {

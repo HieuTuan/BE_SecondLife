@@ -23,7 +23,6 @@ import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.ReputationCalculator;
 import com.secondlife.secondlife.service.SellerReputationService;
 
-import lombok.RequiredArgsConstructor;
 
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.data.domain.*;
@@ -37,7 +36,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 
-@Service("sellerReputationService") @RequiredArgsConstructor
+@Service("sellerReputationService")
 public class SellerReputationServiceImpl implements SellerReputationService {
 
     private final SellerReputationRepository reputations;
@@ -50,6 +49,28 @@ public class SellerReputationServiceImpl implements SellerReputationService {
     private final ReputationCalculator calculator;
     private final OrderConfirmationProperties confirmations;
     private final OrderMapper orderMapper;
+
+    public SellerReputationServiceImpl(SellerReputationRepository reputations,
+                                      SellerReputationMapper reputationMapper,
+                                      ShippingQuoteRepository shippingQuotes,
+                                      ShipmentRepository shipments,
+                                      UserRepository users,
+                                      OrderRepository orders,
+                                      ReputationProperties properties,
+                                      ReputationCalculator calculator,
+                                      OrderConfirmationProperties confirmations,
+                                      OrderMapper orderMapper) {
+        this.reputations = reputations;
+        this.reputationMapper = reputationMapper;
+        this.shippingQuotes = shippingQuotes;
+        this.shipments = shipments;
+        this.users = users;
+        this.orders = orders;
+        this.properties = properties;
+        this.calculator = calculator;
+        this.confirmations = confirmations;
+        this.orderMapper = orderMapper;
+    }
 
     public static final String FORMULA_VERSION="TRANSACTION_SUCCESS_RATE_V3";
 
