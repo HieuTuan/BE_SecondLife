@@ -25,6 +25,9 @@ import java.util.UUID;
 public interface PostRepository extends JpaRepository<Post, UUID>, JpaSpecificationExecutor<Post>, RefreshOperations {
     @EntityGraph(attributePaths = "images")
     Optional<Post> findByIdAndStatus(UUID id, String status);
+    @Override
+    @EntityGraph(attributePaths = {"images", "user", "user.profile"})
+    Optional<Post> findById(UUID id);
     @EntityGraph(attributePaths = "images")
     @Query("select p from Post p where p.id in :ids")
     List<Post> findAllWithImagesByIdIn(@Param("ids") Collection<UUID> ids);

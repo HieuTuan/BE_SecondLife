@@ -52,7 +52,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, RefreshOper
     @Query("select o.post.id from Order o where o.id=:id")
     Optional<UUID> findPostId(@Param("id") UUID id);
     Optional<Order> findByBuyerIdAndRequestId(UUID buyerId, UUID requestId);
-    @EntityGraph(attributePaths = "post")
+    @EntityGraph(attributePaths = {"post", "buyer", "seller", "negotiation"})
     Page<Order> findByBuyerId(UUID buyerId, Pageable pageable);
     Page<Order> findByConfirmationDeadlineIsNotNull(Pageable pageable);
     Page<Order> findByConfirmationDeadlineIsNotNullAndStatus(OrderStatus status, Pageable pageable);
@@ -81,7 +81,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, RefreshOper
         @Param("cutoff") Instant cutoff,
         @Param("afterDeadline") Instant afterDeadline,
         @Param("afterId") UUID afterId, Pageable page);
-    @EntityGraph(attributePaths = "post")
+    @EntityGraph(attributePaths = {"post", "buyer", "seller", "negotiation"})
     Page<Order> findBySellerId(UUID sellerId, Pageable pageable);
 
     interface DueConfirmationOrder {

@@ -9,7 +9,6 @@ import com.secondlife.secondlife.service.MarketplaceListingService;
 
 import jakarta.persistence.criteria.JoinType;
 
-import lombok.RequiredArgsConstructor;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -20,12 +19,16 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.UUID;
 
 @Service("marketplaceListingService")
-@RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class MarketplaceListingServiceImpl implements MarketplaceListingService {
 
     private final PostRepository posts;
     private final PostMapper postMapper;
+
+    public MarketplaceListingServiceImpl(PostRepository posts, PostMapper postMapper) {
+        this.posts = posts;
+        this.postMapper = postMapper;
+    }
 
     public Page<MarketplaceListingResponse> list(UUID categoryId, UUID itemId, Pageable pageable) {
         Specification<Post> filter = (root, query, cb) -> {

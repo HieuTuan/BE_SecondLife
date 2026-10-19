@@ -56,6 +56,7 @@ class AccessTokenAuthenticationTest {
 
     @BeforeEach
     void setUp() {
+        authenticator.clearCache();
         SecurityContextHolder.clearContext();
         user = new User("buyer@example.test", "hash", AccountStatus.ACTIVE);
         user.setId(UUID.randomUUID());
@@ -64,6 +65,7 @@ class AccessTokenAuthenticationTest {
 
     @AfterEach
     void clearContext() {
+        authenticator.clearCache();
         SecurityContextHolder.clearContext();
     }
 

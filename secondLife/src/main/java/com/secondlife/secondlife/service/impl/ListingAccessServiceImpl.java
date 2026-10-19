@@ -11,18 +11,24 @@ import com.secondlife.secondlife.repository.SellerVerificationRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.ListingAccessService;
 import com.secondlife.secondlife.service.SellerReputationService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.UUID;
 
 @Service("listingAccessService")
-@RequiredArgsConstructor
 public class ListingAccessServiceImpl implements ListingAccessService {
     private final UserRepository users;
     private final SellerReputationService reputation;
     private final PostRepository posts;
     private final SellerVerificationRepository verifications;
+
+    public ListingAccessServiceImpl(UserRepository users, SellerReputationService reputation,
+                                  PostRepository posts, SellerVerificationRepository verifications) {
+        this.users = users;
+        this.reputation = reputation;
+        this.posts = posts;
+        this.verifications = verifications;
+    }
 
     public void requireVerifiedSeller(UUID userId) {
         reputation.requireSellingAllowed(userId);

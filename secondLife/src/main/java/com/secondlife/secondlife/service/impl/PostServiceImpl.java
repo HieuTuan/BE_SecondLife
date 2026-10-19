@@ -57,7 +57,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -123,6 +125,7 @@ public class PostServiceImpl implements PostService {
     private final ListingPublicationService publication;
 
     private final ListingReviewService reviews;
+    private final TransactionTemplate transactionTemplate;
 
 
     public PostServiceImpl(PostRepository postRepository,
@@ -172,7 +175,9 @@ public class PostServiceImpl implements PostService {
 
                            @Value("${app.listing.min-images}") int minImages,
 
-                           @Value("${app.listing.max-images}") int maxImages, PostMapper postMapper) {
+                           @Value("${app.listing.max-images}") int maxImages, PostMapper postMapper,
+                           PlatformTransactionManager transactions) {
+        this.transactionTemplate = transactions != null ? new TransactionTemplate(transactions) : null;
         this.postMapper = postMapper;
 
         if (inspectionFee.signum() < 0 || shippingFee.signum() < 0)
@@ -237,92 +242,71 @@ public class PostServiceImpl implements PostService {
     }
 
     @Override
-
-    @Transactional
-
     public PostInitResponse initPost(UUID userId, PostInitRequest request) {
-
         User user = userRepository.findById(userId)
-
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
         if (request.categoryId() == null || !categoryRepository.existsById(request.categoryId()))
-
             throw new BadRequestException("A valid categoryId is required");
 
         if (request.itemId() != null) {
-
             var item = itemRepository.findById(request.itemId()).orElseThrow(() -> new BadRequestException("Invalid itemId"));
-
             if (!request.categoryId().equals(item.getCategory().getId()))
-
                 throw new BadRequestException("itemId does not belong to categoryId");
-
         }
 
         if (postRepository.countByUser_IdAndStatusIn(userId, List.of("DRAFT", "REJECTED", "PENDING", "PENDING_INSPECTION")) >= maxUnfinishedDrafts)
-
             throw new ConflictException("Maximum " + maxUnfinishedDrafts + " unfinished drafts; finish an existing draft first");
 
         if (request.images() == null || request.images().size() < minImages || request.images().size() > maxImages)
-
             throw new BadRequestException("Upload between " + minImages + " and " + maxImages + " product images");
 
         for (var image : request.images()) {
-
             if (image == null || image.isEmpty() || image.getSize() > maxImageBytes || image.getContentType() == null
-
                     || !Set.of("image/jpeg", "image/png", "image/webp").contains(image.getContentType()))
-
                 throw new BadRequestException("Every image must be a non-empty JPEG, PNG or WebP no larger than " + maxImageBytes + " bytes");
-
         }
 
-        Post post = new Post();
-
-        post.setUser(user);
-
-        post.setCategoryId(request.categoryId());
-
-        post.setItemId(request.itemId());
-
-        post.setStatus("DRAFT");
-
-        
-
+        List<PostImage> postImages = new ArrayList<>();
         for (var image : request.images()) {
-
             try {
-
                 byte[] imageBytes = image.getBytes();
-
                 String perceptualFingerprint = imageSimilarity.fingerprint(imageBytes);
-
                 String imageUrl = cloudinaryService.uploadImage(image);
-
                 if (imageUrl == null || imageUrl.isBlank()) throw new IllegalStateException("Image upload returned an empty URL");
-
-                post.getImages().add(new PostImage(imageUrl,
-
+                postImages.add(new PostImage(imageUrl,
                         listingFingerprint.sha256(imageBytes), perceptualFingerprint));
-
             } catch (IOException e) {
-
                 throw new RuntimeException("Failed to upload image to Cloudinary", e);
-
             } catch (IllegalArgumentException e) {
-
                 throw new BadRequestException("Invalid or excessively large image dimensions");
-
             }
-
         }
 
-        post.setImageUrl(post.getImages().getFirst().getImageUrl());
-
-        post.setImageFingerprint(post.getImages().getFirst().getImageFingerprint());
-
-        post = postRepository.save(post);
+        Post post;
+        if (transactionTemplate != null) {
+            post = transactionTemplate.execute(tx -> {
+                Post p = new Post();
+                p.setUser(userRepository.getReferenceById(userId));
+                p.setCategoryId(request.categoryId());
+                p.setItemId(request.itemId());
+                p.setStatus("DRAFT");
+                p.getImages().addAll(postImages);
+                p.setImageUrl(postImages.getFirst().getImageUrl());
+                p.setImageFingerprint(postImages.getFirst().getImageFingerprint());
+                return postRepository.save(p);
+            });
+        } else {
+            Post p = new Post();
+            p.setUser(userRepository.getReferenceById(userId));
+            p.setCategoryId(request.categoryId());
+            p.setItemId(request.itemId());
+            p.setStatus("DRAFT");
+            p.getImages().addAll(postImages);
+            p.setImageUrl(postImages.getFirst().getImageUrl());
+            p.setImageFingerprint(postImages.getFirst().getImageFingerprint());
+            post = postRepository.save(p);
+        }
 
         // Extract names early
         final String categoryName = categoryRepository.findById(request.categoryId())
@@ -432,7 +416,11 @@ public class PostServiceImpl implements PostService {
                         .trim();
                 log.warn("Post init blocked: Image does not match category/item. Selected: {} / {}, Reason: {}",
                         selectedCategoryName, selectedItemName, cleanReason);
-                postRepository.delete(post);
+                if (transactionTemplate != null) {
+                    transactionTemplate.executeWithoutResult(tx -> postRepository.delete(post));
+                } else {
+                    postRepository.delete(post);
+                }
                 throw new BadRequestException("HÌNH ẢNH KHÔNG KHỚP LOẠI SẢN PHẨM: " + cleanReason);
             }
 
@@ -448,18 +436,17 @@ public class PostServiceImpl implements PostService {
                         .trim();
                 log.warn("Post init blocked: Image does not match brand. Declared: {}, Detected: {}, Reason: {}",
                         declaredBrand, detectedBrand, cleanReason);
-                postRepository.delete(post);
+                if (transactionTemplate != null) {
+                    transactionTemplate.executeWithoutResult(tx -> postRepository.delete(post));
+                } else {
+                    postRepository.delete(post);
+                }
                 String brandPrefix = detectedBrand.isEmpty() ? "" : "[DETECTED_BRAND:" + detectedBrand + "] ";
                 throw new BadRequestException("HÌNH ẢNH KHÔNG KHỚP THƯƠNG HIỆU: " + brandPrefix + cleanReason);
             }
 
             // Nếu hợp lệ: làm sạch tiền tố [HỢP_LỆ]
             String cleanDescription = aiReply.replaceFirst("^\\[HỢP_LỆ\\]\\s*", "").trim();
-            post.setAiDescription(cleanDescription);
-            // QUAN TRỌNG: description bài đăng để trống khi vừa khởi tạo.
-            // Chỉ lưu kết quả thẩm định ảnh vào aiDescription, KHÔNG tự gán văn bản thô vào description bài đăng.
-            post.setDescription(null);
-            post.setDescriptionAccepted(false);
 
             // 4. Fetch or Generate Template:
             CategoryQuestionTemplate template = templateRepository
@@ -520,14 +507,30 @@ public class PostServiceImpl implements PostService {
                         itemName, categoryName, itemName, itemName, itemName, itemName, itemName);
 
                 String generatedTemplate = chatGateway.complete(promptText);
+                final String genText = generatedTemplate;
 
-                if (template == null) {
-                    template = new CategoryQuestionTemplate();
-                    template.setCategoryId(request.categoryId());
-                    template.setItemId(request.itemId());
+                if (transactionTemplate != null) {
+                    template = transactionTemplate.execute(tx -> {
+                        CategoryQuestionTemplate t = templateRepository
+                                .findByCategoryIdAndItemId(request.categoryId(), request.itemId())
+                                .orElse(null);
+                        if (t == null) {
+                            t = new CategoryQuestionTemplate();
+                            t.setCategoryId(request.categoryId());
+                            t.setItemId(request.itemId());
+                        }
+                        t.setTemplateText(genText);
+                        return templateRepository.save(t);
+                    });
+                } else {
+                    if (template == null) {
+                        template = new CategoryQuestionTemplate();
+                        template.setCategoryId(request.categoryId());
+                        template.setItemId(request.itemId());
+                    }
+                    template.setTemplateText(genText);
+                    template = templateRepository.save(template);
                 }
-                template.setTemplateText(generatedTemplate);
-                template = templateRepository.save(template);
             }
 
             String templateText = template != null ? template.getTemplateText() : "";
@@ -537,12 +540,29 @@ public class PostServiceImpl implements PostService {
                 templateText = templateText.replaceAll("\\?\\s+(?=[A-ZÀ-Ỹ0-9\\*\\#])", "?\n");
             }
 
-            // Fetch session to set on post
-            AiChatSession session = sessionRepository.findById(aiResponse.sessionId())
-                    .orElse(null);
-            post.setAiChatSession(session);
-            post.setTemplate(template);
-            postRepository.save(post);
+            // Update post with session and template
+            final CategoryQuestionTemplate finalTemplate = template;
+            final UUID finalPostId = post.getId();
+            if (transactionTemplate != null) {
+                transactionTemplate.executeWithoutResult(tx -> {
+                    Post managed = postRepository.findById(finalPostId).orElse(post);
+                    AiChatSession session = sessionRepository.findById(aiResponse.sessionId()).orElse(null);
+                    managed.setAiDescription(cleanDescription);
+                    managed.setDescription(null);
+                    managed.setDescriptionAccepted(false);
+                    managed.setAiChatSession(session);
+                    managed.setTemplate(finalTemplate);
+                    postRepository.save(managed);
+                });
+            } else {
+                AiChatSession session = sessionRepository.findById(aiResponse.sessionId()).orElse(null);
+                post.setAiDescription(cleanDescription);
+                post.setDescription(null);
+                post.setDescriptionAccepted(false);
+                post.setAiChatSession(session);
+                post.setTemplate(finalTemplate);
+                postRepository.save(post);
+            }
 
             return new PostInitResponse(
                     post.getId(),
@@ -551,10 +571,19 @@ public class PostServiceImpl implements PostService {
                     cleanDescription);
         } else {
             // Manual mode: No AI visual scan, no credit deducted
-            post.setAiDescription(null);
-            post.setDescription(null);
-            post.setDescriptionAccepted(false);
-            postRepository.save(post);
+            if (transactionTemplate != null) {
+                transactionTemplate.executeWithoutResult(tx -> {
+                    post.setAiDescription(null);
+                    post.setDescription(null);
+                    post.setDescriptionAccepted(false);
+                    postRepository.save(post);
+                });
+            } else {
+                post.setAiDescription(null);
+                post.setDescription(null);
+                post.setDescriptionAccepted(false);
+                postRepository.save(post);
+            }
 
             return new PostInitResponse(
                     post.getId(),
@@ -1282,11 +1311,13 @@ public class PostServiceImpl implements PostService {
             }
 
             return cb.equal(root.get("user").get("id"), userId);
-
         };
 
-        return postRepository.findAll(spec, pageable).map(postMapper::toResponse);
-
+        Page<Post> page = postRepository.findAll(spec, pageable);
+        if (!page.isEmpty()) {
+            postRepository.findAllWithImagesByIdIn(page.getContent().stream().map(Post::getId).toList());
+        }
+        return page.map(postMapper::toResponse);
     }
 
     @Override
