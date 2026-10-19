@@ -3,6 +3,7 @@ package com.secondlife.secondlife.controller;
 import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
+import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionQuoteRequest;
 import com.secondlife.secondlife.dto.request.InspectionSealScanRequest;
 import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
@@ -113,6 +114,16 @@ public class InspectionController {
             @PathVariable UUID orderId) {
         UUID buyerId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(inspectionService.confirmFinalPurchase(buyerId, orderId));
+    }
+
+    @PostMapping(value = {"/orders/{orderId}/reject-purchase", "/orders/{orderId}/cancel-purchase"})
+    @Operation(summary = "Người mua từ chối mua tiếp sau khi sản phẩm kiểm định PASSED")
+    public ResponseEntity<InspectionOrderResponse> rejectFinalPurchase(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID orderId,
+            @RequestBody(required = false) InspectionRejectPurchaseRequest request) {
+        UUID buyerId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(inspectionService.rejectFinalPurchase(buyerId, orderId, request));
     }
 
     @GetMapping("/seal/{tamperSealId}")

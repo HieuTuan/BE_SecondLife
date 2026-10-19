@@ -49,8 +49,19 @@ public class InspectionOrderMapper {
         @Mapping(target = "postTitle", source = "post.title")
         @Mapping(target = "postImageUrls", source = "post.imageUrls")
         @Mapping(target = "postPrice", source = "post.price")
+        @Mapping(target = "initialDepositPaid", expression = "java(resolveInitialDepositPaid(order))")
+        @Mapping(target = "finalPaymentRequired", expression = "java(resolveFinalPaymentRequired(order))")
         @Mapping(target = "videoCleanedMessage", expression = "java(cleanedMessage(order.getVideoCleanupStatus()))")
         InspectionOrderResponse toResponse(InspectionOrder order);
+
+        default java.math.BigDecimal resolveInitialDepositPaid(InspectionOrder order) {
+            if (order == null) return java.math.BigDecimal.ZERO;
+            return order.getBuyerFeeShare() != null ? order.getBuyerFeeShare() : java.math.BigDecimal.ZERO;
+        }
+
+        default boolean resolveFinalPaymentRequired(InspectionOrder order) {
+            return true;
+        }
 
         default String partyName(User user) {
             if (user == null) return null;

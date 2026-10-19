@@ -2,6 +2,7 @@ package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
+import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionQuoteRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
 import com.secondlife.secondlife.dto.request.InspectionSealScanRequest;
@@ -554,6 +555,88 @@ public class InspectionServiceImpl implements InspectionService {
                     "/seller/orders/" + order.getId()
                 );
             }
+        }
+
+        return inspectionOrderMapper.toResponse(savedOrder);
+    }
+
+    @Override
+    @Transactional
+    public InspectionOrderResponse rejectFinalPurchase(UUID buyerId, UUID orderId, InspectionRejectPurchaseRequest request) {
+        InspectionOrder order = inspectionOrderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
+
+        if (order.getBuyer() == null || !order.getBuyer().getId().equals(buyerId)) {
+            throw new ForbiddenException("Bạn không phải người mua của đơn kiểm định này");
+        }
+
+        if (!InspectionOrderStatus.PASSED.name().equals(order.getStatus())) {
+            throw new ConflictException("Đơn kiểm định phải ở trạng thái ĐẠT CHUẨN (PASSED) mới có thể từ chối mua tiếp");
+        }
+
+        if (order.getFinalPaymentPaidAt() != null) {
+            throw new ConflictException("Đơn hàng đã được thanh toán tiền hàng rồi, không thể từ chối");
+        }
+
+        String reason = (request != null && request.reason() != null && !request.reason().isBlank())
+                ? request.reason().trim()
+                : "Người mua từ chối mua tiếp sau khi có kết quả kiểm định đạt chuẩn";
+
+        order.setStatus("CANCELLED");
+        order.setNote((order.getNote() != null ? order.getNote() + " | " : "") +
+                "Người mua từ chối mua tiếp sau kiểm định. Lý do: " + reason);
+
+        BigDecimal buyerDeposit = (order.getBuyerPaidAt() != null && order.getBuyerFeeShare() != null)
+                ? order.getBuyerFeeShare()
+                : BigDecimal.ZERO;
+
+        // Bồi hoàn tiền cọc kiểm định của người mua cho người bán theo cam kết
+        if (order.getSeller() != null && buyerDeposit.compareTo(BigDecimal.ZERO) > 0) {
+            try {
+                walletService.processEarning(order.getSeller().getId(), buyerDeposit, order.getId());
+                log.info("Compensated buyer deposit fee share of {} to seller {} for rejected purchase on inspection order {}",
+                        buyerDeposit, order.getSeller().getId(), order.getId());
+            } catch (Exception ex) {
+                log.error("Failed to compensate seller {} for rejected purchase order {}: {}",
+                        order.getSeller().getId(), order.getId(), ex.getMessage());
+            }
+        }
+
+        // Mở lại bài đăng sang trạng thái ACTIVE cho người bán
+        Post post = order.getPost();
+        if (post != null) {
+            post.setStatus("ACTIVE");
+            postRepository.save(post);
+        }
+
+        InspectionOrder savedOrder = inspectionOrderRepository.save(order);
+
+        // Gửi thông báo & email cho Người bán và thông báo cho Người mua
+        if (notificationService != null) {
+            String title = post != null && post.getTitle() != null ? post.getTitle() : "";
+            if (order.getSeller() != null) {
+                String sellerMsg = "Người mua đã từ chối mua sản phẩm \"" + title + "\" sau kiểm định. Lý do: " + reason +
+                        ". Tiền cọc kiểm định của người mua (" + buyerDeposit + " VND) đã được bồi hoàn vào ví của bạn. Bài đăng đã được mở lại sang ACTIVE.";
+                notificationService.notifyWithEmail(
+                    order.getSeller().getId(),
+                    "Người mua từ chối mua tiếp sau kiểm định",
+                    sellerMsg,
+                    NotificationType.ORDER,
+                    order.getId(),
+                    "INSPECTION_ORDER",
+                    "/seller/inspections/" + order.getId()
+                );
+            }
+
+            notificationService.notify(
+                buyerId,
+                "Đã hủy đơn mua sau kiểm định",
+                "Bạn đã từ chối mua tiếp sản phẩm \"" + title + "\". Đơn kiểm định đã kết thúc và tiền cọc kiểm định được bồi hoàn cho người bán theo chính sách cam kết.",
+                NotificationType.ORDER,
+                order.getId(),
+                "INSPECTION_ORDER",
+                "/buyer/inspections/" + order.getId()
+            );
         }
 
         return inspectionOrderMapper.toResponse(savedOrder);

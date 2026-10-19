@@ -2,6 +2,7 @@ package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
+import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
 import com.secondlife.secondlife.dto.request.InspectionSealScanRequest;
 import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
@@ -49,6 +50,11 @@ public interface InspectionService {
      * Người mua xác nhận mua hàng & thanh toán tiền hàng sau khi kiểm định PASSED
      */
     InspectionOrderResponse confirmFinalPurchase(UUID buyerId, UUID orderId);
+
+    /**
+     * Người mua từ chối mua tiếp sau khi sản phẩm kiểm định PASSED
+     */
+    InspectionOrderResponse rejectFinalPurchase(UUID buyerId, UUID orderId, InspectionRejectPurchaseRequest request);
 
     /**
      * Inspector xem danh sách đơn kiểm định được phân công cho mình

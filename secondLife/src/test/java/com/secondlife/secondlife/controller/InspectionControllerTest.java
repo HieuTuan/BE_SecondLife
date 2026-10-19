@@ -190,4 +190,35 @@ class InspectionControllerTest {
                 .andExpect(jsonPath("$.status").value(InspectionOrderStatus.WAITING_SELLER_APPROVAL.name()))
                 .andExpect(jsonPath("$.buyerConsentZin").value(true));
     }
+
+    @Test
+    @DisplayName("POST /api/v1/inspection/orders/{orderId}/reject-purchase: Người mua từ chối mua tiếp thành công")
+    void testRejectFinalPurchase() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        UUID buyerId = UUID.randomUUID();
+
+        String payload = """
+                {
+                    "reason": "Hàng không ưng ý sau khi xem video kiểm định"
+                }
+                """;
+
+        InspectionOrderResponse response = InspectionOrderResponse.builder()
+                .id(orderId)
+                .status("CANCELLED")
+                .initialDepositPaid(BigDecimal.valueOf(100000))
+                .finalPaymentRequired(true)
+                .build();
+
+        when(currentUserProvider.resolveUserId(any())).thenReturn(buyerId);
+        when(inspectionService.rejectFinalPurchase(eq(buyerId), eq(orderId), any())).thenReturn(response);
+
+        mockMvc.perform(post("/api/v1/inspection/orders/" + orderId + "/reject-purchase")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.initialDepositPaid").value(100000))
+                .andExpect(jsonPath("$.finalPaymentRequired").value(true));
+    }
 }

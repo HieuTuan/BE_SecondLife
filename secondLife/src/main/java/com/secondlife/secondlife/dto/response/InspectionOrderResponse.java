@@ -35,6 +35,8 @@ public record InspectionOrderResponse(
     BigDecimal returnShippingReserveFee,
     BigDecimal buyerFeeShare,
     BigDecimal sellerFeeShare,
+    BigDecimal initialDepositPaid,
+    boolean finalPaymentRequired,
     Instant paymentDeadline,
     Instant buyerPaidAt,
     Instant sellerPaidAt,
