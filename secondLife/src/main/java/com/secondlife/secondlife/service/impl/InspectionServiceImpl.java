@@ -330,6 +330,35 @@ public class InspectionServiceImpl implements InspectionService {
                     "/buyer/inspections/" + order.getId()
                 );
             }
+            if (notificationService != null && userRepository != null) {
+                String postTitle = order.getPost() != null && order.getPost().getTitle() != null ? order.getPost().getTitle() : "";
+                List<UUID> centerManagerIds = userRepository.findActiveInspectionCenterUserIds();
+                if (InspectionOrderStatus.CONFIRMED_PENDING_DISPATCH.name().equals(order.getStatus())) {
+                    for (UUID centerId : centerManagerIds) {
+                        notificationService.notify(
+                            centerId,
+                            "Đơn kiểm định mới cần phân công KTV",
+                            "Đơn kiểm định cho sản phẩm \"" + postTitle + "\" đã sẵn sàng phân công Kỹ thuật viên.",
+                            NotificationType.INSPECTION,
+                            order.getId(),
+                            "INSPECTION_ORDER",
+                            "/inspector-center/orders"
+                        );
+                    }
+                } else if (InspectionOrderStatus.WAITING_FEE_PAYMENT.name().equals(order.getStatus())) {
+                    for (UUID centerId : centerManagerIds) {
+                        notificationService.notify(
+                            centerId,
+                            "Đơn kiểm định mới đang chờ nộp phí",
+                            "Người bán đã đồng ý kiểm định cho sản phẩm \"" + postTitle + "\". Đơn đang chờ thanh toán phí kiểm định vào ví ký quỹ.",
+                            NotificationType.INSPECTION,
+                            order.getId(),
+                            "INSPECTION_ORDER",
+                            "/inspector-center/orders"
+                        );
+                    }
+                }
+            }
             return inspectionOrderMapper.toResponse(saved);
         }
 
@@ -508,8 +537,17 @@ public class InspectionServiceImpl implements InspectionService {
     @Override
     @Transactional(readOnly = true)
     public Page<InspectionOrderResponse> getAllOrders(String status, Pageable pageable) {
-        if (status != null && !status.isBlank()) {
-            return inspectionOrderRepository.findByStatus(status, pageable)
+        if (status != null && !status.isBlank() && !"ALL".equalsIgnoreCase(status.trim())) {
+            String normalized = status.trim().toUpperCase();
+            if ("PENDING".equals(normalized)) {
+                return inspectionOrderRepository.findByStatusIn(List.of("PENDING", "CONFIRMED_PENDING_DISPATCH"), pageable)
+                        .map(inspectionOrderMapper::toResponse);
+            }
+            if ("ASSIGNED".equals(normalized)) {
+                return inspectionOrderRepository.findByStatusIn(List.of("ASSIGNED", "DISPATCHED", "SCHEDULED"), pageable)
+                        .map(inspectionOrderMapper::toResponse);
+            }
+            return inspectionOrderRepository.findByStatus(normalized, pageable)
                     .map(inspectionOrderMapper::toResponse);
         }
         return inspectionOrderRepository.findAll(pageable)

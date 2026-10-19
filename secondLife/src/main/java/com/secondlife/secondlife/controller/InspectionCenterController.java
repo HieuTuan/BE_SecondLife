@@ -31,7 +31,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/inspector-center")
-@RequiredArgsConstructor
 @Tag(name = "Inspection Center Management Portal", description = "APIs dành cho Quản lý Trung tâm kiểm định điều phối và quản trị")
 public class InspectionCenterController {
 
@@ -40,9 +39,19 @@ public class InspectionCenterController {
     private final InspectionPricingService pricingService;
     private final CurrentUserProvider currentUserProvider;
 
+    public InspectionCenterController(InspectionService inspectionService,
+                                      InspectionChecklistService checklistService,
+                                      InspectionPricingService pricingService,
+                                      CurrentUserProvider currentUserProvider) {
+        this.inspectionService = inspectionService;
+        this.checklistService = checklistService;
+        this.pricingService = pricingService;
+        this.currentUserProvider = currentUserProvider;
+    }
+
     // --- 1. ĐIỀU PHỐI & THEO DÕI ĐƠN KIỂM ĐỊNH ---
 
-    @GetMapping("/orders")
+    @GetMapping(value = {"/orders", "/orders/all"})
     @PreAuthorize("hasAuthority('INSPECTION_ORDER_READ_ANY')")
     @Operation(summary = "Xem danh sách tất cả các đơn kiểm định (hỗ trợ lọc status và phân trang)")
     public ResponseEntity<ApiResponse<PageResponse<InspectionOrderResponse>>> getAllOrders(

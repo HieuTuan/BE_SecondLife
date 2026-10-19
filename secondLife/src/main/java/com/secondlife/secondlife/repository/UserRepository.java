@@ -60,6 +60,13 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
     List<User> findAllWithRolesByIdIn(@Param("ids") Collection<UUID> ids);
 
     List<User> findByManagerId(UUID managerId);
+
+    @Query("""
+        SELECT DISTINCT u.id FROM User u JOIN u.userRoles ur JOIN ur.role r
+        WHERE r.code = 'INSPECTION_CENTER' AND u.accountStatus = 'ACTIVE'
+        """)
+    List<UUID> findActiveInspectionCenterUserIds();
+
     @Query("""
         SELECT DISTINCT u.id FROM User u JOIN u.userRoles ur JOIN ur.role r
         JOIN r.rolePermissions rp JOIN rp.permission p

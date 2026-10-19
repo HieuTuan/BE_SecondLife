@@ -35,6 +35,9 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
     Page<InspectionOrder> findByStatus(String status, Pageable pageable);
 
     @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
+    Page<InspectionOrder> findByStatusIn(java.util.Collection<String> statuses, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
     Page<InspectionOrder> findAll(Pageable pageable);
 
     Optional<InspectionOrder> findByPostId(UUID postId);
