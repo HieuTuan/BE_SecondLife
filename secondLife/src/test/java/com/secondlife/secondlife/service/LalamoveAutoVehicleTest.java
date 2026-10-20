@@ -16,6 +16,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.Clock;
+import java.util.concurrent.*;
+import static org.mockito.Mockito.*;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.*;
@@ -24,17 +27,40 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class LalamoveAutoVehicleTest {
     private static final JsonMapper JSON=JsonMapper.builder().build();
     private static final String BASE="https://rest.sandbox.lalamove.com";
+    private final Clock clock=mock(Clock.class);
+    private final Instant now=Instant.now();
     private final RestClient.Builder builder=RestClient.builder();
-    private final LalamoveShippingProvider provider=new LalamoveShippingProvider(builder,JSON,properties());
+    private final LalamoveShippingProvider provider=new LalamoveShippingProvider(builder,JSON,properties(),clock);
     private final MockRestServiceServer server=MockRestServiceServer.bindTo(builder).build();
 
-    @Test void choosesCheapestFittingVehicleUsingCityCatalogueAndActualQuotes() {
-        catalogue(List.of(vehicle("MOTORCYCLE", "30", "kg", "0.5", "0.5", "0.5", "m"),
-                vehicle("VAN", "500", "kg", "2", "1", "1", "m")),List.of());
-        quotation("MOTORCYCLE","30000"); quotation("VAN","25000");
+    @org.junit.jupiter.api.BeforeEach void setClock() { when(clock.instant()).thenReturn(now); }
+
+    @Test void quotesOnlyTheSmallestFittingVehicleRegardlessOfCatalogueOrder() {
+        catalogue(List.of(vehicle("VAN", "0.5", "t", "2", "1", "1", "m"),
+                vehicle("MOTORCYCLE", "30000", "g", "0.5", "0.5", "0.5", "m")),List.of());
+        quotation("MOTORCYCLE","30000");
         var result=assertDoesNotThrow(()->provider.preview(route(10000,40,40,40)));
-        assertEquals("VAN",result.path("provider_quote").path("serviceType").asText());
-        assertEquals(25000,result.path("total_fee").intValue()); server.verify();
+        assertEquals("MOTORCYCLE",result.path("provider_quote").path("serviceType").asText());
+        assertEquals(30000,result.path("total_fee").intValue()); server.verify();
+    }
+    @Test void duplicateAutomaticPreviewsReuseTheQuotationWithoutAnyMoreCarrierRequests() {
+        catalogue(List.of(vehicle("MOTORCYCLE","30","kg","1","1","1","m")),List.of());
+        quotation("MOTORCYCLE","30000");
+        var first=provider.preview(route(10000,40,40,40));
+        var duplicate=provider.preview(route(10000,40,40,40));
+        assertEquals(first,duplicate);
+        assertNotSame(first,duplicate);
+        server.verify();
+    }
+    @Test void rateLimitStopsImmediatelyWithoutTryingLargerVehicles() {
+        catalogue(List.of(vehicle("MOTORCYCLE","30","kg","1","1","1","m"),
+            vehicle("VAN","100","kg","2","2","2","m")),List.of());
+        server.expect(requestTo(BASE+"/v3/quotations")).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS)
+            .body("{\"message\":\"ERR_RATE_LIMIT_EXCEEDED\"}"));
+        var error=assertThrows(LalamoveRequestException.class,()->provider.preview(route(10000,40,40,40)));
+        assertEquals(429,error.getUpstreamStatus());
+        assertEquals("ERR_RATE_LIMIT_EXCEEDED",error.getErrorCode());
+        server.verify();
     }
     @Test void excludesOverloadedOversizedAndForeignCityVehicles() {
         catalogue(List.of(vehicle("TOO_LIGHT","5000","g","200","200","200","cm"),
@@ -73,9 +99,8 @@ class LalamoveAutoVehicleTest {
             .body("{\"errors\":[{\"id\":\"ERR_OUT_OF_SERVICE_AREA\"}]}"));
         quotation("VAN","50000");assertEquals(50000,provider.preview(route(10000,40,40,40)).path("total_fee").intValue());server.verify();
     }
-    @Test void providerFailureDoesNotReturnAnUnverifiedCheapestPrice() {
+    @Test void authenticationFailureIsNotHiddenByTryingAnotherVehicle() {
         catalogue(List.of(vehicle("MOTORCYCLE","30","kg","1","1","1","m"),vehicle("VAN","100","kg","2","2","2","m")),List.of());
-        quotation("MOTORCYCLE","30000");
         server.expect(requestTo(BASE+"/v3/quotations")).andRespond(withStatus(HttpStatus.UNAUTHORIZED));
         assertThrows(ShippingProviderException.class,()->provider.preview(route(10000,40,40,40)));server.verify();
     }
@@ -100,6 +125,90 @@ class LalamoveAutoVehicleTest {
         quotation("VAN","45000");
         assertEquals("VAN",provider.preview(route).path("provider_quote").path("serviceType").asText());server.verify();
     }
+    @Test void cacheExpiresAfterThirtySeconds() {
+        catalogue(List.of(vehicle("MOTORCYCLE","30","kg","1","1","1","m")),List.of());
+        quotation("MOTORCYCLE","30000");
+        catalogue(List.of(vehicle("MOTORCYCLE","30","kg","1","1","1","m")),List.of());
+        quotation("MOTORCYCLE","31000");
+        assertEquals(30000,provider.preview(route(10000,40,40,40)).path("total_fee").intValue());
+        when(clock.instant()).thenReturn(now.plusSeconds(29));
+        assertEquals(30000,provider.preview(route(10000,40,40,40)).path("total_fee").intValue());
+        when(clock.instant()).thenReturn(now.plusSeconds(30));
+        assertEquals(31000,provider.preview(route(10000,40,40,40)).path("total_fee").intValue());
+        server.verify();
+    }
+    @Test void cacheNeverOutlivesTheProviderQuotation() {
+        catalogue(List.of(vehicle("MOTORCYCLE","30","kg","1","1","1","m")),List.of());
+        quotation("MOTORCYCLE","MOTORCYCLE","30000",now.plusSeconds(5));
+        catalogue(List.of(vehicle("MOTORCYCLE","30","kg","1","1","1","m")),List.of());
+        quotation("MOTORCYCLE","31000");
+        provider.preview(route(10000,40,40,40));
+        when(clock.instant()).thenReturn(now.plusSeconds(5));
+        assertEquals(31000,provider.preview(route(10000,40,40,40)).path("total_fee").intValue());
+        server.verify();
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"from_latitude","to_longitude","weight","length","width","height"})
+    void changedRouteOrParcelCannotReuseCachedQuotation(String field) {
+        for(int i=0;i<2;i++) {
+            catalogue(List.of(vehicle("MOTORCYCLE","30","kg","1","1","1","m")),List.of());
+            quotation("MOTORCYCLE",Integer.toString(30000+i*1000));
+        }
+        provider.preview(route(10000,40,40,40));
+        var changed=route(10000,40,40,40);
+        changed.put(field,switch(field) {
+            case "from_latitude" -> new BigDecimal("10.778");
+            case "to_longitude" -> new BigDecimal("106.701");
+            case "weight" -> 10001;
+            default -> 41;
+        });
+        assertEquals(31000,provider.preview(changed).path("total_fee").intValue());
+        server.verify();
+    }
+    @Test void cachedResultsCannotBeModifiedByCallers() {
+        catalogue(List.of(vehicle("MOTORCYCLE","30","kg","1","1","1","m")),List.of());
+        quotation("MOTORCYCLE","30000");
+        var first=provider.preview(route(10000,40,40,40));
+        ((tools.jackson.databind.node.ObjectNode)first.path("provider_quote")).put("serviceType","VAN");
+        assertEquals("MOTORCYCLE",provider.preview(route(10000,40,40,40)).path("provider_quote").path("serviceType").asText());
+        server.verify();
+    }
+    @Test void failedRequestsAreNotCached() {
+        catalogue(List.of(vehicle("MOTORCYCLE","30","kg","1","1","1","m")),List.of());
+        server.expect(requestTo(BASE+"/v3/quotations")).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+        catalogue(List.of(vehicle("MOTORCYCLE","30","kg","1","1","1","m")),List.of());
+        quotation("MOTORCYCLE","30000");
+        assertThrows(LalamoveRequestException.class,()->provider.preview(route(10000,40,40,40)));
+        assertEquals(30000,provider.preview(route(10000,40,40,40)).path("total_fee").intValue());
+        server.verify();
+    }
+    @Test void bookingAndPaidVehicleRefreshAlwaysRequestFreshQuotations() {
+        catalogue(List.of(vehicle("MOTORCYCLE","30","kg","1","1","1","m")),List.of());
+        quotation("MOTORCYCLE","30000");
+        catalogue(List.of(vehicle("MOTORCYCLE","30","kg","1","1","1","m")),List.of());
+        quotation("MOTORCYCLE","31000");
+        quotation("MOTORCYCLE","32000");
+        var preview=provider.preview(route(10000,40,40,40));
+        var booking=route(10000,40,40,40);booking.put("client_order_code","SL-inspection");
+        assertEquals(31000,provider.preview(booking).path("total_fee").intValue());
+        var refresh=route(10000,40,40,40);refresh.put("provider_quote",preview.path("provider_quote"));
+        assertEquals(32000,provider.preview(refresh).path("total_fee").intValue());
+        server.verify();
+    }
+    @Test void simultaneousDuplicatePreviewsMakeOnlyOneCarrierQuotation() throws Exception {
+        catalogue(List.of(vehicle("MOTORCYCLE","30","kg","1","1","1","m")),List.of());
+        quotation("MOTORCYCLE","30000");
+        var start=new CountDownLatch(1);
+        try(var executor=Executors.newFixedThreadPool(4)) {
+            var calls=new ArrayList<Future<JsonNode>>();
+            for(int i=0;i<4;i++) calls.add(executor.submit(()->{
+                start.await();return provider.preview(route(10000,40,40,40));
+            }));
+            start.countDown();
+            for(var call:calls) assertEquals(30000,call.get(5,TimeUnit.SECONDS).path("total_fee").intValue());
+        }
+        server.verify();
+    }
     private void catalogue(List<Map<String,Object>> local,List<Map<String,Object>> foreign) {
         server.expect(requestTo(BASE+"/v3/cities")).andExpect(method(HttpMethod.GET)).andRespond(withSuccess(
             envelope(List.of(Map.of("locode","VN SGN","name","Ho Chi Minh & Nearby Regions","services",local),
@@ -107,9 +216,12 @@ class LalamoveAutoVehicleTest {
     }
     private void quotation(String key,String fee) { quotation(key,key,fee); }
     private void quotation(String key,String returnedKey,String fee) {
+        quotation(key,returnedKey,fee,now.plusSeconds(300));
+    }
+    private void quotation(String key,String returnedKey,String fee,Instant expiry) {
         server.expect(requestTo(BASE+"/v3/quotations")).andExpect(method(HttpMethod.POST))
             .andExpect(request->assertEquals(key,JSON.readTree(((MockClientHttpRequest)request).getBodyAsString()).path("data").path("serviceType").asText()))
-            .andRespond(withSuccess(envelope(Map.of("quotationId","quote-"+key,"serviceType",returnedKey,"expiresAt",Instant.now().plusSeconds(300).toString(),
+            .andRespond(withSuccess(envelope(Map.of("quotationId","quote-"+key,"serviceType",returnedKey,"expiresAt",expiry.toString(),
                 "priceBreakdown",Map.of("total",fee,"currency","VND"),"stops",List.of(Map.of("stopId","from"),Map.of("stopId","to")))),MediaType.APPLICATION_JSON));
     }
     private static Map<String,Object> vehicle(String key,String weight,String weightUnit,String l,String w,String h,String unit) {

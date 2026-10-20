@@ -4,7 +4,7 @@
 
 ## 1. Kết quả FE cần làm
 
-BUYER chỉ chọn địa chỉ nhận, xem phí và thanh toán. BE lấy thông số kiện hàng SELLER đã lưu, lọc phương tiện Lalamove theo thành phố, tải trọng và kích thước, lấy báo giá các loại xe phù hợp và chọn phí thấp nhất trong các phương án có thể báo giá.
+BUYER chỉ chọn địa chỉ nhận, xem phí và thanh toán. BE lấy thông số kiện hàng SELLER đã lưu, lọc phương tiện Lalamove theo thành phố, tải trọng và kích thước, ưu tiên xe có tải trọng nhỏ nhất đủ chở kiện hàng và dùng báo giá đầu tiên thành công.
 
 SELLER nhận đơn đã thanh toán → xác nhận đơn → chuẩn bị hàng → gọi tài xế. BUYER/SELLER theo dõi cùng vận đơn. Người test đổi trạng thái trên Sandbox; Production do tài xế Lalamove thao tác.
 
@@ -97,6 +97,8 @@ Thông thường đã lưu khi đăng ký seller trước eKYC: tái sử dụng
 GET /api/v1/shipping/pickup-address
 ```
 
+GET cho phép BUYER và SELLER đọc địa chỉ của chính tài khoản đăng nhập. Chưa có địa chỉ trả HTTP 200, success=true và không có trường data (quy ước bỏ field null của ApiResponse); FE hiển thị trạng thái chưa cấu hình. PUT vẫn chỉ dành cho SELLER; BUYER lưu địa chỉ qua luồng onboarding.
+
 Nếu seller cần cập nhật địa chỉ cho các báo giá mới:
 
 ```http
@@ -187,8 +189,10 @@ BE thực hiện:
 4. Đọc danh mục xe Lalamove của thành phố lấy hàng. Chỉ chọn xe có đủ thông tin tải trọng và kích thước với đơn vị xác định được.
 5. Quy đổi kg → gram và m → cm (có hỗ trợ đơn vị g/t, cm/mm theo dữ liệu catalogue), so sánh cả cân nặng lẫn ba chiều.
 6. Giữ chiều cao kiện hàng theo chiều đứng. Chỉ cho phép đổi chiều dài với chiều rộng; không tự đặt nằm tủ lạnh/máy giặt.
-7. Gọi báo giá các xe phù hợp, chọn tổng phí thấp nhất. Dịch vụ bị Lalamove xác định ngoài vùng phục vụ/không còn hợp lệ có thể bị loại; lỗi xác thực/mạng/hạn mức không được che giấu thành một báo giá “rẻ nhất”.
+7. Sắp xếp xe đủ điều kiện theo tải trọng tăng dần, gọi xe nhỏ nhất trước và dừng ngay khi có báo giá hợp lệ. Chỉ thử xe kế tiếp khi Lalamove trả 422 với ERR_OUT_OF_SERVICE_AREA hoặc ERR_INVALID_SERVICE_TYPE; lỗi xác thực/mạng/hạn mức được trả ngay cho FE. Không bảo đảm đây là giá thấp nhất của mọi loại xe.
 8. Lưu loại xe, phí, địa chỉ, kiện hàng và quote Lalamove vào snapshot.
+
+Báo giá tự động trùng tuyến, địa chỉ và kích thước/cân nặng được dùng lại trong tối đa 30 giây trên cùng một BE instance (tối đa 128 mục), luôn giới hạn bởi thời hạn quote Lalamove. Request đồng thời dùng chung kết quả; lỗi không được cache. Đổi tuyến hoặc kiện hàng tạo cache key mới. Khi đặt chuyến, BE vẫn lấy báo giá mới để tránh dùng lịch lấy hàng cũ.
 
 Response minh họa:
 
@@ -524,6 +528,7 @@ Webhook cần URL BE công khai truy cập được; localhost phải dùng tunn
 | 403 | Sai chủ đơn/quyền hoặc seller bị hạn chế; không retry vô hạn |
 | 404 | ID không tồn tại; tải lại dữ liệu liên quan |
 | 409 | Đọc message: quote hết hạn, dữ liệu đổi, chưa xác nhận, đã có vận đơn, phí tăng...; không gộp mọi 409 thành hết hạn quote |
+| 429 | Lalamove vượt hạn mức; giữ input và chờ trước khi thử lại, không retry ngay hoặc gọi dồn |
 | 502/503/504 | Provider/cấu hình/tạm lỗi mạng; giữ input, hiển thị retry có kiểm soát |
 
 Khi BE trả success=false, hiển thị message và errors nếu có; không coi payload lỗi là quote. Nút thanh toán/gọi tài xế có loading và khóa gửi lặp. Không log Bearer token, key, contact đầy đủ hoặc payload webhook vào console công khai.

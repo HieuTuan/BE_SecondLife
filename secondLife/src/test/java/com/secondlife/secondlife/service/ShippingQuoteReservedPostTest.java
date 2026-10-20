@@ -49,6 +49,27 @@ class ShippingQuoteReservedPostTest {
     }
 
     @Test
+    void checkoutQuoteStillRequiresTheSellerPickupAddress() {
+        var post=new Post();post.setId(UUID.randomUUID());post.setStatus("ACTIVE");
+        post.setPrice(BigDecimal.valueOf(100000));post.setTitle("Appliance");
+        post.setShippingWeight(10000);post.setShippingLength(40);post.setShippingWidth(40);post.setShippingHeight(40);
+        var seller=new User();seller.setId(UUID.randomUUID());post.setUser(seller);
+        when(posts.findById(post.getId())).thenReturn(Optional.of(post));
+        when(addresses.findById(seller.getId())).thenReturn(Optional.empty());
+        var delivery=new ShippingAddressRequest("Buyer","0912345678",BigDecimal.valueOf(21.0333),BigDecimal.valueOf(105.7937));
+        var request=new ShippingQuoteRequest(post.getId(),null,delivery);
+        var error=assertThrows(com.secondlife.secondlife.exception.BadRequestException.class,()->service.quote(UUID.randomUUID(),request));
+        assertEquals("Seller pickup address is not configured",error.getMessage());
+        verifyNoInteractions(provider,quotes,geocoding);
+    }
+    @Test
+    void missingPickupAddressReturnsEmptyForOnboarding() {
+        UUID userId = UUID.randomUUID();
+        when(addresses.findById(userId)).thenReturn(Optional.empty());
+        assertNull(service.pickup(userId));
+        verifyNoInteractions(mapper);
+    }
+    @Test
     void reservedPostWithoutNegotiationThrowsConflictException() {
         UUID buyerId = UUID.randomUUID();
         UUID sellerId = UUID.randomUUID();

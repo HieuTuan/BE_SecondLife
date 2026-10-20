@@ -19,6 +19,13 @@ class GlobalExceptionHandlerTest {
             .build();
 
     @Test
+    void carrierRateLimitReturns429InsteadOfBadGateway() throws Exception {
+        mockMvc.perform(get("/test/rate-limit"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Lalamove request failed (HTTP 429, ERR_RATE_LIMIT_EXCEEDED)"));
+    }
+    @Test
     void notFoundReturnsStandardErrorEnvelope() throws Exception {
         mockMvc.perform(get("/test/not-found"))
                 .andExpect(status().isNotFound())
@@ -49,6 +56,10 @@ class GlobalExceptionHandlerTest {
     @RestController
     @RequestMapping("/test")
     static class FailingController {
+        @GetMapping("/rate-limit")
+        void rateLimit() {
+            throw new LalamoveRequestException(429,"ERR_RATE_LIMIT_EXCEEDED",null);
+        }
         @GetMapping("/not-found")
         void notFound() {
             throw new NotFoundException("Missing item");

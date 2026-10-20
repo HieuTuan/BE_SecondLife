@@ -32,7 +32,8 @@ public class GlobalExceptionHandler {
     }
     @ExceptionHandler(ShippingProviderException.class)
     public ResponseEntity<ErrorResponse> handleShippingProvider(ShippingProviderException ex,HttpServletRequest request) {
-        HttpStatus status = ex.getUpstreamStatus()==503 ? HttpStatus.SERVICE_UNAVAILABLE :
+        HttpStatus status = ex.getUpstreamStatus()==429 ? HttpStatus.TOO_MANY_REQUESTS :
+                ex.getUpstreamStatus()==503 ? HttpStatus.SERVICE_UNAVAILABLE :
                 ex.getUpstreamStatus()==504 ? HttpStatus.GATEWAY_TIMEOUT : HttpStatus.BAD_GATEWAY;
         return ResponseEntity.status(status).body(ErrorResponse.of(ex.getMessage(),request.getRequestURI()));
     }

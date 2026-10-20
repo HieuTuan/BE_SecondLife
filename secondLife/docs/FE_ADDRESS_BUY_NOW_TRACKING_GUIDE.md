@@ -209,6 +209,8 @@ FE cần phân biệt HTTP thành công với hồ sơ `APPROVED`. Không gửi 
 GET /api/v1/shipping/pickup-address
 ```
 
+BUYER đang onboarding cũng được đọc địa chỉ của chính mình qua GET này. Nếu chưa có địa chỉ, BE trả HTTP 200 với success=true và không có data. PUT vẫn yêu cầu SELLER.
+
 Nếu cần cập nhật, dùng component chọn vị trí và API:
 
 ```http
@@ -277,7 +279,7 @@ POST /api/v1/shipping/quotes
 
 - Mua ngay: bỏ `negotiationId`.
 - Không gửi `serviceType` từ BUYER; BE tự xác định loại xe phù hợp.
-- BE lấy danh mục xe theo điểm lấy hàng, lọc tải trọng/kích thước và chọn báo giá thấp nhất trong các xe phù hợp.
+- BE lấy danh mục xe theo điểm lấy hàng, lọc tải trọng/kích thước, ưu tiên xe có tải trọng nhỏ nhất và dừng ở báo giá hợp lệ đầu tiên. Chỉ thử xe kế tiếp khi Lalamove từ chối tuyến/loại xe; không truy vấn mọi xe để so giá.
 - BE lookup địa chỉ nhận từ tọa độ, sử dụng địa chỉ lấy hàng của SELLER và kiện hàng của bài đăng.
 - Không dùng xe mặc định. Chi tiết lựa chọn, snapshot và xử lý lỗi: [FE_AUTO_VEHICLE_SHIPPING_GUIDE.md](FE_AUTO_VEHICLE_SHIPPING_GUIDE.md).
 
@@ -512,6 +514,7 @@ Các API shipping/onboarding/verification thường bọc `success`, `message`, 
 - 401: xử lý refresh token/đăng nhập lại theo luồng Auth hiện có.
 - 403: thông báo thiếu quyền hoặc không thuộc đơn.
 - 409: xung đột trạng thái, báo giá hết hạn/đã dùng, bài đã bán hoặc phí mới tăng; đọc message để xử lý đúng.
+- 429: Lalamove vượt hạn mức; giữ dữ liệu form và chờ trước khi thử lại, không tự gọi dồn.
 - 502/503/504: lỗi/không khả dụng/timeout của dịch vụ ngoài; giữ dữ liệu form. Với tạo đơn/vận đơn, tuân thủ quy tắc retry và đối soát, tránh tạo thao tác mới khi kết quả chưa rõ.
 - Response tạo shipment có thể HTTP 200 nhưng shipment thất bại: kiểm tra `orderCode`, `status`, `lastError`.
 

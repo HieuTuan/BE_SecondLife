@@ -41,11 +41,11 @@ public class ShippingController {
     public ApiResponse<ShippingAddress> savePickup(@AuthenticationPrincipal CustomUserDetails user,@Valid @RequestBody ShippingAddressRequest body) {
         return ApiResponse.success(quotes.savePickup(current.resolveUserId(user),geocoding.shipping(body)));
     }
-    @GetMapping("/pickup-address") @PreAuthorize("hasRole('SELLER')")
+    @GetMapping("/pickup-address") @PreAuthorize("hasAnyRole('SELLER', 'BUYER')")
     public ApiResponse<ShippingAddress> pickup(@AuthenticationPrincipal CustomUserDetails user) { return ApiResponse.success(quotes.pickup(current.resolveUserId(user))); }
     @PostMapping("/quotes") @PreAuthorize("hasRole('BUYER') or hasRole('SELLER')")
     @Operation(summary="Tự chọn xe phù hợp và lấy phí vận chuyển",
-        description="BUYER gửi bài đăng và địa chỉ nhận. BE lọc tải trọng/kích thước kiện hàng theo danh mục xe Lalamove, chọn báo giá thấp nhất. serviceType trong response do BE quyết định.")
+        description="BUYER gửi bài đăng và địa chỉ nhận. BE lọc tải trọng/kích thước kiện hàng theo danh mục xe Lalamove, ưu tiên xe có tải trọng nhỏ nhất đủ chở kiện hàng và lấy báo giá đầu tiên thành công. serviceType trong response do BE quyết định.")
     public ApiResponse<ShippingQuoteResponse> quote(@AuthenticationPrincipal CustomUserDetails user,@Valid @RequestBody ShippingQuoteRequest body) {
         return ApiResponse.success(quotes.quote(current.resolveUserId(user),body));
     }

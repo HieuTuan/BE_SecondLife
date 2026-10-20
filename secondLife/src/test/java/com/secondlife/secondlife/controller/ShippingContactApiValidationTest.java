@@ -16,6 +16,22 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class ShippingContactApiValidationTest {
+    @Test void missingPickupReturnsSuccessForTheAuthenticatedUserOnly() throws Exception {
+        var quotes=mock(ShippingQuoteService.class);
+        var current=mock(CurrentUserProvider.class);
+        var userId=java.util.UUID.randomUUID();
+        when(current.resolveUserId(null)).thenReturn(userId);
+        var mvc=MockMvcBuilders.standaloneSetup(new ShippingController(mock(ShippingCatalogService.class),quotes,
+            current,mock(ReverseGeocodingService.class)))
+            .setControllerAdvice(new GlobalExceptionHandler())
+            .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver()).build();
+        mvc.perform(get("/api/v1/shipping/pickup-address").param("userId",java.util.UUID.randomUUID().toString()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.data").doesNotExist());
+        verify(quotes).pickup(userId);
+        verifyNoMoreInteractions(quotes);
+    }
     @ParameterizedTest @ValueSource(strings={"0912345678","+84912345678","84912345678","02412345678"})
     void quoteAcceptsLocalAndInternationalVietnameseContacts(String phone) throws Exception {
         var mvc=MockMvcBuilders.standaloneSetup(new ShippingController(mock(ShippingCatalogService.class),mock(ShippingQuoteService.class),

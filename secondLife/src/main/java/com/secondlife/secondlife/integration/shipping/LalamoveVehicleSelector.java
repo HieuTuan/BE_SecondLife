@@ -17,7 +17,7 @@ final class LalamoveVehicleSelector {
         if(division==null) throw new BadRequestException("Điểm lấy hàng nằm ngoài khu vực vận chuyển được hỗ trợ");
         String locode=switch(division.city()) { case HANOI->"VN HAN";case DANANG->"VN DAD";case HO_CHI_MINH->"VN SGN"; };
         if(catalogue==null || !catalogue.isArray()) throw new ShippingProviderException("Lalamove returned an invalid vehicle catalogue");
-        Set<String> keys=new LinkedHashSet<>();
+        Map<String,BigDecimal> keys=new LinkedHashMap<>();
         for(var city:catalogue) {
             if(!locode.equals(city.path("locode").asText().strip().toUpperCase(Locale.ROOT).replaceAll("\\s+"," "))) continue;
             for(var service:city.path("services")) {
@@ -26,11 +26,11 @@ final class LalamoveVehicleSelector {
                 BigDecimal load=capacity(service.path("load"),true),l=capacity(service.path("dimensions").path("length"),false),
                     w=capacity(service.path("dimensions").path("width"),false),h=capacity(service.path("dimensions").path("height"),false);
                 if(load==null || l==null || w==null || h==null || weight.compareTo(load)>0 || height.compareTo(h)>0) continue;
-                if((length.compareTo(l)<=0 && width.compareTo(w)<=0) || (length.compareTo(w)<=0 && width.compareTo(l)<=0)) keys.add(key);
+                if((length.compareTo(l)<=0 && width.compareTo(w)<=0) || (length.compareTo(w)<=0 && width.compareTo(l)<=0)) keys.merge(key,load,BigDecimal::min);
             }
         }
         if(keys.isEmpty()) throw new BadRequestException("Không có loại xe Lalamove đủ tải trọng và kích thước cho kiện hàng tại điểm lấy hàng");
-        return List.copyOf(keys);
+        return keys.entrySet().stream().sorted(Map.Entry.comparingByValue()).map(Map.Entry::getKey).toList();
     }
     static void validateParcel(Map<String,Object> payload) {
         for(String field:List.of("weight","length","width","height")) packed(payload,field);

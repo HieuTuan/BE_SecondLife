@@ -59,7 +59,7 @@ public class ShippingQuoteServiceImpl implements ShippingQuoteService {
         addresses.save(row); return address;
     }
     @Transactional(readOnly=true) public ShippingAddress pickup(UUID userId) {
-        return mapper.readValue(addresses.findById(userId).orElseThrow(() -> new NotFoundException("Seller pickup address is not configured")).getAddressJson(),ShippingAddress.class);
+        return addresses.findById(userId).map(row -> mapper.readValue(row.getAddressJson(),ShippingAddress.class)).orElse(null);
     }
     @Transactional public ShippingParcel saveParcel(UUID sellerId,UUID postId,ShippingParcel parcel) {
         var post=posts.findByIdForUpdate(postId).orElseThrow(() -> new NotFoundException("Post not found"));
@@ -85,6 +85,7 @@ public class ShippingQuoteServiceImpl implements ShippingQuoteService {
             price=n.getOfferedPrice();
         }
         ShippingAddress sellerPickup=pickup(post.getUser().getId());
+        if (sellerPickup==null) throw new BadRequestException("Seller pickup address is not configured");
         ShippingAddress origin=sellerPickup;
         String leg="SELLER_TO_BUYER";
         var inspection=inspections.findByPostId(post.getId());

@@ -11,6 +11,7 @@ import java.math.BigDecimal;
 public interface ShippingQuoteService {
     ShippingAddress savePickup(UUID userId, ShippingAddress address);
 
+    /** Returns the current pickup address, or null when the user has not configured one. */
     ShippingAddress pickup(UUID userId);
 
     ShippingParcel saveParcel(UUID sellerId, UUID postId, ShippingParcel parcel);

@@ -5,6 +5,7 @@ import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.ShippingProviderException;
 import com.secondlife.secondlife.exception.LalamoveRequestException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -26,6 +27,7 @@ import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -43,8 +45,17 @@ public class LalamoveShippingProvider implements ShippingProvider {
     private final ObjectMapper mapper;
     private final LalamoveProperties properties;
     private volatile RestClient restClient;
+    private final Clock clock;
+    private final Map<JsonNode,CachedPreview> previews = new LinkedHashMap<>();
+    private record CachedPreview(JsonNode result,Instant validUntil) { }
 
+    @Autowired
     public LalamoveShippingProvider(RestClient.Builder builder, ObjectMapper mapper, LalamoveProperties properties) {
+        this(builder,mapper,properties,Clock.systemUTC());
+    }
+
+    public LalamoveShippingProvider(RestClient.Builder builder, ObjectMapper mapper, LalamoveProperties properties,Clock clock) {
+        this.clock = clock;
         this.builder = builder;
         this.mapper = mapper;
         this.properties = properties;
@@ -74,14 +85,36 @@ public class LalamoveShippingProvider implements ShippingProvider {
             serviceType=mapper.valueToTree(payload.get("provider_quote")).path("serviceType").asText();
         // Validate stops before catalogue requests; contacts/coordinates never reach unrelated calls.
         var stops=List.of(stop(payload,"from"),stop(payload,"to"));
-        if (serviceType.isBlank()) return automaticPreview(payload,stops);
+        if (serviceType.isBlank()) {
+            // Booking must obtain a fresh schedule, even if an identical preview was just cached.
+            if (payload.containsKey("client_order_code")) return automaticPreview(payload,stops);
+            return cachedAutomaticPreview(payload,stops);
+        }
         return previewForService(serviceType,stops);
+    }
+
+    // ponytail: serializes automatic previews within one instance; use per-key loading if throughput requires it.
+    private synchronized JsonNode cachedAutomaticPreview(Map<String,Object> payload,List<Map<String,Object>> stops) {
+        LalamoveVehicleSelector.validateParcel(payload);
+        var key=mapper.valueToTree(Map.of("stops",stops,"parcel",List.of(payload.get("weight"),payload.get("length"),
+            payload.get("width"),payload.get("height")),"market",properties.getMarket(),"language",properties.getLanguage()));
+        Instant now=clock.instant();
+        previews.entrySet().removeIf(entry -> !entry.getValue().validUntil().isAfter(now));
+        var cached=previews.get(key);
+        if(cached!=null) return cached.result().deepCopy();
+        JsonNode result=automaticPreview(payload,stops);
+        Instant expiry=Instant.parse(result.path("expires_at").asText());
+        Instant validUntil=clock.instant().plusSeconds(30);
+        if(expiry.isBefore(validUntil)) validUntil=expiry;
+        if(previews.size()>=128) previews.remove(previews.keySet().iterator().next());
+        previews.put(key,new CachedPreview(result.deepCopy(),validUntil));
+        return result;
     }
 
     private JsonNode automaticPreview(Map<String,Object> payload,List<Map<String,Object>> stops) {
         LalamoveVehicleSelector.validateParcel(payload);
         var candidates=LalamoveVehicleSelector.eligible(cities(),payload);
-        JsonNode best=null;
+
         for(String service:candidates) {
             JsonNode result;
             try { result=previewForService(service,stops); }
@@ -89,12 +122,11 @@ public class LalamoveShippingProvider implements ShippingProvider {
                 if(error.getUpstreamStatus()==422 && Set.of("ERR_OUT_OF_SERVICE_AREA","ERR_INVALID_SERVICE_TYPE").contains(error.getErrorCode()==null?"":error.getErrorCode())) continue;
                 throw error;
             }
-            if(best==null || result.path("total_fee").decimalValue().compareTo(best.path("total_fee").decimalValue())<0) best=result;
+            if(!Instant.parse(result.path("expires_at").asText()).isAfter(clock.instant()))
+                throw new ConflictException("Báo giá vận chuyển đã hết hạn; vui lòng lấy lại báo giá trước khi thanh toán");
+            return result;
         }
-        if(best==null) throw new BadRequestException("Lalamove chưa hỗ trợ tuyến giao hàng này với các loại xe phù hợp");
-        if(!Instant.parse(best.path("expires_at").asText()).isAfter(Instant.now()))
-            throw new ConflictException("Báo giá vận chuyển đã hết hạn; vui lòng lấy lại báo giá trước khi thanh toán");
-        return best;
+        throw new BadRequestException("Lalamove chưa hỗ trợ tuyến giao hàng này với các loại xe phù hợp");
     }
 
     private JsonNode previewForService(String serviceType,List<Map<String,Object>> stops) {
