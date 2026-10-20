@@ -12,7 +12,11 @@ class ReputationConfigurationTest {
             .run(c->assertNotNull(c.getStartupFailure()));
     }
     @Test void completeValidConfigurationStartsSuccessfully() {
-        runner.withPropertyValues("app.reputation.handover-deadline-hours=48","app.reputation.min-evaluated-orders=5","app.reputation.max-evidence-images=6")
-            .run(c->{assertNull(c.getStartupFailure()); assertEquals(5,c.getBean(ReputationProperties.class).minEvaluatedOrders());});
+        runner.withPropertyValues("app.reputation.handover-deadline-hours=48","app.reputation.min-evaluated-orders=5","app.reputation.max-evidence-images=6","app.reputation.fraud-restriction-threshold=2")
+            .run(c->{assertNull(c.getStartupFailure()); assertEquals(5,c.getBean(ReputationProperties.class).minEvaluatedOrders()); assertEquals(2,c.getBean(ReputationProperties.class).fraudRestrictionThreshold());});
+    }
+    @Test void invalidFraudRestrictionThresholdMustFailStartup() {
+        runner.withPropertyValues("app.reputation.handover-deadline-hours=48","app.reputation.min-evaluated-orders=5","app.reputation.max-evidence-images=6","app.reputation.fraud-restriction-threshold=1")
+            .run(c->assertNotNull(c.getStartupFailure()));
     }
 }
