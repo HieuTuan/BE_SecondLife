@@ -54,6 +54,9 @@ class UserServiceTest {
     @Mock
     private NotificationService notificationService;
 
+    @Mock
+    private SellerReputationService sellerReputationService;
+
     @InjectMocks
     private UserServiceImpl userService;
 
@@ -93,7 +96,7 @@ class UserServiceTest {
                 AccountStatus.ACTIVE, false, null, null, null, null, null,
                 null, null, null, null, null, null
         );
-        when(userMapper.toProfileResponse(user)).thenReturn(expected);
+        when(userMapper.toProfileResponse(user, null)).thenReturn(expected);
 
         UserProfileResponse result = userService.updateProfile(userId, request);
 

@@ -2,27 +2,47 @@ package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.config.ReputationProperties;
+import com.secondlife.secondlife.dto.request.ReportRequests.Create;
+import com.secondlife.secondlife.dto.request.ReportRequests.Decision;
+import com.secondlife.secondlife.dto.request.ReportRequests.ListingCreate;
+import com.secondlife.secondlife.dto.request.ReportRequests.ReasonCode;
+import com.secondlife.secondlife.dto.request.ReportRequests.ResolutionAction;
+import com.secondlife.secondlife.dto.request.ReportRequests.Resolve;
+import com.secondlife.secondlife.dto.request.ReportRequests.ResponsibleParty;
+import com.secondlife.secondlife.dto.request.ReportRequests.Status;
+import com.secondlife.secondlife.dto.request.ReportRequests.TargetType;
 import com.secondlife.secondlife.dto.response.ReportResponse;
 import com.secondlife.secondlife.entity.Order;
-import com.secondlife.secondlife.enums.OrderStatus;
-import com.secondlife.secondlife.exception.*;
+import com.secondlife.secondlife.exception.BadRequestException;
+import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.exception.ForbiddenException;
+import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.UserReportMapper;
-import com.secondlife.secondlife.repository.*;
+import com.secondlife.secondlife.repository.OrderRepository;
+import com.secondlife.secondlife.repository.PostRepository;
+import com.secondlife.secondlife.repository.UserReportRepository;
 import com.secondlife.secondlife.service.ListingReportNotifications;
+import com.secondlife.secondlife.service.OrderDisputeService;
 import com.secondlife.secondlife.service.ReportEvidenceService;
 import com.secondlife.secondlife.service.SellerReputationService;
 import com.secondlife.secondlife.service.UserReportService;
-import org.springframework.data.domain.*;
+
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
-import java.util.*;
-
-import static com.secondlife.secondlife.dto.request.ReportRequests.*;
+import java.time.Instant;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
 
 @Service("userReportService")
 public class UserReportServiceImpl implements UserReportService {
+    private final OrderDisputeService disputes;
     private final UserReportRepository reports;
     private final OrderRepository orders;
     private final PostRepository posts;
@@ -34,7 +54,8 @@ public class UserReportServiceImpl implements UserReportService {
     private final ObjectMapper json;
     public UserReportServiceImpl(UserReportRepository reports,OrderRepository orders,PostRepository posts,
             SellerReputationService reputation,ReputationProperties properties,
-            ReportEvidenceService evidence,ListingReportNotifications notifications,UserReportMapper mapper,ObjectMapper json) {
+            ReportEvidenceService evidence,ListingReportNotifications notifications,UserReportMapper mapper,ObjectMapper json,OrderDisputeService disputes) {
+        this.disputes=disputes;
         this.reports=reports; this.orders=orders; this.posts=posts; this.reputation=reputation;
         this.properties=properties; this.evidence=evidence; this.notifications=notifications;
         this.mapper=mapper; this.json=json;
@@ -63,14 +84,14 @@ public class UserReportServiceImpl implements UserReportService {
             return previous;
         }
         UUID postId,sellerId;
+        Instant acceptedAt=null;
         if ((request.postId()==null)==(request.orderId()==null)) throw new BadRequestException("Provide exactly one of postId or orderId");
         if (request.orderId()!=null) {
             if (request.reasonCode()==ReasonCode.DUPLICATE_LISTING || request.relatedPostId()!=null)
                 throw new BadRequestException("Duplicate listing reports and relatedPostId require a postId, not an orderId");
-            Order order=orders.findById(request.orderId()).orElseThrow(() -> new NotFoundException("Order not found"));
+            Order order=orders.findByIdForUpdate(request.orderId()).orElseThrow(() -> new NotFoundException("Order not found"));
             if (!order.getBuyer().getId().equals(reporterId)) throw new ForbiddenException("Only the buyer of this order can report it");
-            if (order.getStatus()==OrderStatus.PENDING_PAYMENT)
-                throw new ConflictException("An unpaid order cannot be reported as a purchase");
+            acceptedAt=disputes.open(order);
             postId=order.getPost().getId(); sellerId=order.getSeller().getId();
         } else {
             var post=posts.findById(request.postId()).orElseThrow(() -> new NotFoundException("Post not found"));
@@ -84,10 +105,10 @@ public class UserReportServiceImpl implements UserReportService {
         boolean pending=reports.hasPending(reporterId,postId,request.orderId(),request.reasonCode());
         if (pending) throw new ConflictException("A report for this target and reason is already awaiting review");
         UUID id=UUID.randomUUID();
-        reports.insert(id,reporterId,sellerId,postId,request,json.writeValueAsString(request.evidenceUrls()));
+        reports.insert(id,reporterId,sellerId,postId,request,json.writeValueAsString(request.evidenceUrls()),acceptedAt);
         evidence.bind(reporterId,id,request.evidenceUrls());
         var report=find(id,false);
-        if (report.orderId()==null) notifications.created(report);
+        notifications.created(report);
         return report;
     }
 
@@ -116,7 +137,7 @@ public class UserReportServiceImpl implements UserReportService {
             throw new ForbiddenException("You cannot review a report concerning yourself");
         reports.assign(id,reviewerId);
         var updated=find(id,false);
-        if (updated.orderId()==null) notifications.reviewStarted(updated);
+        notifications.reviewStarted(updated);
         return updated;
     }
     @Transactional
@@ -134,16 +155,18 @@ public class UserReportServiceImpl implements UserReportService {
         } else if (party==null || party==ResponsibleParty.NONE) throw new BadRequestException("A confirmed report requires responsibleParty SELLER, BUYER or CARRIER");
         if (report.status()==Status.CONFIRMED || report.status()==Status.DISMISSED) {
             if (report.status().name().equals(request.decision().name()) && report.responsibleParty()==party
-                    && request.reason().trim().equals(report.decisionReason())) return report;
+                    && request.reason().trim().equals(report.decisionReason())
+                    && request.resolutionAction()==report.resolutionAction()) return report;
             throw new ConflictException("A resolved report cannot be changed by retrying resolution");
         }
         if (report.status()!=Status.IN_REVIEW) throw new ConflictException("Start review before resolving this report");
         if (reviewerId.equals(report.sellerId()) || reviewerId.equals(report.reporterId())) throw new ForbiddenException("You cannot resolve a report concerning yourself");
-        reports.resolve(id,request.decision(),party,request.reason().trim());
-        if (request.decision()==Decision.CONFIRMED && party==ResponsibleParty.SELLER)
+        disputes.resolve(report,request,party);
+        if (request.decision()==Decision.CONFIRMED && party==ResponsibleParty.SELLER
+                && request.resolutionAction()!=ResolutionAction.RETURN_AND_REFUND)
             reputation.confirmSellerFault(report,reviewerId,request.reason().trim());
         var updated=find(id,false);
-        if (updated.orderId()==null) notifications.resolved(updated);
+        notifications.resolved(updated);
         return updated;
     }
     private void validateRelatedListing(Create request,UUID postId) {

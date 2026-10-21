@@ -23,6 +23,9 @@ import org.springframework.test.context.*;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
+import org.springframework.transaction.support.TransactionTemplate;
+import java.math.BigDecimal;
+import static org.hamcrest.Matchers.nullValue;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -65,6 +68,55 @@ class SellerReputationIntegrationTest {
             return new ReportEvidenceStorage.StoredImage("report-evidence/"+UUID.randomUUID(),"image/png",file.getSize());
         });
         org.mockito.Mockito.when(evidenceStorage.read(org.mockito.ArgumentMatchers.anyString())).thenReturn(new byte[]{1,2,3});
+    }
+
+    @Test void ownProfileIncludesReputationForSellerWithoutTransactions() throws Exception {
+        var seller = user("SELLER");
+        mvc.perform(get("/api/v1/users/me").header("Authorization", bearer(seller)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.id").value(seller.getId().toString()))
+            .andExpect(jsonPath("$.data.sellerReputation.sellerId").value(seller.getId().toString()))
+            .andExpect(jsonPath("$.data.sellerReputation.score").value(nullValue()))
+            .andExpect(jsonPath("$.data.sellerReputation.evaluatedOrders").value(0))
+            .andExpect(jsonPath("$.data.sellerReputation.assessmentStatus").value("NO_TRANSACTIONS"));
+    }
+
+    @Test void ownProfileUsesSameReputationAndPenaltiesAsReputationEndpoint() throws Exception {
+        var seller = user("SELLER");
+        var completed = order(seller, user("BUYER"), true);
+        recordGood(completed);
+        new TransactionTemplate(transactions).executeWithoutResult(tx ->
+            reputation.recordConfirmationPenalty(completed, "LATE", new BigDecimal("2.00")));
+
+        var profileResult = mvc.perform(get("/api/v1/users/me").header("Authorization", bearer(seller)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.sellerReputation.score").value(98.0))
+            .andExpect(jsonPath("$.data.sellerReputation.transactionScore").value(100.0))
+            .andExpect(jsonPath("$.data.sellerReputation.confirmationPenaltyPoints").value(2.0))
+            .andReturn();
+        var reputationResult = mvc.perform(get("/api/v1/seller/reputation/me").header("Authorization", bearer(seller)))
+            .andExpect(status().isOk()).andReturn();
+        assertEquals(mapper.readTree(reputationResult.getResponse().getContentAsString()).path("data"),
+            mapper.readTree(profileResult.getResponse().getContentAsString()).path("data").path("sellerReputation"));
+    }
+
+    @Test void buyerProfileRemainsAvailableWithoutSellerReputation() throws Exception {
+        var buyer = user("BUYER");
+        mvc.perform(get("/api/v1/users/me").header("Authorization", bearer(buyer)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.id").value(buyer.getId().toString()))
+            .andExpect(jsonPath("$.data.sellerReputation").doesNotExist());
+    }
+
+    @Test void updatingSellerProfilePreservesReputationInResponse() throws Exception {
+        var seller = user("SELLER");
+        recordGood(order(seller, user("BUYER"), true));
+        mvc.perform(patch("/api/v1/users/me").header("Authorization", bearer(seller))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"fullName\":\"Updated Seller\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.fullName").value("Updated Seller"))
+            .andExpect(jsonPath("$.data.sellerReputation.sellerId").value(seller.getId().toString()))
+            .andExpect(jsonPath("$.data.sellerReputation.score").value(100.0));
     }
 
     @Test void newSellerHasProvisionalScoreAndNoPublicPrivateData() throws Exception {

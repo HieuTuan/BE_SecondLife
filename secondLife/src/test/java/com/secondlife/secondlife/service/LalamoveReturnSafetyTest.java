@@ -8,6 +8,7 @@ import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.Shipment;
 import com.secondlife.secondlife.entity.ShippingQuote;
 import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.entity.UserReport;
 import com.secondlife.secondlife.enums.EscrowStatus;
 import com.secondlife.secondlife.enums.OrderStatus;
 import com.secondlife.secondlife.integration.shipping.ShippingProvider;
@@ -76,6 +77,7 @@ class LalamoveReturnSafetyTest {
 
         var order = order();
         order.setStatus(OrderStatus.DELIVERED);
+        order.setEscrowStatus(EscrowStatus.FROZEN);
         order.setShippingDeliveredAt(Instant.now().minusSeconds(300));
         order.setDeliveryAddress(mapper.writeValueAsString(buyerDelivery));
         var quote = new ShippingQuote();
@@ -95,10 +97,13 @@ class LalamoveReturnSafetyTest {
                 "expiresAt", Instant.now().plusSeconds(300).toString()))));
         when(lalamove.create(anyMap())).thenReturn(mapper.valueToTree(Map.of(
                 "order_code", "1234567890123456789", "status", "ASSIGNING_DRIVER", "total_fee", 28000)));
+        var disputes = mock(OrderDisputeService.class);
+        var decision = new UserReport(); decision.setId(UUID.randomUUID());
+        when(disputes.approvedReturn(eq(order), eq(decision.getId()))).thenReturn(decision);
         var service = new com.secondlife.secondlife.service.impl.ShipmentServiceImpl(shipments, mock(ShipmentEventRepository.class), orders,
                 mock(InspectionOrderRepository.class), quotes, mock(ShippingQuoteService.class), mock(com.secondlife.secondlife.service.ReverseGeocodingService.class), router,
-                mapper, wallets, transactions, mock(SystemWalletService.class),mock(SellerReputationService.class),new com.secondlife.secondlife.service.impl.ListingFingerprintImpl(), MapperTestSupport.mapper(ShipmentMapper.class));
-        var request = new CreateShipmentRequest(UUID.randomUUID(), "BUYER_TO_SELLER", null, null, "Approved dispute return");
+                mapper, wallets, transactions, mock(SystemWalletService.class),mock(SellerReputationService.class),new com.secondlife.secondlife.service.impl.ListingFingerprintImpl(), MapperTestSupport.mapper(ShipmentMapper.class), disputes);
+        var request = new CreateShipmentRequest(UUID.randomUUID(), "BUYER_TO_SELLER", null, null, "Approved dispute return", decision.getId());
 
         var first = service.createForOrder(UUID.randomUUID(), true, order.getId(), request);
         var replay = service.createForOrder(UUID.randomUUID(), true, order.getId(), request);
@@ -117,6 +122,8 @@ class LalamoveReturnSafetyTest {
         var storedRoute = mapper.readTree(rows.get(first.shipmentId()).getPayload());
         assertEquals(buyerDelivery, ShippingPayloads.storedAddress(storedRoute, "from"));
         assertEquals(sellerPickup, ShippingPayloads.storedAddress(storedRoute, "to"));
+        verify(disputes, times(2)).approvedReturn(order, decision.getId());
+        verify(disputes, times(2)).bindReturn(eq(order), eq(decision), any());
         verifyNoInteractions(wallets);
     }
 

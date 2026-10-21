@@ -31,6 +31,10 @@ public class EmailNotificationChannel implements NotificationChannel {
 
     @Override
     public void send(NotificationMessage message) {
+        if (message == null || message.recipient() == null) return;
+        if (message.channels() != null && !message.channels().contains(NotificationChannelType.EMAIL)) {
+            return;
+        }
         String recipientEmail = message.recipient().email();
         if (recipientEmail == null || recipientEmail.isBlank()) {
             log.warn("Cannot send email notification: recipient email is missing for type {}", message.type());

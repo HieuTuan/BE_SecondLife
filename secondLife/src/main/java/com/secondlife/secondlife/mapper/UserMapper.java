@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.mapper;
 
 import com.secondlife.secondlife.config.MapStructConfiguration;
+import com.secondlife.secondlife.dto.response.ReputationResponse;
 import com.secondlife.secondlife.dto.response.UserAdminResponse;
 import com.secondlife.secondlife.dto.response.UserProfileResponse;
 import com.secondlife.secondlife.dto.response.UserSummaryResponse;
@@ -26,8 +27,8 @@ public class UserMapper {
         return delegate.toSummaryResponse(user);
     }
 
-    public UserProfileResponse toProfileResponse(User user) {
-        return delegate.toProfileResponse(user);
+    public UserProfileResponse toProfileResponse(User user, ReputationResponse sellerReputation) {
+        return delegate.toProfileResponse(user, sellerReputation);
     }
 
     public UserAdminResponse toAdminResponse(User user) {
@@ -50,19 +51,21 @@ public class UserMapper {
         @Mapping(target = "gender", source = "profile.gender")
         UserSummaryResponse toSummaryResponse(User user);
 
-        @Mapping(target = "fullName", source = "profile.fullName")
-        @Mapping(target = "phone", source = "profile.phone")
-        @Mapping(target = "avatarUrl", source = "profile.avatarUrl")
-        @Mapping(target = "gender", source = "profile.gender")
-        @Mapping(target = "province", source = "profile.province")
-        @Mapping(target = "district", source = "profile.district")
-        @Mapping(target = "ward", source = "profile.ward")
-        @Mapping(target = "streetAddress", source = "profile.streetAddress")
-        @Mapping(target = "latitude", source = "profile.latitude")
-        @Mapping(target = "longitude", source = "profile.longitude")
+        @Mapping(target = "fullName", source = "user.profile.fullName")
+        @Mapping(target = "phone", source = "user.profile.phone")
+        @Mapping(target = "avatarUrl", source = "user.profile.avatarUrl")
+        @Mapping(target = "gender", source = "user.profile.gender")
+        @Mapping(target = "province", source = "user.profile.province")
+        @Mapping(target = "district", source = "user.profile.district")
+        @Mapping(target = "ward", source = "user.profile.ward")
+        @Mapping(target = "streetAddress", source = "user.profile.streetAddress")
+        @Mapping(target = "latitude", source = "user.profile.latitude")
+        @Mapping(target = "longitude", source = "user.profile.longitude")
         @Mapping(target = "roles", expression = "java(extractRoleCodes(user))")
         @Mapping(target = "permissions", expression = "java(extractPermissionCodes(user))")
-        UserProfileResponse toProfileResponse(User user);
+        @Mapping(target = "updatedAt", source = "user.updatedAt")
+        @Mapping(target = "sellerReputation", source = "sellerReputation")
+        UserProfileResponse toProfileResponse(User user, ReputationResponse sellerReputation);
 
         @Mapping(target = "fullName", source = "profile.fullName")
         @Mapping(target = "phone", source = "profile.phone")

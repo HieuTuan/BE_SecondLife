@@ -5,31 +5,47 @@ import com.secondlife.secondlife.dto.request.ReportRequests;
 import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.request.ShippingAddressRequest;
 import com.secondlife.secondlife.dto.response.ShipmentResponse;
-import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.entity.InspectionSealLog;
-import com.secondlife.secondlife.enums.*;
+import com.secondlife.secondlife.entity.Order;
+import com.secondlife.secondlife.entity.Shipment;
+import com.secondlife.secondlife.entity.ShipmentEvent;
+import com.secondlife.secondlife.entity.UserReport;
+import com.secondlife.secondlife.enums.EscrowStatus;
 import com.secondlife.secondlife.enums.NotificationType;
-import com.secondlife.secondlife.exception.*;
+import com.secondlife.secondlife.enums.OrderStatus;
+import com.secondlife.secondlife.exception.BadRequestException;
+import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.exception.ForbiddenException;
+import com.secondlife.secondlife.exception.LalamoveRequestException;
+import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.exception.ShippingProviderException;
 import com.secondlife.secondlife.integration.shipping.ShippingProvider;
 import com.secondlife.secondlife.mapper.ShipmentMapper;
 import com.secondlife.secondlife.mapper.ShippingPayloads;
-import com.secondlife.secondlife.repository.*;
+import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.InspectionSealLogRepository;
+import com.secondlife.secondlife.repository.OrderRepository;
+import com.secondlife.secondlife.repository.ShipmentEventRepository;
+import com.secondlife.secondlife.repository.ShipmentRepository;
+import com.secondlife.secondlife.repository.ShippingQuoteRepository;
 import com.secondlife.secondlife.service.ListingFingerprint;
 import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.service.OrderDisputeService;
 import com.secondlife.secondlife.service.ReverseGeocodingService;
 import com.secondlife.secondlife.service.SellerReputationService;
 import com.secondlife.secondlife.service.ShipmentService;
 import com.secondlife.secondlife.service.ShippingQuoteService;
 import com.secondlife.secondlife.service.SystemWalletService;
 import com.secondlife.secondlife.service.WalletService;
+
 import jakarta.persistence.LockModeType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
-import tools.jackson.databind.*;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.math.BigDecimal;
@@ -37,11 +53,17 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
 
 @Service("shipmentService")
 public class ShipmentServiceImpl implements ShipmentService {
     private final ShipmentMapper shipmentMapper;
+    private final OrderDisputeService disputes;
 
     private final ShipmentRepository shipments;
     private final ShipmentEventRepository events;
@@ -64,8 +86,8 @@ public class ShipmentServiceImpl implements ShipmentService {
                            InspectionOrderRepository inspections, ShippingQuoteRepository quotes, ShippingQuoteService quoteService,
                            ReverseGeocodingService geocoding, ShippingProvider provider, ObjectMapper mapper,
                            WalletService wallets, PlatformTransactionManager transactions,
-                           SystemWalletService systemWallet, SellerReputationService reputation, ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper) {
-        this(shipments, events, orders, inspections, quotes, quoteService, geocoding, provider, mapper, wallets, transactions, systemWallet, reputation, null, null, listingFingerprint, shipmentMapper);
+                           SystemWalletService systemWallet, SellerReputationService reputation, ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes) {
+        this(shipments, events, orders, inspections, quotes, quoteService, geocoding, provider, mapper, wallets, transactions, systemWallet, reputation, null, null, listingFingerprint, shipmentMapper, disputes);
     }
 
     @Autowired
@@ -76,8 +98,9 @@ public class ShipmentServiceImpl implements ShipmentService {
                            SystemWalletService systemWallet, SellerReputationService reputation,
                            @Autowired(required = false) NotificationService notificationService,
                            @Autowired(required = false) InspectionSealLogRepository sealLogs,
-                           ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper) {
+                           ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes) {
         this.shipmentMapper = shipmentMapper;
+        this.disputes = Objects.requireNonNull(disputes, "OrderDisputeService is required");
 
         this.shipments = shipments;
         this.events = events;
@@ -114,10 +137,13 @@ public class ShipmentServiceImpl implements ShipmentService {
         var quote=quotes.findById(order.getShippingQuoteId()).orElseThrow();
         Map<String,Object> payload=readMap(quote.getPayload());
         BigDecimal quotedFee=quote.getFee();
+        UserReport returnDecision=null;
         if ("BUYER_TO_SELLER".equals(request.leg())) {
             if (!staff || request.reason()==null || request.reason().isBlank()) throw new ForbiddenException("A STAFF/ADMIN return decision with reason is required");
             if (order.getShippingDeliveredAt()==null) throw new ConflictException("Outbound delivery must be confirmed before creating a buyer return");
             if (order.getEscrowStatus()!=EscrowStatus.HELD && order.getEscrowStatus()!=EscrowStatus.FROZEN) throw new ConflictException("Funds are already settled");
+            returnDecision=disputes.approvedReturn(order,request.reportId());
+            if (order.getEscrowStatus()!=EscrowStatus.FROZEN) throw new ConflictException("An approved return requires frozen escrow");
             var from=mapper.readValue(order.getDeliveryAddress(),ShippingAddress.class);
             var original=mapper.readTree(quote.getPayload());
             var to=mapper.readValue(quote.getSellerPickupAddress(),ShippingAddress.class);
@@ -138,7 +164,9 @@ public class ShipmentServiceImpl implements ShipmentService {
                     throw new ConflictException("Inspection center address must match the paid shipping quote");
             }
         }
-        return prepare(actor,orderId,null,order.getSeller().getId(),order.getBuyer().getId(),request,payload,quotedFee,quote.getProvider());
+        var prepared=prepare(actor,orderId,null,order.getSeller().getId(),order.getBuyer().getId(),request,payload,quotedFee,quote.getProvider());
+        if (returnDecision!=null) disputes.bindReturn(order,returnDecision,shipments.findById(prepared.id()).orElseThrow());
+        return prepared;
     }
 
     public ShipmentResponse createForInspection(UUID actor,boolean staff,UUID inspectionId,CreateShipmentRequest request) {
@@ -292,6 +320,8 @@ public class ShipmentServiceImpl implements ShipmentService {
                 && !(!buyerReturn && "RETURNED".equals(shipment.getStatus())))
             throw new ConflictException("Product must be physically returned before refund");
         var order=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();
+        UserReport returnDecision=buyerReturn?disputes.refundDecision(order,shipment,responsibleParty):null;
+        if (returnDecision!=null) responsibleParty=returnDecision.getResponsibleParty();
         String party=responsibleParty==null?"NONE":responsibleParty.name();
         if(order.getEscrowStatus()==EscrowStatus.REFUNDED) {
             if(order.getReturnResponsibleParty()!=null && !order.getReturnResponsibleParty().equals(party))
@@ -302,7 +332,8 @@ public class ShipmentServiceImpl implements ShipmentService {
         systemWallet.refund(order, order.getFinalPrice());
         wallets.processRefund(order.getBuyer().getId(),order.getFinalPrice(),order.getId());
         order.setStatus(OrderStatus.CANCELLED); order.setEscrowStatus(EscrowStatus.REFUNDED); order.setReturnResponsibleParty(party); orders.saveAndFlush(order);
-        reputation.recordClosedOrder(order,actor,reason,"SELLER".equals(party));
+        reputation.recordClosedOrder(order,actor,reason,returnDecision==null && "SELLER".equals(party));
+        if (returnDecision!=null) disputes.recordRefund(returnDecision,actor,order.getFinalPrice());
         shipment.setReason(reason); shipment.setRequestedBy(actor); shipments.save(shipment);
         // Do not re-publish returned/disputed goods automatically; the seller must resolve their condition.
         return shipmentMapper.toResponse(shipment);
@@ -429,8 +460,9 @@ public class ShipmentServiceImpl implements ShipmentService {
         if (Set.of(OrderStatus.COMPLETED,OrderStatus.CANCELLED).contains(order.getStatus())) return;
         boolean toBuyer=Set.of("SELLER_TO_BUYER","CENTER_TO_BUYER").contains(shipment.getLeg());
         if (toBuyer && "PICKED_UP".equals(status) && order.getShippingDeliveredAt()==null) {
+            boolean statusChanged = order.getStatus() != OrderStatus.SHIPPED;
             order.setStatus(OrderStatus.SHIPPED);
-            if (notificationService != null && order.getBuyer() != null) {
+            if (statusChanged && notificationService != null && order.getBuyer() != null) {
                 String code = order.getId().toString();
                 notificationService.notify(
                     order.getBuyer().getId(),
@@ -444,9 +476,10 @@ public class ShipmentServiceImpl implements ShipmentService {
             }
         }
         if (toBuyer && "COMPLETED".equals(status)) {
+            boolean statusChanged = order.getStatus() != OrderStatus.DELIVERED;
             order.setStatus(OrderStatus.DELIVERED);
             if (order.getShippingDeliveredAt()==null) order.setShippingDeliveredAt(shipment.getDeliveredAt());
-            if (notificationService != null) {
+            if (statusChanged && notificationService != null) {
                 String code = order.getId().toString();
                 if (order.getBuyer() != null) {
                     notificationService.notify(
@@ -547,7 +580,11 @@ public class ShipmentServiceImpl implements ShipmentService {
     private void freeze(Shipment shipment) {
         if (shipment.getOrderId()!=null) {
             var order=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();
-            if (order.getEscrowStatus()==EscrowStatus.HELD) { order.setEscrowStatus(EscrowStatus.FROZEN); orders.save(order); }
+            if (order.getEscrowStatus()==EscrowStatus.HELD || order.getEscrowStatus()==EscrowStatus.FROZEN) {
+                order.setEscrowStatus(EscrowStatus.FROZEN);
+                order.setShippingHold(true);
+                orders.save(order);
+            }
         }
     }
     private String canonicalLalamove(String status) {

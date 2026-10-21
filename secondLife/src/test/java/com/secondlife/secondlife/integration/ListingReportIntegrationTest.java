@@ -25,6 +25,7 @@ import org.springframework.test.context.*;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -106,6 +107,12 @@ class ListingReportIntegrationTest {
         var buyer=user("BUYER");var o=order(user("SELLER"),buyer,true);
         var request=body("DUPLICATE_LISTING");request.put("orderId",o.getId());submit(buyer,request).andExpect(status().isBadRequest());
     }
+    @Test void completedReleasedOrderCannotOpenANewPurchaseDispute() throws Exception {
+        var buyer=user("BUYER");var completed=order(user("SELLER"),buyer,true);
+        var request=body("OTHER");request.put("orderId",completed.getId());
+        submit(buyer,request).andExpect(status().isConflict());
+        assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM user_reports WHERE order_id=?",Integer.class,completed.getId()));
+    }
     @Test void ownUnpublishedAndUnauthenticatedReportsAreRejected() throws Exception {
         var seller=user("SELLER");var reporter=user("BUYER");var p=listing(seller);
         listingReport(seller,p.getId(),body("OTHER")).andExpect(status().isBadRequest());
@@ -143,7 +150,7 @@ class ListingReportIntegrationTest {
     @Test void listingQueueFilterDoesNotIncludeOrderDisputesAndIsPrivate() throws Exception {
         var staff=user("STAFF");var seller=user("SELLER");var reporter=user("BUYER");var p=listing(seller);
         listingReport(reporter,p.getId(),body("OTHER")).andExpect(status().isCreated());
-        var orderReport=body("OTHER");orderReport.put("orderId",order(seller,reporter,true).getId());
+        var orderReport=body("OTHER");orderReport.put("orderId",order(seller,reporter,false).getId());
         submit(reporter,orderReport).andExpect(status().isCreated());
         mvc.perform(get("/api/v1/reports/me?targetType=LISTING&page=0&size=10").header("Authorization",bearer(reporter)))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(1))
@@ -234,8 +241,9 @@ class ListingReportIntegrationTest {
     private Order order(User seller,User buyer,boolean completed) {
         var o=new Order(); o.setPost(listing(seller)); o.setSeller(seller); o.setBuyer(buyer);
         o.setFinalPrice(new java.math.BigDecimal("1000000"));
-        o.setStatus(completed?OrderStatus.COMPLETED:OrderStatus.PROCESSING);
+        o.setStatus(completed?OrderStatus.COMPLETED:OrderStatus.DELIVERED);
         o.setEscrowStatus(completed?EscrowStatus.RELEASED:EscrowStatus.HELD);
+        o.setShippingDeliveredAt(Instant.now().minusSeconds(60));
         return orders.saveAndFlush(o);
     }
     private void recordGood(Order order) {

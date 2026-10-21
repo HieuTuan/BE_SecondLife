@@ -322,13 +322,24 @@ class LalamoveShippingIntegrationTest {
         assertMoney(new BigDecimal("950000"), balance(f.seller()));
     }
 
-    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"SELLER","BUYER","CARRIER","NONE"})
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"SELLER","BUYER","CARRIER"})
     void approvedReturnFreezesEscrowAndRefundsProductWithoutPayingSellerOrCommission(String responsibleParty) throws Exception {
         Fixture f = fixture(); User admin = user("ADMIN", BigDecimal.ZERO);
         JsonNode before = systemWallet(admin); UUID id = deliveredOrder(f);
+        JsonNode report = tree(mvc.perform(post("/api/v1/reports").header("Authorization", bearer(f.buyer()))
+                .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("requestId", UUID.randomUUID(), "orderId", id,
+                        "reasonCode", "MISLEADING_DESCRIPTION", "description", "Delivered product differs from its listing", "evidenceUrls", List.of()))))
+                .andExpect(status().isCreated()).andReturn()).path("data");
+        UUID reportId = UUID.fromString(report.path("id").asText());
+        mvc.perform(post("/api/v1/staff/reports/" + reportId + "/start-review").header("Authorization", bearer(admin)))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/v1/staff/reports/" + reportId + "/resolve").header("Authorization", bearer(admin))
+                .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("decision", "CONFIRMED", "responsibleParty", responsibleParty,
+                        "reason", "Staff approved the product return", "resolutionAction", "RETURN_AND_REFUND"))))
+                .andExpect(status().isOk());
         JsonNode returned = tree(mvc.perform(post("/api/v1/orders/" + id + "/shipments")
                 .header("Authorization", bearer(admin)).contentType(MediaType.APPLICATION_JSON)
-                .content(body(Map.of("requestId", UUID.randomUUID(), "leg", "BUYER_TO_SELLER", "reason", "Approved product return"))))
+                .content(body(Map.of("requestId", UUID.randomUUID(), "leg", "BUYER_TO_SELLER", "reason", "Approved product return", "reportId", reportId))))
                 .andExpect(status().isOk()).andReturn()).path("data");
         assertOrder(id, "DELIVERED", "FROZEN");
         deliveredAt(id, Instant.now().minus(Duration.ofHours(49)));

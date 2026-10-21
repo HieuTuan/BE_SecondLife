@@ -1,9 +1,17 @@
 package com.secondlife.secondlife.entity;
-import jakarta.persistence.*;
-import lombok.*;
-import java.util.UUID;
-import java.time.Instant;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.UUID;
+
 @Entity @Table(name="shipments") @Getter @Setter @NoArgsConstructor
 public class Shipment {
     @Id private UUID id;
@@ -13,6 +21,7 @@ public class Shipment {
     private Instant lastReconciledAt;
     private UUID orderId;
     private UUID inspectionOrderId;
+    @Column(name="report_id") private UUID reportId;
     @Column(nullable=false) private UUID sellerId;
     private UUID buyerId;
     @Column(nullable=false) private String leg;

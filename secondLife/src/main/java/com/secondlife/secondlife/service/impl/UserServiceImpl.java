@@ -5,6 +5,7 @@ import com.secondlife.secondlife.dto.request.AdminStatusUpdateRequest;
 import com.secondlife.secondlife.dto.request.ChangePasswordRequest;
 import com.secondlife.secondlife.dto.request.CreateInspectionCenterRequest;
 import com.secondlife.secondlife.dto.request.UpdateProfileRequest;
+import com.secondlife.secondlife.dto.response.ReputationResponse;
 import com.secondlife.secondlife.dto.response.UserAdminResponse;
 import com.secondlife.secondlife.dto.response.UserProfileResponse;
 import com.secondlife.secondlife.dto.response.UserSummaryResponse;
@@ -20,6 +21,7 @@ import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.service.SellerReputationService;
 import com.secondlife.secondlife.service.TokenService;
 import com.secondlife.secondlife.service.UserService;
 
@@ -52,13 +54,14 @@ public class UserServiceImpl implements UserService {
     private final TokenService tokenService;
     private final UserMapper userMapper;
     private final NotificationService notificationService;
+    private final SellerReputationService sellerReputationService;
 
     @Override
     @Transactional(readOnly = true)
     public UserProfileResponse getProfile(UUID userId) {
         User user = userRepository.findByIdWithAuthorities(userId)
                 .orElseThrow(() -> new NotFoundException("User not found with id: " + userId));
-        return userMapper.toProfileResponse(user);
+        return profileResponse(user);
     }
 
     @Override
@@ -106,7 +109,13 @@ public class UserServiceImpl implements UserService {
 
         User savedUser = userRepository.save(user);
         log.info("Profile updated for user: {}", savedUser.getEmail());
-        return userMapper.toProfileResponse(savedUser);
+        return profileResponse(savedUser);
+    }
+
+    private UserProfileResponse profileResponse(User user) {
+        ReputationResponse sellerReputation = user.hasRole(RoleCode.SELLER.name())
+                ? sellerReputationService.get(user.getId()) : null;
+        return userMapper.toProfileResponse(user, sellerReputation);
     }
 
     @Override

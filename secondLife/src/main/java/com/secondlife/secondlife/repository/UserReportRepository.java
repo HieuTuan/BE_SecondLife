@@ -1,10 +1,10 @@
 package com.secondlife.secondlife.repository;
 
+import com.secondlife.secondlife.config.JpaRepositoryConfiguration.RefreshOperations;
 import com.secondlife.secondlife.dto.request.ReportRequests.Create;
 import com.secondlife.secondlife.dto.request.ReportRequests.Decision;
 import com.secondlife.secondlife.dto.request.ReportRequests.ReasonCode;
 import com.secondlife.secondlife.dto.request.ReportRequests.ResponsibleParty;
-import com.secondlife.secondlife.config.JpaRepositoryConfiguration.RefreshOperations;
 import com.secondlife.secondlife.entity.UserReport;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
@@ -14,6 +14,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -43,15 +44,31 @@ public interface UserReportRepository extends JpaRepository<UserReport, UUID>, R
     boolean hasPending(@Param("reporterId") UUID reporterId, @Param("postId") UUID postId,
             @Param("orderId") UUID orderId, @Param("reason") ReasonCode reason);
 
+    @Query(value = """
+            SELECT EXISTS(SELECT 1 FROM user_reports WHERE order_id=:orderId
+                AND (status IN ('OPEN','IN_REVIEW')
+                    OR (status='CONFIRMED' AND resolution_action='RETURN_AND_REFUND' AND refunded_at IS NULL)))
+            """, nativeQuery = true)
+    boolean hasOrderHold(@Param("orderId") UUID orderId);
+
+    @Query(value = """
+            SELECT EXISTS(SELECT 1 FROM user_reports WHERE order_id=:orderId AND id<>:excludedReportId
+                AND status='CONFIRMED' AND resolution_action='RETURN_AND_REFUND')
+            """, nativeQuery = true)
+    boolean hasApprovedReturn(@Param("orderId") UUID orderId, @Param("excludedReportId") UUID excludedReportId);
+
+    Optional<UserReport> findByReturnShipmentId(UUID shipmentId);
+
     @Modifying
     @Query(value = """
             INSERT INTO user_reports(id,reporter_id,request_id,seller_id,post_id,order_id,reason_code,description,evidence_urls,related_post_id,status,created_at,updated_at)
             VALUES (:id,:reporterId,:#{#request.requestId()},:sellerId,:postId,:#{#request.orderId()},
                 :#{#request.reasonCode().name()},:#{#request.description().trim()},CAST(:evidenceJson AS JSONB),
-                :#{#request.relatedPostId()},'OPEN',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+                :#{#request.relatedPostId()},'OPEN',COALESCE(CAST(:acceptedAt AS TIMESTAMPTZ),CURRENT_TIMESTAMP),COALESCE(CAST(:acceptedAt AS TIMESTAMPTZ),CURRENT_TIMESTAMP))
             """, nativeQuery = true)
     void insert(@Param("id") UUID id, @Param("reporterId") UUID reporterId, @Param("sellerId") UUID sellerId,
-            @Param("postId") UUID postId, @Param("request") Create request, @Param("evidenceJson") String evidenceJson);
+            @Param("postId") UUID postId, @Param("request") Create request, @Param("evidenceJson") String evidenceJson,
+            @Param("acceptedAt") Instant acceptedAt);
 
     @Modifying
     @Query(value = "UPDATE user_reports SET status='IN_REVIEW',reviewer_id=:reviewerId,updated_at=CURRENT_TIMESTAMP WHERE id=:id", nativeQuery = true)

@@ -132,6 +132,9 @@ public class NotificationServiceImpl implements NotificationService {
                         payload
                 );
                 for (NotificationChannel channel : channels) {
+                    if (notifMsg.channels() != null && !notifMsg.channels().contains(channel.getChannelType())) {
+                        continue;
+                    }
                     try {
                         channel.send(notifMsg);
                     } catch (Exception ex) {

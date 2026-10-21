@@ -1,6 +1,11 @@
 package com.secondlife.secondlife.dto.request;
-import jakarta.validation.constraints.*;
+
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -19,6 +24,7 @@ public final class ReportRequests {
     public enum Status { OPEN, IN_REVIEW, CONFIRMED, DISMISSED }
     public enum Decision { CONFIRMED, DISMISSED }
     public enum ResponsibleParty { SELLER, BUYER, CARRIER, NONE }
+    public enum ResolutionAction { NONE, RETURN_AND_REFUND }
     public record Create(@NotNull UUID requestId,
             @Schema(description = "Provide exactly one of postId or orderId") UUID postId,
             @Schema(description = "Only this order's buyer may report it") UUID orderId,
@@ -36,6 +42,15 @@ public final class ReportRequests {
     }
     public record Resolve(@NotNull Decision decision,
             @Schema(description = "Required for CONFIRMED; only SELLER affects seller reputation") ResponsibleParty responsibleParty,
-            @NotBlank @Size(max=2000) String reason) { }
+            @NotBlank @Size(max=2000) String reason,
+            @Schema(description = "Defaults to NONE; RETURN_AND_REFUND approves an order dispute return") ResolutionAction resolutionAction) {
+        public Resolve {
+            if (resolutionAction == null) resolutionAction = ResolutionAction.NONE;
+        }
+
+        public Resolve(Decision decision, ResponsibleParty responsibleParty, String reason) {
+            this(decision, responsibleParty, reason, ResolutionAction.NONE);
+        }
+    }
     public record LiftRestriction(@NotBlank @Size(max=2000) String reason) { }
 }

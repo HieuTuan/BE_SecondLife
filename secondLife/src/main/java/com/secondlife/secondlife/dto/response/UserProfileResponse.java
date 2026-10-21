@@ -1,6 +1,9 @@
 package com.secondlife.secondlife.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.secondlife.secondlife.enums.AccountStatus;
+import com.secondlife.secondlife.enums.Gender;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.Instant;
 import java.util.Set;
@@ -25,12 +28,15 @@ public record UserProfileResponse(
     String streetAddress,
     Double latitude,
     Double longitude,
-    com.secondlife.secondlife.enums.Gender gender
+    Gender gender,
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Schema(description = "Current seller reputation; omitted for users without the SELLER role")
+    ReputationResponse sellerReputation
 ) {
     public UserProfileResponse(UUID id,String email,String fullName,String phone,String avatarUrl,AccountStatus accountStatus,
             boolean emailVerified,Set<String> roles,Set<String> permissions,Instant createdAt,Instant updatedAt,Instant lastLoginAt,
             String province,String district,String ward,String streetAddress,Double latitude,Double longitude) {
         this(id,email,fullName,phone,avatarUrl,accountStatus,emailVerified,roles,permissions,createdAt,updatedAt,lastLoginAt,
-                province,district,ward,streetAddress,latitude,longitude,null);
+                province,district,ward,streetAddress,latitude,longitude,null,null);
     }
 }
