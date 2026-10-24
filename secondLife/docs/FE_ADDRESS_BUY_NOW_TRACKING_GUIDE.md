@@ -2,6 +2,8 @@
 
 ## 1. Phạm vi và trạng thái hiện tại
 
+Cập nhật 24/10/2026: contract `GET /api/v1/shipping/vehicles` dành cho mục **“Xem thông tin vận chuyển”** và validation ngay khi nhập kiện hàng được mô tả đầy đủ trong [FE_SHIPPING_VEHICLE_CATALOGUE_GUIDE.md](FE_SHIPPING_VEHICLE_CATALOGUE_GUIDE.md). Hướng dẫn này vẫn mô tả luồng địa chỉ, quote và checkout hiện có; việc bổ sung giao diện danh mục xe là công việc FE cần thực hiện.
+
 Tài liệu mô tả contract BE hiện tại cho luồng:
 
 ```text
@@ -234,10 +236,11 @@ PUT /api/v1/posts/{postId}/shipping-package
 }
 ```
 
-- `weight`: gram; giới hạn BE 1–50.000.
-- `length`, `width`, `height`: cm; mỗi chiều 1–200.
-- Giới hạn chung BE không đồng nghĩa mọi loại xe Lalamove đều chở được kiện hàng đó.
-- Nếu thiếu thông tin kiện hàng, BE chưa tính phí được.
+- `weight`: số nguyên dương, đơn vị gram.
+- `length`, `width`, `height`: số nguyên dương, đơn vị cm.
+- Không áp trần cố định 50 kg hoặc 200 cm mỗi chiều tại BE/FE. BE kiểm tra tải trọng và kích thước từ catalogue từng loại xe Lalamove theo điểm lấy hàng khi lấy báo giá; chỉ đổi chiều dài/rộng, giữ kiện đứng theo chiều cao.
+- Lưu thông số thành công chỉ xác nhận dữ liệu hợp lệ, chưa xác nhận có dịch vụ vận chuyển. Nếu thiếu thông tin kiện hàng, BE chưa tính phí được.
+- Nếu không có xe đủ sức chở hoặc tuyến không được hỗ trợ, API quote trả HTTP 400, `success=false`, `message` nêu rõ lý do và `errors=[]`. FE hiển thị `message`, xóa quote cũ và không cho checkout khi chưa có quote hợp lệ. Xem các [response lỗi minh họa](FE_AUTO_VEHICLE_SHIPPING_GUIDE.md#không-có-xe-hoặc-tuyến-phù-hợp).
 
 ## 6. BUYER xem bài đăng và chọn địa chỉ nhận
 
@@ -510,7 +513,7 @@ FE sử dụng `sellerPayout`, `platformCommission` từ BE để hiển thị k
 
 Các API shipping/onboarding/verification thường bọc `success`, `message`, `data`. API đơn hàng và ví có các response DTO trực tiếp; adapter FE cần xử lý theo từng contract, không áp dụng `response.data` cho mọi API.
 
-- 400: hiển thị lỗi trường từ `errors[]`; cho người dùng sửa dữ liệu.
+- 400: hiển thị lỗi trường từ `errors[]`; nếu `errors` rỗng thì hiển thị `message`, đặc biệt khi không có xe đủ tải trọng/kích thước hoặc tuyến chưa được hỗ trợ; không cho checkout nếu chưa có quote hợp lệ.
 - 401: xử lý refresh token/đăng nhập lại theo luồng Auth hiện có.
 - 403: thông báo thiếu quyền hoặc không thuộc đơn.
 - 409: xung đột trạng thái, báo giá hết hạn/đã dùng, bài đã bán hoặc phí mới tăng; đọc message để xử lý đúng.

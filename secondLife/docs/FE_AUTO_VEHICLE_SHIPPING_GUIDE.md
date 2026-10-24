@@ -1,6 +1,8 @@
 # FE — Tự chọn xe, tính phí vận chuyển, mua hàng và tracking Lalamove
 
-Đối chiếu code BE ngày 16/10/2026. Dùng tài liệu này cho phần vận chuyển tự động mới; nó thay thế các hướng dẫn cũ yêu cầu BUYER truyền serviceType hoặc dùng xe mặc định.
+Đối chiếu luồng tự chọn xe BE; cập nhật catalogue chuẩn hóa ngày 24/10/2026. Dùng tài liệu này cho phần vận chuyển tự động; nó thay thế các hướng dẫn cũ yêu cầu BUYER truyền serviceType hoặc dùng xe mặc định.
+
+FE triển khai mục ẩn/hiện **“Xem thông tin vận chuyển”**, hiển thị giới hạn từng xe và đánh dấu xe phù hợp tại form đăng bài theo [hướng dẫn catalogue xe chi tiết](FE_SHIPPING_VEHICLE_CATALOGUE_GUIDE.md). API mới là `GET /api/v1/shipping/vehicles`, hỗ trợ lọc theo tọa độ lấy hàng; `/cities` và `/provinces` vẫn giữ cấu trúc catalogue thô. Phần giao diện mới do FE triển khai, chưa nằm trong thay đổi BE này.
 
 ## 1. Kết quả FE cần làm
 
@@ -78,14 +80,18 @@ PUT /api/v1/posts/{postId}/shipping-package
 }
 ```
 
-| Field | Đơn vị | Giới hạn BE hiện tại |
+| Field | Đơn vị | Kiểm tra đầu vào |
 |---|---|---|
-| weight | gram, số nguyên | 1–50000 g (tối đa 50 kg) |
-| length | cm, số nguyên | 1–200 |
-| width | cm, số nguyên | 1–200 |
-| height | cm, số nguyên | 1–200 |
+| weight | gram, số nguyên | Lớn hơn hoặc bằng 1 |
+| length | cm, số nguyên | Lớn hơn hoặc bằng 1 |
+| width | cm, số nguyên | Lớn hơn hoặc bằng 1 |
+| height | cm, số nguyên | Lớn hơn hoặc bằng 1 |
 
-Đây là giới hạn nhập kiện hàng của SecondLife hiện tại, không phải giới hạn mọi xe Lalamove. Không hiển thị “Lalamove chỉ chở tối đa 50 kg”. Nếu UI nhập kg, quy đổi sang gram trước khi gửi; không gửi 12 để biểu thị 12 kg. Các số đo phải gồm bao bì, không chỉ kích thước sản phẩm trần.
+SecondLife không áp trần cố định 50 kg hoặc 200 cm mỗi chiều. DTO và bước tạo payload chỉ kiểm tra số đo dương; khả năng vận chuyển được kiểm tra khi lấy báo giá dựa trên `load`, `dimensions` của từng dịch vụ trong catalogue `GET /v3/cities` của Lalamove tại điểm lấy hàng. Chỉ xét xe có tải trọng/kích thước và đơn vị hợp lệ. Tham khảo [Get City Info của Lalamove](https://developers.lalamove.com/#get-city-info).
+
+Lưu kiện hàng thành công không đồng nghĩa tuyến giao hàng đã được hỗ trợ. Ví dụ kiện 100 kg, dài 220 cm được lưu, sau đó BE chỉ lấy báo giá từ xe đủ sức chở kiện; nếu không có xe phù hợp hoặc tuyến không khả dụng thì trả lỗi rõ ràng ở bước quote. Không hardcode giới hạn hoặc danh sách xe ở FE; không dùng phân loại xe ước lượng trên giao diện để quyết định cho phép vận chuyển.
+
+Nếu UI nhập kg, quy đổi sang gram trước khi gửi; không gửi 12 để biểu thị 12 kg. Các số đo phải gồm bao bì, không chỉ kích thước sản phẩm trần. Các field vẫn là số nguyên 32 bit trong API/DB; số vượt kiểu dữ liệu hoặc JSON sai kiểu bị trả HTTP 400, đây không phải tải trọng tối đa của Lalamove.
 
 Bài DRAFT/REJECTED/ACTIVE/PENDING_INSPECTION có thể sửa kiện theo điều kiện BE. Bài đã bán không được sửa; API trả 409. Nếu kiện đổi sau khi BUYER lấy quote nhưng chưa đặt đơn, quote cũ bị chặn tại checkout, BUYER phải lấy quote mới.
 
@@ -217,6 +223,28 @@ Response minh họa:
 ```
 
 Thời gian/ID/phí trên chỉ minh họa; dùng response thật. API có thể bỏ field null. Timestamp Z là UTC, hiển thị theo múi giờ người dùng.
+
+### Không có xe hoặc tuyến phù hợp
+
+`POST /api/v1/shipping/quotes` trả HTTP 400 theo `ErrorResponse` hiện có khi không có xe đủ tải trọng/kích thước tại điểm lấy hàng:
+
+```json
+{
+  "success": false,
+  "message": "Không có loại xe Lalamove đủ tải trọng và kích thước cho kiện hàng tại điểm lấy hàng. Giới hạn từng loại xe tại điểm lấy hàng (dài x rộng x cao): MOTORCYCLE: tối đa 30 kg, 50 x 40 x 50 cm; VAN: tối đa 500 kg, 170 x 120 x 120 cm",
+  "path": "/api/v1/shipping/quotes",
+  "errors": [],
+  "timestamp": "2026-10-24T10:00:00"
+}
+```
+
+Phần giới hạn trong `message` được tạo từ các xe có tải trọng/kích thước xác minh được của đúng thành phố lấy hàng, quy đổi sang kg/cm. Không lấy xe thành phố khác, không lấy dữ liệu thiếu/sai đơn vị, không gộp tải trọng lớn nhất của một xe với kích thước lớn nhất của xe khác. Nếu catalogue không có xe với thông số xác minh được thì chỉ trả thông báo không có xe phù hợp, không tự dựng mức tối đa. Các mức trong ví dụ chỉ minh họa, không dùng để hardcode ở FE; có xe trong catalogue chưa bảo đảm tuyến cụ thể khả dụng.
+
+Nếu có xe đủ sức chở nhưng tất cả báo giá đều trả 422 với `ERR_OUT_OF_SERVICE_AREA` hoặc `ERR_INVALID_SERVICE_TYPE`, BE trả HTTP 400 cùng cấu trúc trên và `message` là `Lalamove chưa hỗ trợ tuyến giao hàng này với các loại xe phù hợp`.
+
+Điểm lấy hàng ngoài khu vực hệ thống hỗ trợ trả HTTP 400 với `message` là `Điểm lấy hàng nằm ngoài khu vực vận chuyển được hỗ trợ`. FE phải hiển thị `message` ngay cả khi `errors` rỗng, xóa quote cũ và chặn checkout cho đến khi có quote hợp lệ; người dùng cần sửa thông tin kiện hàng hoặc địa chỉ phù hợp. Không tự gán xe máy, phí 0 hay coi lưu kiện thành công là đã hỗ trợ giao hàng.
+
+Lỗi xác thực, hạn mức, mạng hoặc catalogue không hợp lệ vẫn theo status lỗi dịch vụ tương ứng (429/502/503/504); không diễn giải các lỗi này thành kiện hàng vượt tải trọng. Các ID, phí và timestamp trong tài liệu chỉ minh họa.
 
 ### FE hiển thị kết quả
 
@@ -523,7 +551,7 @@ Webhook cần URL BE công khai truy cập được; localhost phải dùng tunn
 
 | HTTP | Hướng xử lý |
 |---|---|
-| 400 | Hiển thị lỗi input/kiện/vùng phục vụ; cho sửa đúng trường |
+| 400 | Hiển thị `message` khi kiện/tuyến chưa được hỗ trợ, kể cả `errors=[]`; nếu có lỗi trường trong `errors[]` thì hiển thị cạnh trường; chưa cho checkout khi thiếu quote hợp lệ |
 | 401 | Refresh/đăng nhập lại theo luồng Auth |
 | 403 | Sai chủ đơn/quyền hoặc seller bị hạn chế; không retry vô hạn |
 | 404 | ID không tồn tại; tải lại dữ liệu liên quan |
@@ -534,4 +562,4 @@ Webhook cần URL BE công khai truy cập được; localhost phải dùng tunn
 Khi BE trả success=false, hiển thị message và errors nếu có; không coi payload lỗi là quote. Nút thanh toán/gọi tài xế có loading và khóa gửi lặp. Không log Bearer token, key, contact đầy đủ hoặc payload webhook vào console công khai.
 BE cần restart sau cập nhật; Swagger reload để bỏ serviceType khỏi request. Cấu hình LALAMOVE_SERVICE_TYPE đã bỏ, không dùng nó để quyết định xe. Không cần migration DB mới riêng cho tính năng tự chọn xe vì snapshot dùng payload hiện có.
 
-Thay đổi BE đã được kiểm tra bằng 114 test liên quan và đóng gói thành công. Danh mục Sandbox thật đã được đọc để đối chiếu đơn vị/tải trọng; số tiền/đơn trong tài liệu là minh họa, không phải kết quả giao hàng Production.
+Các test kiện hàng bao phủ lưu kiện trên 50 kg/200 cm, chọn xe theo tải trọng và kích thước thực tế, quy đổi đơn vị, giữ kiện đứng, vượt từng giới hạn và response HTTP 400 kèm mức tối đa từng xe của đúng thành phố. Catalogue trong test được giả lập để kiểm tra các biên; mức tải trọng/kích thước khi chạy thật luôn lấy từ Lalamove. Số tiền/đơn trong tài liệu chỉ minh họa, không phải kết quả giao hàng Production.
