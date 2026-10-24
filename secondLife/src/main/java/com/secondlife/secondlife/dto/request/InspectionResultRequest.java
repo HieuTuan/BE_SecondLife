@@ -2,33 +2,22 @@ package com.secondlife.secondlife.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 
 import java.util.List;
 
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-public class InspectionResultRequest {
-
+public record InspectionResultRequest(
     @NotBlank(message = "Status is required (PASSED or FAILED)")
     @Pattern(regexp = "^(PASSED|FAILED)$", message = "Status must be PASSED or FAILED")
-    private String status; // PASSED | FAILED
-
-    private String note; // Ghi chú chi tiết kết quả kiểm định
-
-    private String videoProofUrl; // Video quá trình kiểm tra máy móc
-    private String videoProofPublicId; // Cloudinary publicId của video kiểm định
-
-    private String unboxingVideoUrl; // Video khui kiện hàng (nếu gói AT_CENTER)
-    private String unboxingVideoPublicId; // Cloudinary publicId của video mở hộp
-
-    private Integer conditionScore;
-    private String conditionGrade;
-    private String tamperSealId;
-    private String barcode;
-
-    private List<ChecklistItemResultDto> checklistResults;
+    String status, // PASSED | FAILED
+    String note, // Ghi chú chi tiết kết quả kiểm định
+    String videoProofUrl, // Video quá trình kiểm tra máy móc
+    String videoProofPublicId, // Cloudinary publicId của video kiểm định
+    String unboxingVideoUrl, // Video khui kiện hàng (nếu gói AT_CENTER)
+    String unboxingVideoPublicId, // Cloudinary publicId của video mở hộp
+    Integer conditionScore,
+    String conditionGrade,
+    String tamperSealId,
+    String barcode,
+    List<ChecklistItemResultDto> checklistResults
+) {
 }

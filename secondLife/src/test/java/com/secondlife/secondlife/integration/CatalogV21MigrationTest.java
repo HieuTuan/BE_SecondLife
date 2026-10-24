@@ -1,13 +1,20 @@
 package com.secondlife.secondlife.integration;
 
-import com.secondlife.secondlife.service.CatalogSeedService;
-import com.secondlife.secondlife.service.CatalogWriteLock;
+import com.secondlife.secondlife.entity.Category;
+import com.secondlife.secondlife.entity.Item;
+import com.secondlife.secondlife.repository.CategoryRepository;
+import com.secondlife.secondlife.repository.ItemRepository;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.data.jpa.repository.support.JpaRepositoryFactory;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
+import org.springframework.orm.jpa.SharedEntityManagerCreator;
+import org.springframework.orm.jpa.persistenceunit.PersistenceManagedTypes;
+import org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.*;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -36,10 +43,24 @@ class CatalogV21MigrationTest {
         assertTrue(flyway.validateWithResult().validationSuccessful);
         assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM category_question_templates", Integer.class));
 
-        var seeder = new CatalogSeedService(jdbc, new CatalogWriteLock(jdbc));
-        var transaction = new TransactionTemplate(new DataSourceTransactionManager(source));
-        transaction.executeWithoutResult(status -> seeder.seedDefaults());
-        transaction.executeWithoutResult(status -> seeder.seedDefaults());
+        var factory = new LocalContainerEntityManagerFactoryBean();
+        factory.setDataSource(source);
+        factory.setJpaVendorAdapter(new HibernateJpaVendorAdapter());
+        factory.setManagedTypes(PersistenceManagedTypes.of(Category.class.getName(), Item.class.getName()));
+        factory.afterPropertiesSet();
+        try {
+            var entityManagerFactory = factory.getObject();
+            var repositories = new JpaRepositoryFactory(
+                    SharedEntityManagerCreator.createSharedEntityManager(entityManagerFactory));
+            var seeder = new com.secondlife.secondlife.service.impl.CatalogSeedServiceImpl(
+                    repositories.getRepository(CategoryRepository.class),
+                    repositories.getRepository(ItemRepository.class));
+            var transaction = new TransactionTemplate(new JpaTransactionManager(entityManagerFactory));
+            transaction.executeWithoutResult(status -> seeder.seedDefaults());
+            transaction.executeWithoutResult(status -> seeder.seedDefaults());
+        } finally {
+            factory.destroy();
+        }
         assertEquals(category, jdbc.queryForObject("SELECT id FROM categories WHERE seed_key = 'living-room'", UUID.class));
         assertEquals(item, jdbc.queryForObject("SELECT id FROM items WHERE seed_key = 'living-room/sofa'", UUID.class));
         assertEquals("Existing description", jdbc.queryForObject("SELECT description FROM categories WHERE id = ?", String.class, category));

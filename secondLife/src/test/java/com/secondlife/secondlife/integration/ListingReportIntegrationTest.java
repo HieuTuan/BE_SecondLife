@@ -1,11 +1,18 @@
 package com.secondlife.secondlife.integration;
 
+import com.secondlife.secondlife.integration.notification.PushNotificationChannel;
+
+import com.secondlife.secondlife.integration.ai.AiPriceProvider;
+
+import com.secondlife.secondlife.integration.storage.ReportEvidenceStorage;
+
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.entity.Order;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
-import com.secondlife.secondlife.service.*;
+import com.secondlife.secondlife.service.CloudinaryService;
+import com.secondlife.secondlife.service.SellerReputationService;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.ai.chat.model.ChatModel;
@@ -18,6 +25,9 @@ import org.springframework.test.context.*;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -55,7 +65,7 @@ class ListingReportIntegrationTest {
 
     @MockitoBean org.springframework.mail.javamail.JavaMailSender mail;
     @MockitoBean org.springframework.messaging.simp.SimpMessagingTemplate messages;
-    @MockitoBean com.secondlife.secondlife.notification.channel.PushNotificationChannel pushes;
+    @MockitoBean com.secondlife.secondlife.integration.notification.PushNotificationChannel pushes;
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings={"FRAUD","MISLEADING_DESCRIPTION","DUPLICATE_LISTING","OTHER"})
@@ -99,6 +109,12 @@ class ListingReportIntegrationTest {
         var buyer=user("BUYER");var o=order(user("SELLER"),buyer,true);
         var request=body("DUPLICATE_LISTING");request.put("orderId",o.getId());submit(buyer,request).andExpect(status().isBadRequest());
     }
+    @Test void completedReleasedOrderCannotOpenANewPurchaseDispute() throws Exception {
+        var buyer=user("BUYER");var completed=order(user("SELLER"),buyer,true);
+        var request=body("OTHER");request.put("orderId",completed.getId());
+        submit(buyer,request).andExpect(status().isConflict());
+        assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM user_reports WHERE order_id=?",Integer.class,completed.getId()));
+    }
     @Test void ownUnpublishedAndUnauthenticatedReportsAreRejected() throws Exception {
         var seller=user("SELLER");var reporter=user("BUYER");var p=listing(seller);
         listingReport(seller,p.getId(),body("OTHER")).andExpect(status().isBadRequest());
@@ -133,10 +149,47 @@ class ListingReportIntegrationTest {
             org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("staff").roles("STAFF")))
             .andExpect(status().isForbidden());
     }
+    @Test void reportListSwaggerExposesPaginationWithoutUnusedSort() throws Exception {
+        var result=mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn();
+        var paths=mapper.readTree(result.getResponse().getContentAsString()).path("paths");
+        for(String path:List.of("/api/v1/reports/me","/api/v1/staff/reports")) {
+            var names=new HashSet<String>();
+            paths.path(path).path("get").path("parameters").forEach(parameter -> names.add(parameter.path("name").asText()));
+            assertTrue(names.containsAll(Set.of("page","size")),path+": "+names);
+            assertFalse(names.contains("sort"),path+" should document fixed chronological ordering");
+            assertFalse(names.contains("pageable"),path+" should expose explicit pagination fields");
+        }
+    }
+
+    @Test void personalAndStaffReportsAreNewestFirstWithStablePaginationDespiteLegacySort() throws Exception {
+        var reporter=user("BUYER"); var seller=user("SELLER"); var staff=user("STAFF");
+        var ids=new ArrayList<UUID>();
+        Instant latest=Instant.now().plusSeconds(7200).truncatedTo(ChronoUnit.MICROS);
+        for(int index=0;index<3;index++) {
+            var created=listingReport(reporter,listing(seller).getId(),body("OTHER")).andExpect(status().isCreated()).andReturn();
+            UUID id=UUID.fromString(mapper.readTree(created.getResponse().getContentAsString()).path("data").path("id").asText());
+            ids.add(id);
+            Instant at=index==0?latest.minusSeconds(3600):latest;
+            jdbc.update("update user_reports set created_at=?,updated_at=? where id=?",Timestamp.from(at),Timestamp.from(at),id);
+        }
+        var newest=ids.subList(1,3).stream().map(UUID::toString).sorted(Comparator.reverseOrder()).toList();
+        for(String endpoint:List.of("/api/v1/reports/me","/api/v1/staff/reports")) {
+            String token=endpoint.contains("/staff/")?bearer(staff):bearer(reporter);
+            mvc.perform(get(endpoint).param("targetType","LISTING").param("page","0").param("size","2")
+                    .param("sort","[\"string\"]").header("Authorization",token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].id").value(newest.get(0)))
+                .andExpect(jsonPath("$.data.items[1].id").value(newest.get(1)));
+            mvc.perform(get(endpoint).param("targetType","LISTING").param("page","1").param("size","2")
+                    .header("Authorization",token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.items[0].id").value(ids.get(0).toString()));
+        }
+    }
+
     @Test void listingQueueFilterDoesNotIncludeOrderDisputesAndIsPrivate() throws Exception {
         var staff=user("STAFF");var seller=user("SELLER");var reporter=user("BUYER");var p=listing(seller);
         listingReport(reporter,p.getId(),body("OTHER")).andExpect(status().isCreated());
-        var orderReport=body("OTHER");orderReport.put("orderId",order(seller,reporter,true).getId());
+        var orderReport=body("OTHER");orderReport.put("orderId",order(seller,reporter,false).getId());
         submit(reporter,orderReport).andExpect(status().isCreated());
         mvc.perform(get("/api/v1/reports/me?targetType=LISTING&page=0&size=10").header("Authorization",bearer(reporter)))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(1))
@@ -227,8 +280,9 @@ class ListingReportIntegrationTest {
     private Order order(User seller,User buyer,boolean completed) {
         var o=new Order(); o.setPost(listing(seller)); o.setSeller(seller); o.setBuyer(buyer);
         o.setFinalPrice(new java.math.BigDecimal("1000000"));
-        o.setStatus(completed?OrderStatus.COMPLETED:OrderStatus.PROCESSING);
+        o.setStatus(completed?OrderStatus.COMPLETED:OrderStatus.DELIVERED);
         o.setEscrowStatus(completed?EscrowStatus.RELEASED:EscrowStatus.HELD);
+        o.setShippingDeliveredAt(Instant.now().minusSeconds(60));
         return orders.saveAndFlush(o);
     }
     private void recordGood(Order order) {

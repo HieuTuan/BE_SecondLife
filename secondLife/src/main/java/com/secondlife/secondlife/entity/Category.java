@@ -1,5 +1,6 @@
 package com.secondlife.secondlife.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -26,7 +27,7 @@ public class Category {
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 
-    @com.fasterxml.jackson.annotation.JsonIgnore
+    @JsonIgnore
     @Column(name = "seed_key", length = 100, unique = true)
     private String seedKey;
 }

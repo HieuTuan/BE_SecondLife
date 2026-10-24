@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.repository;
 
 import com.secondlife.secondlife.entity.ChatRoom;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -17,7 +18,7 @@ public interface ChatRoomRepository extends JpaRepository<ChatRoom, UUID> {
         return findFirstByPostIdAndBuyerIdAndSellerIdOrderByCreatedAtAsc(postId, buyerId, sellerId);
     }
 
-    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"post", "buyer", "seller", "buyer.profile", "seller.profile"})
+    @EntityGraph(attributePaths = {"post", "buyer", "seller", "buyer.profile", "seller.profile"})
     @Query("SELECT cr FROM ChatRoom cr WHERE cr.buyer.id = :userId OR cr.seller.id = :userId ORDER BY cr.updatedAt DESC")
     List<ChatRoom> findUserChatRooms(@Param("userId") UUID userId);
 

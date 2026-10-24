@@ -4,7 +4,6 @@ import com.secondlife.secondlife.dto.request.NegotiationRequestDTO;
 import com.secondlife.secondlife.dto.response.NegotiationResponseDTO;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-
 import java.util.UUID;
 
 public interface NegotiationService {

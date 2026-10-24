@@ -1,9 +1,13 @@
 package com.secondlife.secondlife.exception;
 
 import com.secondlife.secondlife.common.ErrorResponse;
-import com.secondlife.secondlife.service.ekyc.vnpt.VnptApiException;
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptApiException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -22,13 +26,19 @@ import java.util.List;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler(VideoUploadException.class)
+    public ResponseEntity<ErrorResponse> handleVideoUpload(VideoUploadException ex, HttpServletRequest request) {
+        return ResponseEntity.status(ex.getStatus()).body(ErrorResponse.of(ex.getMessage(), request.getRequestURI()));
+    }
+
     @ExceptionHandler(EmailDeliveryException.class)
     public ResponseEntity<ErrorResponse> handleEmailDelivery(EmailDeliveryException ex, HttpServletRequest request) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(ex.getMessage(), request.getRequestURI()));
     }
     @ExceptionHandler(ShippingProviderException.class)
     public ResponseEntity<ErrorResponse> handleShippingProvider(ShippingProviderException ex,HttpServletRequest request) {
-        HttpStatus status = ex.getUpstreamStatus()==503 ? HttpStatus.SERVICE_UNAVAILABLE :
+        HttpStatus status = ex.getUpstreamStatus()==429 ? HttpStatus.TOO_MANY_REQUESTS :
+                ex.getUpstreamStatus()==503 ? HttpStatus.SERVICE_UNAVAILABLE :
                 ex.getUpstreamStatus()==504 ? HttpStatus.GATEWAY_TIMEOUT : HttpStatus.BAD_GATEWAY;
         return ResponseEntity.status(status).body(ErrorResponse.of(ex.getMessage(),request.getRequestURI()));
     }
@@ -188,6 +198,18 @@ public class GlobalExceptionHandler {
         log.warn("Authentication failed at {}", request.getRequestURI());
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(ErrorResponse.of("Authentication failed", request.getRequestURI()));
+    }
+
+    @ExceptionHandler({
+            QueryTimeoutException.class,
+            CannotAcquireLockException.class,
+            PessimisticLockingFailureException.class
+    })
+    public ResponseEntity<ErrorResponse> handleDatabaseTimeoutAndLockConflict(
+            TransientDataAccessException ex, HttpServletRequest request) {
+        log.warn("Database timeout or lock conflict at {}: {}", request.getRequestURI(), ex.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ErrorResponse.of("Database operation timed out or lock conflict occurred. Please retry.", request.getRequestURI()));
     }
 
     @ExceptionHandler(Exception.class)

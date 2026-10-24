@@ -1,6 +1,6 @@
 package com.secondlife.secondlife.entity;
 
-import com.secondlife.secondlife.service.payment.PaymentStatus;
+import com.secondlife.secondlife.enums.PaymentStatus;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;

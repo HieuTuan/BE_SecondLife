@@ -6,21 +6,23 @@ import com.secondlife.secondlife.dto.response.UnreadCountResponseDTO;
 import com.secondlife.secondlife.entity.Notification;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.AccountStatus;
-import com.secondlife.secondlife.notification.NotificationChannelType;
-import com.secondlife.secondlife.notification.NotificationMessage;
-import com.secondlife.secondlife.notification.channel.NotificationChannel;
+import com.secondlife.secondlife.enums.NotificationChannelType;
+import com.secondlife.secondlife.integration.mail.CriticalNotificationMailer;
+import com.secondlife.secondlife.integration.notification.NotificationChannel;
+import com.secondlife.secondlife.integration.notification.NotificationMessage;
+import com.secondlife.secondlife.mapper.NotificationMapper;
 import com.secondlife.secondlife.repository.NotificationRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import java.time.Instant;
@@ -52,10 +54,7 @@ class NotificationServiceImplTest {
     private NotificationChannel smsChannel;
 
     @Mock
-    private JavaMailSender mailSender;
-
-    @Mock
-    private EmailTemplateBuilder templateBuilder;
+    private CriticalNotificationMailer criticalMailer;
 
     private NotificationServiceImpl notificationService;
 
@@ -66,9 +65,8 @@ class NotificationServiceImplTest {
                 userRepository,
                 messagingTemplate,
                 List.of(emailChannel, smsChannel),
-                mailSender,
-                templateBuilder
-        );
+                criticalMailer
+        , MapperTestSupport.mapper(NotificationMapper.class));
     }
 
     @Test
@@ -94,7 +92,7 @@ class NotificationServiceImplTest {
         );
 
         assertNotNull(response);
-        assertEquals("Đơn hàng mới", response.getTitle());
+        assertEquals("Đơn hàng mới", response.title());
         verify(notificationRepository).save(any(Notification.class));
         verify(messagingTemplate).convertAndSendToUser(eq(userId.toString()), eq("/queue/notifications"), eq(response));
     }
@@ -107,18 +105,18 @@ class NotificationServiceImplTest {
         var saved=Notification.builder().id(UUID.randomUUID()).user(user).title("Report result").message("Reviewed")
                 .type("REPORT").referenceId(reportId).createdAt(Instant.now()).isRead(false).isDeleted(false).build();
         when(notificationRepository.save(any(Notification.class))).thenReturn(saved);
-        var report=new com.secondlife.secondlife.dto.reputation.ReportResponse(reportId,UUID.randomUUID(),reporterId,
+        var report=new com.secondlife.secondlife.dto.response.ReportResponse(reportId,UUID.randomUUID(),reporterId,
                 UUID.randomUUID(),UUID.randomUUID(),null,
-                com.secondlife.secondlife.dto.reputation.ReportRequests.ReasonCode.OTHER,"Report details",List.of(),
-                com.secondlife.secondlife.dto.reputation.ReportRequests.Status.DISMISSED,UUID.randomUUID(),
-                com.secondlife.secondlife.dto.reputation.ReportRequests.ResponsibleParty.NONE,"No violation found",
+                com.secondlife.secondlife.dto.request.ReportRequests.ReasonCode.OTHER,"Report details",List.of(),
+                com.secondlife.secondlife.dto.request.ReportRequests.Status.DISMISSED,UUID.randomUUID(),
+                com.secondlife.secondlife.dto.request.ReportRequests.ResponsibleParty.NONE,"No violation found",
                 Instant.now(),Instant.now(),Instant.now(),null,
-                com.secondlife.secondlife.dto.reputation.ReportRequests.TargetType.LISTING);
-        new com.secondlife.secondlife.service.ListingReportNotifications(
-                mock(org.springframework.jdbc.core.JdbcTemplate.class),notificationService).resolved(report);
+                com.secondlife.secondlife.dto.request.ReportRequests.TargetType.LISTING);
+        new com.secondlife.secondlife.service.impl.ListingReportNotificationsImpl(
+                userRepository,notificationService).resolved(report);
         verify(notificationRepository).save(any(Notification.class));
         verify(messagingTemplate).convertAndSendToUser(eq(reporterId.toString()),eq("/queue/notifications"),any(Object.class));
-        verifyNoInteractions(emailChannel,smsChannel,mailSender);
+        verifyNoInteractions(emailChannel,smsChannel,criticalMailer);
     }
 
     @Test
@@ -128,7 +126,7 @@ class NotificationServiceImplTest {
 
         UnreadCountResponseDTO result = notificationService.getUnreadCount(userId);
 
-        assertEquals(5L, result.getUnreadCount());
+        assertEquals(5L, result.unreadCount());
     }
 
     @Test
@@ -154,7 +152,7 @@ class NotificationServiceImplTest {
         NotificationResponseDTO result = notificationService.markAsRead(userId, notificationId);
 
         assertTrue(result.isRead());
-        assertNotNull(result.getReadAt());
+        assertNotNull(result.readAt());
         verify(notificationRepository).save(notification);
     }
 
@@ -165,8 +163,8 @@ class NotificationServiceImplTest {
 
         NotificationActionResponseDTO response = notificationService.markAllAsRead(userId);
 
-        assertTrue(response.isSuccess());
-        assertEquals(3, response.getAffectedCount());
+        assertTrue(response.success());
+        assertEquals(3, response.affectedCount());
     }
 
     @Test
@@ -195,8 +193,8 @@ class NotificationServiceImplTest {
 
         NotificationActionResponseDTO response = notificationService.clearReadNotifications(userId);
 
-        assertTrue(response.isSuccess());
-        assertEquals(8, response.getAffectedCount());
+        assertTrue(response.success());
+        assertEquals(8, response.affectedCount());
     }
 
     @Test
@@ -206,8 +204,8 @@ class NotificationServiceImplTest {
 
         NotificationActionResponseDTO response = notificationService.clearAllNotifications(userId);
 
-        assertTrue(response.isSuccess());
-        assertEquals(15, response.getAffectedCount());
+        assertTrue(response.success());
+        assertEquals(15, response.affectedCount());
     }
 
     @Test

@@ -2,9 +2,13 @@ package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
+import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
+import com.secondlife.secondlife.dto.request.InspectionSealScanRequest;
 import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
+import com.secondlife.secondlife.dto.response.InspectionSealLogResponse;
+import com.secondlife.secondlife.dto.response.InspectionSealVerificationResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -48,6 +52,11 @@ public interface InspectionService {
     InspectionOrderResponse confirmFinalPurchase(UUID buyerId, UUID orderId);
 
     /**
+     * Người mua từ chối mua tiếp sau khi sản phẩm kiểm định PASSED
+     */
+    InspectionOrderResponse rejectFinalPurchase(UUID buyerId, UUID orderId, InspectionRejectPurchaseRequest request);
+
+    /**
      * Inspector xem danh sách đơn kiểm định được phân công cho mình
      */
     List<InspectionOrderResponse> getMyOrders(UUID inspectorId);
@@ -86,25 +95,15 @@ public interface InspectionService {
     /**
      * Tra cứu và xác thực thông tin tem niêm phong QR
      */
-    com.secondlife.secondlife.dto.response.InspectionSealVerificationResponse getSealVerification(String tamperSealId);
+    InspectionSealVerificationResponse getSealVerification(String tamperSealId);
 
     /**
      * Ghi nhận lịch sử các lần quét mã QR tem niêm phong (KTV, Shipper, Buyer)
      */
-    com.secondlife.secondlife.dto.response.InspectionSealLogResponse recordSealScan(UUID actorId, com.secondlife.secondlife.dto.request.InspectionSealScanRequest request);
+    InspectionSealLogResponse recordSealScan(UUID actorId, InspectionSealScanRequest request);
 
     /**
      * Sinh mã tem niêm phong chuẩn cho đơn kiểm định
      */
     String generateSealForOrder(UUID inspectorId, UUID orderId);
-
-    /**
-     * Kỹ thuật viên xem thống kê hiệu suất KPI và tổng thu nhập theo tháng
-     */
-    com.secondlife.secondlife.dto.response.InspectorStatsResponse getInspectorStats(UUID inspectorId, Integer month, Integer year);
-
-    /**
-     * Kỹ thuật viên xem danh sách lịch sử thù lao và phụ cấp theo từng đơn
-     */
-    Page<com.secondlife.secondlife.dto.response.InspectorPayoutResponse> getPayoutHistory(UUID inspectorId, Pageable pageable);
 }

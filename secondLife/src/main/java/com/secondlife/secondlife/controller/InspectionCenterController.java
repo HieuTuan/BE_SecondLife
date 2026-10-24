@@ -1,5 +1,7 @@
 package com.secondlife.secondlife.controller;
 
+import com.secondlife.secondlife.common.ApiResponse;
+import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.dto.request.CreateInspectorRequest;
 import com.secondlife.secondlife.dto.request.InspectionChecklistTemplateRequest;
 import com.secondlife.secondlife.dto.request.InspectionFeeProposalRequest;
@@ -29,7 +31,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/inspector-center")
-@RequiredArgsConstructor
 @Tag(name = "Inspection Center Management Portal", description = "APIs dành cho Quản lý Trung tâm kiểm định điều phối và quản trị")
 public class InspectionCenterController {
 
@@ -38,16 +39,26 @@ public class InspectionCenterController {
     private final InspectionPricingService pricingService;
     private final CurrentUserProvider currentUserProvider;
 
+    public InspectionCenterController(InspectionService inspectionService,
+                                      InspectionChecklistService checklistService,
+                                      InspectionPricingService pricingService,
+                                      CurrentUserProvider currentUserProvider) {
+        this.inspectionService = inspectionService;
+        this.checklistService = checklistService;
+        this.pricingService = pricingService;
+        this.currentUserProvider = currentUserProvider;
+    }
+
     // --- 1. ĐIỀU PHỐI & THEO DÕI ĐƠN KIỂM ĐỊNH ---
 
-    @GetMapping("/orders")
+    @GetMapping(value = {"/orders", "/orders/all"})
     @PreAuthorize("hasAuthority('INSPECTION_ORDER_READ_ANY')")
     @Operation(summary = "Xem danh sách tất cả các đơn kiểm định (hỗ trợ lọc status và phân trang)")
-    public ResponseEntity<com.secondlife.secondlife.common.ApiResponse<com.secondlife.secondlife.common.PageResponse<InspectionOrderResponse>>> getAllOrders(
+    public ResponseEntity<ApiResponse<PageResponse<InspectionOrderResponse>>> getAllOrders(
             @RequestParam(required = false) String status,
             Pageable pageable) {
-        return ResponseEntity.ok(com.secondlife.secondlife.common.ApiResponse.success(
-                com.secondlife.secondlife.common.PageResponse.from(inspectionService.getAllOrders(status, pageable))));
+        return ResponseEntity.ok(ApiResponse.success(
+                PageResponse.from(inspectionService.getAllOrders(status, pageable))));
     }
 
     @PostMapping("/orders/{orderId}/assign")
@@ -141,7 +152,7 @@ public class InspectionCenterController {
             @Valid @RequestBody CreateInspectorRequest request) {
         UUID managerId = currentUserProvider.resolveUserId(userDetails);
         inspectionService.createInspectorAccount(
-                request.getEmail(), request.getFullName(), request.getPassword(), managerId);
+                request.email(), request.fullName(), request.password(), managerId);
         return ResponseEntity.ok("Tạo tài khoản Kỹ thuật viên thành công");
     }
 

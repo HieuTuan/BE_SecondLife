@@ -1,10 +1,12 @@
 package com.secondlife.secondlife.security.jwt;
 
 import com.secondlife.secondlife.entity.User;
-import io.jsonwebtoken.*;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtParser;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.MalformedJwtException;
+import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.security.Keys;
-import io.jsonwebtoken.security.SecurityException;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -15,11 +17,11 @@ import java.util.Date;
 import java.util.HexFormat;
 import java.util.UUID;
 
-@Slf4j
 @Component
 public class JwtTokenProvider {
 
     private final SecretKey signingKey;
+    private final JwtParser parser;
     private final long accessExpirationMs;
 
     public JwtTokenProvider(
@@ -39,11 +41,8 @@ public class JwtTokenProvider {
             throw new IllegalArgumentException("JWT secret must contain at least 256 bits");
         }
         this.signingKey = Keys.hmacShaKeyFor(keyBytes);
+        this.parser = Jwts.parser().verifyWith(signingKey).build();
         this.accessExpirationMs = accessExpirationMs;
-    }
-
-    private SecretKey getSigningKey() {
-        return signingKey;
     }
 
     public String generateAccessToken(User user) {
@@ -57,51 +56,30 @@ public class JwtTokenProvider {
                 .claim("tokenVersion", user.getTokenVersion())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiry))
-                .signWith(getSigningKey(), Jwts.SIG.HS256)
+                .signWith(signingKey, Jwts.SIG.HS256)
                 .compact();
     }
 
-    public UUID getUserIdFromToken(String token) {
-        Claims claims = getClaims(token);
-        return UUID.fromString(claims.getSubject());
-    }
-
-    public String getEmailFromToken(String token) {
-        Claims claims = getClaims(token);
-        return claims.get("email", String.class);
-    }
-
-    public long getTokenVersionFromToken(String token) {
-        Number version = getClaims(token).get("tokenVersion", Number.class);
-        return version == null ? 0 : version.longValue();
-    }
-
-    public boolean validateToken(String token) {
-        try {
-            Claims claims = getClaims(token);
-            String type = claims.get("type", String.class);
-            return "ACCESS".equals(type);
-        } catch (SecurityException | MalformedJwtException e) {
-            log.warn("Invalid JWT signature");
-        } catch (ExpiredJwtException e) {
-            log.warn("JWT token is expired");
-        } catch (UnsupportedJwtException e) {
-            log.warn("JWT token is unsupported");
-        } catch (IllegalArgumentException e) {
-            log.warn("JWT claims string is empty");
+    public AccessToken parseAccessToken(String token) {
+        Claims claims = parser.parseSignedClaims(token).getPayload();
+        if (!"ACCESS".equals(claims.get("type", String.class))) {
+            throw new UnsupportedJwtException("JWT token is not an access token");
         }
-        return false;
+        if (claims.getSubject() == null) {
+            throw new MalformedJwtException("JWT subject is required");
+        }
+        Number version = claims.get("tokenVersion", Number.class);
+        return new AccessToken(
+                UUID.fromString(claims.getSubject()),
+                claims.get("email", String.class),
+                version == null ? 0 : version.longValue()
+        );
     }
 
     public long getAccessExpirationMs() {
         return accessExpirationMs;
     }
 
-    private Claims getClaims(String token) {
-        return Jwts.parser()
-                .verifyWith(getSigningKey())
-                .build()
-                .parseSignedClaims(token)
-                .getPayload();
+    public record AccessToken(UUID userId, String email, long tokenVersion) {
     }
 }

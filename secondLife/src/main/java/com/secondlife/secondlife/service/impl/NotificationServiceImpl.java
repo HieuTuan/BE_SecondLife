@@ -6,58 +6,58 @@ import com.secondlife.secondlife.dto.response.UnreadCountResponseDTO;
 import com.secondlife.secondlife.entity.Notification;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.AccountStatus;
+import com.secondlife.secondlife.enums.NotificationChannelType;
+import com.secondlife.secondlife.enums.NotificationType;
 import com.secondlife.secondlife.exception.NotFoundException;
-import com.secondlife.secondlife.notification.NotificationChannelType;
-import com.secondlife.secondlife.notification.NotificationMessage;
-import com.secondlife.secondlife.notification.channel.NotificationChannel;
+import com.secondlife.secondlife.integration.mail.CriticalNotificationMailer;
+import com.secondlife.secondlife.integration.notification.NotificationChannel;
+import com.secondlife.secondlife.integration.notification.NotificationMessage;
+import com.secondlife.secondlife.integration.notification.NotificationRecipient;
+import com.secondlife.secondlife.mapper.NotificationMapper;
 import com.secondlife.secondlife.repository.NotificationRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.NotificationService;
-import jakarta.mail.internet.MimeMessage;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.io.UnsupportedEncodingException;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Slf4j
 @Service
 public class NotificationServiceImpl implements NotificationService {
+    private final NotificationMapper notificationMapper;
 
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final List<NotificationChannel> channels;
-    private final JavaMailSender mailSender;
-    private final EmailTemplateBuilder templateBuilder;
-
-    @Value("${MAIL_FROM}")
-    private String fromEmail;
+    private final CriticalNotificationMailer criticalMailer;
 
     public NotificationServiceImpl(
             NotificationRepository notificationRepository,
             UserRepository userRepository,
             SimpMessagingTemplate messagingTemplate,
             List<NotificationChannel> channels,
-            JavaMailSender mailSender,
-            EmailTemplateBuilder templateBuilder
-    ) {
+            CriticalNotificationMailer criticalMailer
+    , NotificationMapper notificationMapper) {
+        this.notificationMapper = notificationMapper;
+
         this.notificationRepository = notificationRepository;
         this.userRepository = userRepository;
         this.messagingTemplate = messagingTemplate;
         this.channels = channels;
-        this.mailSender = mailSender;
-        this.templateBuilder = templateBuilder;
+        this.criticalMailer = criticalMailer;
     }
 
     @Override
@@ -97,7 +97,7 @@ public class NotificationServiceImpl implements NotificationService {
                 .build();
 
         notification = notificationRepository.save(notification);
-        NotificationResponseDTO dto = NotificationResponseDTO.from(notification);
+        NotificationResponseDTO dto = notificationMapper.toResponse(notification);
 
         // A rollback must not publish a notification for money or penalty changes that never committed.
         afterCommit(() -> {
@@ -112,13 +112,13 @@ public class NotificationServiceImpl implements NotificationService {
         // Dispatch to push notification channels (FCM)
         if (dispatchExternalChannels && channels != null && !channels.isEmpty()) {
             afterCommit(() -> {
-                com.secondlife.secondlife.notification.NotificationType parsedType = com.secondlife.secondlife.notification.NotificationType.SYSTEM;
+                NotificationType parsedType = NotificationType.SYSTEM;
                 try {
-                    if (type != null) parsedType = com.secondlife.secondlife.notification.NotificationType.valueOf(type.trim().toUpperCase());
+                    if (type != null) parsedType = NotificationType.valueOf(type.trim().toUpperCase());
                 } catch (Exception ignored) {}
 
-                com.secondlife.secondlife.notification.NotificationRecipient recipient = com.secondlife.secondlife.notification.NotificationRecipient.from(user);
-                java.util.Map<String, Object> payload = new java.util.HashMap<>();
+                NotificationRecipient recipient = NotificationRecipient.from(user);
+                Map<String, Object> payload = new HashMap<>();
                 payload.put("body", message);
                 if (referenceId != null) payload.put("referenceId", referenceId.toString());
                 if (referenceType != null) payload.put("referenceType", referenceType);
@@ -128,10 +128,13 @@ public class NotificationServiceImpl implements NotificationService {
                         parsedType,
                         recipient,
                         title,
-                        java.util.Set.of(NotificationChannelType.PUSH),
+                        Set.of(NotificationChannelType.PUSH),
                         payload
                 );
                 for (NotificationChannel channel : channels) {
+                    if (notifMsg.channels() != null && !notifMsg.channels().contains(channel.getChannelType())) {
+                        continue;
+                    }
                     try {
                         channel.send(notifMsg);
                     } catch (Exception ex) {
@@ -170,7 +173,7 @@ public class NotificationServiceImpl implements NotificationService {
         NotificationResponseDTO dto = notify(user.getId(), title, message, type, referenceId, referenceType, actionUrl);
 
         // Send high-priority financial/legal/certificate email asynchronously or protected with try-catch
-        afterCommit(() -> sendEmailSafely(user, emailSubject != null ? emailSubject : title, type,
+        afterCommit(() -> criticalMailer.send(user, emailSubject != null ? emailSubject : title, type,
                 emailBody != null ? emailBody : message, actionUrl));
 
         return dto;
@@ -197,7 +200,7 @@ public class NotificationServiceImpl implements NotificationService {
             }
         }
 
-        return page.map(NotificationResponseDTO::from);
+        return page.map(notificationMapper::toResponse);
     }
 
     @Override
@@ -219,7 +222,7 @@ public class NotificationServiceImpl implements NotificationService {
             notification = notificationRepository.save(notification);
         }
 
-        return NotificationResponseDTO.from(notification);
+        return notificationMapper.toResponse(notification);
     }
 
     @Override
@@ -270,58 +273,13 @@ public class NotificationServiceImpl implements NotificationService {
             try { delivery.run(); }
             catch(RuntimeException error) { log.warn("Notification delivery failed after commit ({})",error.getClass().getSimpleName()); }
         };
-        if(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
-                && org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
-            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
-                new org.springframework.transaction.support.TransactionSynchronization() {
+        if(TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(
+                new TransactionSynchronization() {
                     @Override public void afterCommit() { safe.run(); }
                 });
         } else safe.run();
-    }
-
-    private void sendEmailSafely(User user, String subject, String type, String body, String actionUrl) {
-        String email = user.getEmail();
-        if (email == null || email.isBlank()) {
-            return;
-        }
-
-        String fullName = user.getProfile() != null ? user.getProfile().getFullName() : null;
-        try {
-            MimeMessage mimeMessage = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
-
-            try {
-                helper.setFrom(fromEmail, "SecondLife");
-            } catch (UnsupportedEncodingException e) {
-                helper.setFrom(fromEmail);
-            }
-
-            helper.setTo(email);
-            helper.setSubject(subject);
-
-            String tag = switch (type) {
-                case "ORDER" -> "CHỨNG TỪ ĐƠN HÀNG";
-                case "INSPECTION" -> "BIÊN BẢN KIỂM ĐỊNH CHÍNH THỨC";
-                case "WALLET" -> "BIÊN LAI GIAO DỊCH VÍ";
-                case "EKYC" -> "KẾT QUẢ XÁC MINH DANH TÍNH";
-                default -> "THÔNG BÁO QUAN TRỌNG";
-            };
-
-            String htmlContent = templateBuilder.buildGenericNoticeEmail(
-                    fullName,
-                    tag,
-                    subject,
-                    body,
-                    "Xem chi tiết",
-                    actionUrl
-            );
-
-            helper.setText(body, htmlContent);
-            mailSender.send(mimeMessage);
-            log.info("Financial/Certificate email notification [{}] sent successfully to: {}", type, email);
-        } catch (Exception e) {
-            log.error("Failed to deliver critical email [{}] to {}: {}", type, email, e.getMessage());
-        }
     }
 
     // =========================================================================

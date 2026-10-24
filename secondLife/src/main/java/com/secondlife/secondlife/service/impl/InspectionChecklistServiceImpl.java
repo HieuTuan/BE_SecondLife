@@ -9,6 +9,7 @@ import com.secondlife.secondlife.entity.InspectionChecklistItem;
 import com.secondlife.secondlife.entity.InspectionChecklistTemplate;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.mapper.InspectionChecklistMapper;
 import com.secondlife.secondlife.repository.CategoryRepository;
 import com.secondlife.secondlife.repository.InspectionChecklistItemRepository;
 import com.secondlife.secondlife.repository.InspectionChecklistTemplateRepository;
@@ -31,12 +32,13 @@ public class InspectionChecklistServiceImpl implements InspectionChecklistServic
     private final InspectionChecklistItemRepository itemRepository;
     private final CategoryRepository categoryRepository;
     private final UserRepository userRepository;
+    private final InspectionChecklistMapper inspectionChecklistMapper;
 
     @Override
     @Transactional(readOnly = true)
     public List<InspectionChecklistResponse> getAllTemplates() {
         return templateRepository.findByActiveTrueOrderByCreatedAtDesc().stream()
-                .map(this::toResponse)
+                .map(inspectionChecklistMapper::toResponse)
                 .collect(Collectors.toList());
     }
 
@@ -45,7 +47,7 @@ public class InspectionChecklistServiceImpl implements InspectionChecklistServic
     public InspectionChecklistResponse getById(UUID templateId) {
         InspectionChecklistTemplate template = templateRepository.findByIdWithItems(templateId)
                 .orElseThrow(() -> new NotFoundException("Checklist template not found"));
-        return toResponse(template);
+        return inspectionChecklistMapper.toResponse(template);
     }
 
     @Override
@@ -54,12 +56,12 @@ public class InspectionChecklistServiceImpl implements InspectionChecklistServic
         if (categoryId != null) {
             List<InspectionChecklistTemplate> list = templateRepository.findByCategoryWithItems(categoryId);
             if (!list.isEmpty()) {
-                return toResponse(list.get(0));
+                return inspectionChecklistMapper.toResponse(list.get(0));
             }
         }
         List<InspectionChecklistTemplate> general = templateRepository.findByActiveTrueOrderByCreatedAtDesc();
         if (!general.isEmpty()) {
-            return toResponse(templateRepository.findByIdWithItems(general.get(0).getId()).orElse(general.get(0)));
+            return inspectionChecklistMapper.toResponse(templateRepository.findByIdWithItems(general.get(0).getId()).orElse(general.get(0)));
         }
         return InspectionChecklistResponse.builder()
                 .title("Checklist kiểm định chung")
@@ -88,35 +90,35 @@ public class InspectionChecklistServiceImpl implements InspectionChecklistServic
                 .orElseThrow(() -> new NotFoundException("Creator not found"));
 
         InspectionChecklistTemplate template = new InspectionChecklistTemplate();
-        template.setTitle(request.getTitle());
-        template.setDescription(request.getDescription());
+        template.setTitle(request.title());
+        template.setDescription(request.description());
         template.setCreatedBy(creator);
         template.setActive(true);
 
-        if (request.getCategoryId() != null) {
-            Category category = categoryRepository.findById(request.getCategoryId()).orElse(null);
+        if (request.categoryId() != null) {
+            Category category = categoryRepository.findById(request.categoryId()).orElse(null);
             template.setCategory(category);
         }
 
         InspectionChecklistTemplate saved = templateRepository.save(template);
 
-        if (request.getItems() != null && !request.getItems().isEmpty()) {
+        if (request.items() != null && !request.items().isEmpty()) {
             List<InspectionChecklistItem> items = new ArrayList<>();
             int idx = 1;
-            for (InspectionChecklistItemRequest itemReq : request.getItems()) {
+            for (InspectionChecklistItemRequest itemReq : request.items()) {
                 InspectionChecklistItem item = new InspectionChecklistItem();
                 item.setTemplate(saved);
-                item.setItemTitle(itemReq.getItemTitle());
-                item.setCriteriaDescription(itemReq.getCriteriaDescription());
-                item.setMandatory(itemReq.isMandatory());
-                item.setOrderIndex(itemReq.getOrderIndex() > 0 ? itemReq.getOrderIndex() : idx++);
+                item.setItemTitle(itemReq.itemTitle());
+                item.setCriteriaDescription(itemReq.criteriaDescription());
+                item.setMandatory(itemReq.mandatory());
+                item.setOrderIndex(itemReq.orderIndex() > 0 ? itemReq.orderIndex() : idx++);
                 items.add(item);
             }
             itemRepository.saveAll(items);
             saved.setItems(items);
         }
 
-        return toResponse(saved);
+        return inspectionChecklistMapper.toResponse(saved);
     }
 
     @Override
@@ -125,34 +127,34 @@ public class InspectionChecklistServiceImpl implements InspectionChecklistServic
         InspectionChecklistTemplate template = templateRepository.findById(templateId)
                 .orElseThrow(() -> new NotFoundException("Checklist template not found"));
 
-        template.setTitle(request.getTitle());
-        template.setDescription(request.getDescription());
+        template.setTitle(request.title());
+        template.setDescription(request.description());
 
-        if (request.getCategoryId() != null) {
-            Category category = categoryRepository.findById(request.getCategoryId()).orElse(null);
+        if (request.categoryId() != null) {
+            Category category = categoryRepository.findById(request.categoryId()).orElse(null);
             template.setCategory(category);
         }
 
-        if (request.getItems() != null) {
+        if (request.items() != null) {
             itemRepository.deleteAll(template.getItems());
             template.getItems().clear();
 
             List<InspectionChecklistItem> items = new ArrayList<>();
             int idx = 1;
-            for (InspectionChecklistItemRequest itemReq : request.getItems()) {
+            for (InspectionChecklistItemRequest itemReq : request.items()) {
                 InspectionChecklistItem item = new InspectionChecklistItem();
                 item.setTemplate(template);
-                item.setItemTitle(itemReq.getItemTitle());
-                item.setCriteriaDescription(itemReq.getCriteriaDescription());
-                item.setMandatory(itemReq.isMandatory());
-                item.setOrderIndex(itemReq.getOrderIndex() > 0 ? itemReq.getOrderIndex() : idx++);
+                item.setItemTitle(itemReq.itemTitle());
+                item.setCriteriaDescription(itemReq.criteriaDescription());
+                item.setMandatory(itemReq.mandatory());
+                item.setOrderIndex(itemReq.orderIndex() > 0 ? itemReq.orderIndex() : idx++);
                 items.add(item);
             }
             itemRepository.saveAll(items);
             template.setItems(items);
         }
 
-        return toResponse(templateRepository.save(template));
+        return inspectionChecklistMapper.toResponse(templateRepository.save(template));
     }
 
     @Override
@@ -164,27 +166,4 @@ public class InspectionChecklistServiceImpl implements InspectionChecklistServic
         templateRepository.save(template);
     }
 
-    private InspectionChecklistResponse toResponse(InspectionChecklistTemplate t) {
-        List<InspectionChecklistItemResponse> items = t.getItems() != null ? t.getItems().stream()
-                .map(i -> InspectionChecklistItemResponse.builder()
-                        .id(i.getId())
-                        .itemTitle(i.getItemTitle())
-                        .criteriaDescription(i.getCriteriaDescription())
-                        .mandatory(i.isMandatory())
-                        .orderIndex(i.getOrderIndex())
-                        .build())
-                .collect(Collectors.toList()) : List.of();
-
-        return InspectionChecklistResponse.builder()
-                .id(t.getId())
-                .categoryId(t.getCategory() != null ? t.getCategory().getId() : null)
-                .categoryName(t.getCategory() != null ? t.getCategory().getName() : null)
-                .title(t.getTitle())
-                .description(t.getDescription())
-                .active(t.isActive())
-                .createdAt(t.getCreatedAt())
-                .updatedAt(t.getUpdatedAt())
-                .items(items)
-                .build();
-    }
 }

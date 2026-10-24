@@ -1,11 +1,22 @@
 package com.secondlife.secondlife.integration;
 
+import com.secondlife.secondlife.scheduler.OrderConfirmationScheduler;
+
+import com.secondlife.secondlife.integration.ai.AiPriceProvider;
+
+import com.secondlife.secondlife.integration.storage.ReportEvidenceStorage;
+
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.entity.Order;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
-import com.secondlife.secondlife.service.*;
+import com.secondlife.secondlife.service.CloudinaryService;
+import com.secondlife.secondlife.service.OrderConfirmationService;
+import com.secondlife.secondlife.service.SellerReputationService;
+import com.secondlife.secondlife.service.SystemWalletService;
+import com.secondlife.secondlife.service.UserReportService;
+import com.secondlife.secondlife.service.WalletService;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.ai.chat.model.ChatModel;
@@ -237,7 +248,7 @@ class OrderConfirmationIntegrationTest {
         doThrow(new com.secondlife.secondlife.exception.ConflictException("Refund temporarily unavailable"))
             .when(wallets).processRefund(eq(failedBuyer.getId()),any(BigDecimal.class),eq(failed.getId()));
         var policy=new com.secondlife.secondlife.config.OrderConfirmationProperties(false,24,48,new BigDecimal("2"),new BigDecimal("3"),60000,1);
-        new com.secondlife.secondlife.service.impl.OrderConfirmationScheduler(orders,confirmations,policy).processDueOrders();
+        new com.secondlife.secondlife.scheduler.OrderConfirmationScheduler(orders,confirmations,policy).processDueOrders();
         assertEquals(OrderStatus.PROCESSING,orders.findById(failed.getId()).orElseThrow().getStatus());
         assertEquals(OrderStatus.CANCELLED,orders.findById(healthy.getId()).orElseThrow().getStatus());
         assertEquals(1,refunds(healthy));assertEquals(0,refunds(failed));
@@ -254,29 +265,29 @@ class OrderConfirmationIntegrationTest {
     @Test void listingReportsByDifferentBuyersWarnButNeverCreateBadTransactions() {
         var seller=user("SELLER");var buyer=user("BUYER");var other=user("BUYER");var staff=user("STAFF");goodSales(seller,buyer,5);
         var o=paidOrder(seller,buyer);
-        var first=reports.create(buyer.getId(),new com.secondlife.secondlife.dto.reputation.ReportRequests.Create(UUID.randomUUID(),o.getPost().getId(),null,
-            com.secondlife.secondlife.dto.reputation.ReportRequests.ReasonCode.MISLEADING_DESCRIPTION,"Listing contains misleading details",List.of()));
+        var first=reports.create(buyer.getId(),new com.secondlife.secondlife.dto.request.ReportRequests.Create(UUID.randomUUID(),o.getPost().getId(),null,
+            com.secondlife.secondlife.dto.request.ReportRequests.ReasonCode.MISLEADING_DESCRIPTION,"Listing contains misleading details",List.of()));
         reports.startReview(staff.getId(),first.id());reports.resolve(staff.getId(),first.id(),sellerFault());
-        var second=reports.create(other.getId(),new com.secondlife.secondlife.dto.reputation.ReportRequests.Create(UUID.randomUUID(),o.getPost().getId(),null,
-            com.secondlife.secondlife.dto.reputation.ReportRequests.ReasonCode.OTHER,"Other confirmed listing violation",List.of()));
+        var second=reports.create(other.getId(),new com.secondlife.secondlife.dto.request.ReportRequests.Create(UUID.randomUUID(),o.getPost().getId(),null,
+            com.secondlife.secondlife.dto.request.ReportRequests.ReasonCode.OTHER,"Other confirmed listing violation",List.of()));
         reports.startReview(staff.getId(),second.id());reports.resolve(staff.getId(),second.id(),sellerFault());
         var r=reputation.get(seller.getId());assertEquals(5,r.goodTransactions());assertEquals(0,r.badTransactions());
         assertEquals(2,r.confirmedIncidents());assertEquals("CONFIRMED_VIOLATION_HISTORY",r.warningCode());money("100.00",r.score());
     }
     @Test void pendingOrderReportAndTimeoutStillCreateOnlyOneBadOutcome() {
         var seller=user("SELLER");var buyer=user("BUYER");var staff=user("STAFF");goodSales(seller,buyer,5);var o=paidOrder(seller,buyer);
-        var report=reports.create(buyer.getId(),new com.secondlife.secondlife.dto.reputation.ReportRequests.Create(UUID.randomUUID(),null,o.getId(),
-            com.secondlife.secondlife.dto.reputation.ReportRequests.ReasonCode.MISLEADING_DESCRIPTION,"Seller acknowledged misleading description",List.of()));
+        var report=reports.create(buyer.getId(),new com.secondlife.secondlife.dto.request.ReportRequests.Create(UUID.randomUUID(),null,o.getId(),
+            com.secondlife.secondlife.dto.request.ReportRequests.ReasonCode.MISLEADING_DESCRIPTION,"Seller acknowledged misleading description",List.of()));
         reports.startReview(staff.getId(),report.id());reports.resolve(staff.getId(),report.id(),sellerFault());
         assertEquals(0,reputation.get(seller.getId()).badTransactions());money("100.00",reputation.get(seller.getId()).score());
         when(clock.instant()).thenReturn(NOW.plus(Duration.ofHours(48)));assertTrue(confirmations.processIfDue(o.getId()));
         reports.resolve(staff.getId(),report.id(),sellerFault());
         assertEquals(1,reputation.get(seller.getId()).badTransactions());money("78.33",reputation.get(seller.getId()).score());
     }
-    private com.secondlife.secondlife.dto.reputation.ReportRequests.Resolve sellerFault() {
-        return new com.secondlife.secondlife.dto.reputation.ReportRequests.Resolve(
-            com.secondlife.secondlife.dto.reputation.ReportRequests.Decision.CONFIRMED,
-            com.secondlife.secondlife.dto.reputation.ReportRequests.ResponsibleParty.SELLER,"Staff confirmed seller responsibility");
+    private com.secondlife.secondlife.dto.request.ReportRequests.Resolve sellerFault() {
+        return new com.secondlife.secondlife.dto.request.ReportRequests.Resolve(
+            com.secondlife.secondlife.dto.request.ReportRequests.Decision.CONFIRMED,
+            com.secondlife.secondlife.dto.request.ReportRequests.ResponsibleParty.SELLER,"Staff confirmed seller responsibility");
     }
 
     @Test void auditEventsWithSameTimestampRemainInCausalOrderRatherThanRandomUuidOrder() {

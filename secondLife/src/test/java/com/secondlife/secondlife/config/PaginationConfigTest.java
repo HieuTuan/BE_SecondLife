@@ -1,6 +1,6 @@
 package com.secondlife.secondlife.config;
 
-import com.secondlife.secondlife.controller.admin.AdminRbacController;
+import com.secondlife.secondlife.controller.AdminRbacController;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.MethodParameter;

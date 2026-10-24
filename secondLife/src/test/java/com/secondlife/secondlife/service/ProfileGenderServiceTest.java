@@ -8,20 +8,23 @@ import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.impl.UserServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.springframework.security.crypto.password.PasswordEncoder;
+
 import java.util.*;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ProfileGenderServiceTest {
     private final UserRepository users=mock(UserRepository.class);
-    private final UserMapper mapper=new UserMapper();
+    private final UserMapper mapper=MapperTestSupport.mapper(UserMapper.class);
     private final User user=new User("gender@example.test","hash",AccountStatus.ACTIVE);
     private UserServiceImpl service;
     @BeforeEach void setup() {
         user.setId(UUID.randomUUID()); user.setProfile(new UserProfile(user,"Nguyễn Test",null,null)); user.getProfile().setGender(Gender.MALE);
-        when(users.findByIdWithAuthorities(user.getId())).thenReturn(Optional.of(user)); when(users.save(user)).thenReturn(user);
-        service=new UserServiceImpl(users,mock(RoleRepository.class),mock(PasswordEncoder.class),mock(TokenService.class),mapper,mock(NotificationService.class));
+        when(users.findByIdWithProfileDetails(user.getId())).thenReturn(Optional.of(user)); when(users.save(user)).thenReturn(user);
+        service=new UserServiceImpl(users,mock(RoleRepository.class),mock(PasswordEncoder.class),mock(TokenService.class),mapper,mock(NotificationService.class),mock(SellerReputationService.class));
     }
     @Test void chosenGenderCanBeUpdatedAndReadFromProfileAndAuthSummary() {
         var result=service.updateProfile(user.getId(),new UpdateProfileRequest(null,null,null,null,null,null,null,null,null,Gender.FEMALE));

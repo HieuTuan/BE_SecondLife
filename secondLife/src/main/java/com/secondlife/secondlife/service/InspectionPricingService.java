@@ -9,7 +9,6 @@ import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.enums.InspectionFeeProposalStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;

@@ -1,5 +1,7 @@
 package com.secondlife.secondlife.controller;
 import com.secondlife.secondlife.common.ApiResponse;
+import com.secondlife.secondlife.dto.response.ReportEvidenceUploadResponse;
+import com.secondlife.secondlife.dto.response.ReportEvidenceMetadataResponse;
 import com.secondlife.secondlife.security.*;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.ReportEvidenceService;
@@ -11,8 +13,10 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @RestController @RequestMapping("/api/v1/reports/evidence") @RequiredArgsConstructor
 @PreAuthorize("isAuthenticated()") @Tag(name="Reports - Private Evidence")
@@ -22,13 +26,19 @@ public class ReportEvidenceController {
     @PostMapping(consumes=MediaType.MULTIPART_FORM_DATA_VALUE) @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasAuthority('MEDIA_UPLOAD_SELF')")
     @Operation(summary="Upload private evidence; use returned evidenceUrl in POST /reports evidenceUrls")
-    public ApiResponse<ReportEvidenceService.UploadResponse> upload(@AuthenticationPrincipal CustomUserDetails user,@RequestParam MultipartFile file) {
+    public ApiResponse<ReportEvidenceUploadResponse> upload(@AuthenticationPrincipal CustomUserDetails user,@RequestParam MultipartFile file) {
         return ApiResponse.success(evidence.upload(currentUser.resolveUserId(user),file));
+    }
+    @GetMapping("/{id}/metadata")
+    public ResponseEntity<ApiResponse<ReportEvidenceMetadataResponse>> metadata(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID id) {
+        Set<String> a=user.getAuthorities().stream().map(x->x.getAuthority()).collect(Collectors.toSet());
+        boolean reviewer=(a.contains("ROLE_STAFF") && a.contains("STAFF_FRAUD_REVIEW")) || (a.contains("ROLE_ADMIN") && a.contains("ADMIN_RBAC_MANAGE"));
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(ApiResponse.success(evidence.metadata(currentUser.resolveUserId(user),reviewer,id)));
     }
     @GetMapping("/{id}")
     @Operation(summary="Private image bytes; FE fetches with bearer token then creates an object URL for display")
     public ResponseEntity<byte[]> get(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID id) {
-        Set<String> a=user.getAuthorities().stream().map(x->x.getAuthority()).collect(java.util.stream.Collectors.toSet());
+        Set<String> a=user.getAuthorities().stream().map(x->x.getAuthority()).collect(Collectors.toSet());
         boolean reviewer=(a.contains("ROLE_STAFF") && a.contains("STAFF_FRAUD_REVIEW")) || (a.contains("ROLE_ADMIN") && a.contains("ADMIN_RBAC_MANAGE"));
         var image=evidence.read(currentUser.resolveUserId(user),reviewer,id);
         return ResponseEntity.ok().contentType(MediaType.parseMediaType(image.contentType())).cacheControl(CacheControl.noStore().cachePrivate())

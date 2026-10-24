@@ -12,7 +12,7 @@ class TamperSealServiceTest {
 
     @BeforeEach
     void setUp() {
-        sealService = new TamperSealService();
+        sealService = new com.secondlife.secondlife.service.impl.TamperSealServiceImpl();
     }
 
     @Test

@@ -1,21 +1,21 @@
 package com.secondlife.secondlife.service.impl;
 
+import com.secondlife.secondlife.dto.response.CreditBalanceResponse;
+import com.secondlife.secondlife.entity.CreditLedgerEntry;
 import com.secondlife.secondlife.entity.TopupPackage;
 import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.enums.CreditType;
+import com.secondlife.secondlife.repository.CreditBalanceRepository;
+import com.secondlife.secondlife.repository.CreditLedgerRepository;
 import com.secondlife.secondlife.repository.TopupPackageRepository;
 import com.secondlife.secondlife.repository.UserRepository;
-import com.secondlife.secondlife.repository.CreditBalanceGrantRepository;
-import com.secondlife.secondlife.repository.CreditLedgerRepository;
-import com.secondlife.secondlife.entity.CreditLedgerEntry;
-import com.secondlife.secondlife.enums.CreditType;
-import com.secondlife.secondlife.dto.credit.CreditBalanceResponse;
-import com.secondlife.secondlife.service.CreditService;
 import com.secondlife.secondlife.service.CreditBalanceService;
-import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.service.CreditService;
 import com.secondlife.secondlife.service.WalletService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -24,20 +24,20 @@ public class CreditServiceImpl implements CreditService {
     private final TopupPackageRepository topupPackageRepository;
     private final UserRepository userRepository;
     private final WalletService walletService;
-    private final CreditBalanceGrantRepository balanceGrantRepository;
+    private final CreditBalanceRepository balanceRepository;
     private final CreditLedgerRepository ledgerRepository;
     private final CreditBalanceService creditBalanceService;
 
     public CreditServiceImpl(TopupPackageRepository topupPackageRepository,
                              UserRepository userRepository,
                              WalletService walletService,
-                             CreditBalanceGrantRepository balanceGrantRepository,
+                             CreditBalanceRepository balanceRepository,
                              CreditLedgerRepository ledgerRepository,
                              CreditBalanceService creditBalanceService) {
         this.topupPackageRepository = topupPackageRepository;
         this.userRepository = userRepository;
         this.walletService = walletService;
-        this.balanceGrantRepository = balanceGrantRepository;
+        this.balanceRepository = balanceRepository;
         this.ledgerRepository = ledgerRepository;
         this.creditBalanceService = creditBalanceService;
     }
@@ -67,9 +67,9 @@ public class CreditServiceImpl implements CreditService {
         walletService.processPayment(userId, topupPackage.getPrice(), packageId);
 
         // Generate a unique purchase ID to group these grants and ensure idempotency keys are unique per purchase
-        UUID purchaseTraceId = java.util.UUID.randomUUID();
+        UUID purchaseTraceId = UUID.randomUUID();
 
-        // Add credits to user via grant repository
+        // Add credits to user
         grant(userId, CreditType.LISTING, topupPackage.getPostCredits(), purchaseTraceId);
         grant(userId, CreditType.AI_CHAT, topupPackage.getChatCredits(), purchaseTraceId);
         grant(userId, CreditType.VALUATION, topupPackage.getValuationCredits(), purchaseTraceId);
@@ -79,7 +79,7 @@ public class CreditServiceImpl implements CreditService {
     
     private void grant(UUID userId, CreditType type, int quantity, UUID purchaseTraceId) {
         if (quantity == 0) return;
-        long balanceAfter = balanceGrantRepository.grant(userId, type, quantity);
+        long balanceAfter = balanceRepository.grant(userId, type, quantity);
         CreditLedgerEntry entry = new CreditLedgerEntry();
         entry.setUserId(userId);
         entry.setCreditType(type);
@@ -87,7 +87,7 @@ public class CreditServiceImpl implements CreditService {
         entry.setQuantityDelta(quantity);
         entry.setBalanceAfter(balanceAfter);
         entry.setIdempotencyKey("TOPUP_GRANT:" + purchaseTraceId + ":" + type.name());
-        entry.setCreatedAt(java.time.Instant.now());
+        entry.setCreatedAt(Instant.now());
         ledgerRepository.save(entry);
     }
 }

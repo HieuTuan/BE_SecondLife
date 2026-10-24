@@ -5,7 +5,7 @@ import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
-import com.secondlife.secondlife.service.impl.InspectionEscrowExpiryScheduler;
+import com.secondlife.secondlife.scheduler.InspectionEscrowExpiryScheduler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

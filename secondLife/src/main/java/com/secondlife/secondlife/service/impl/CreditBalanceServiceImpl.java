@@ -1,6 +1,6 @@
 package com.secondlife.secondlife.service.impl;
 
-import com.secondlife.secondlife.dto.credit.CreditBalanceResponse;
+import com.secondlife.secondlife.dto.response.CreditBalanceResponse;
 import com.secondlife.secondlife.entity.CreditBalance;
 import com.secondlife.secondlife.enums.CreditType;
 import com.secondlife.secondlife.repository.CreditBalanceRepository;

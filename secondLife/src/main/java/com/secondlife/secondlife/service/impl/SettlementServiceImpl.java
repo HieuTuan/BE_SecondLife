@@ -1,19 +1,29 @@
 package com.secondlife.secondlife.service.impl;
 
-import com.secondlife.secondlife.dto.commission.*;
+import com.secondlife.secondlife.dto.response.OrderCommissionResponse;
+import com.secondlife.secondlife.dto.response.SettlementResponse;
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.exception.*;
+import com.secondlife.secondlife.mapper.SettlementMapper;
 import com.secondlife.secondlife.repository.*;
-import com.secondlife.secondlife.service.*;
-import lombok.RequiredArgsConstructor;
+import com.secondlife.secondlife.service.CommissionCalculator;
+import com.secondlife.secondlife.service.CommissionService;
+import com.secondlife.secondlife.service.SellerReputationService;
+import com.secondlife.secondlife.service.SettlementService;
+import com.secondlife.secondlife.service.SystemWalletService;
+import com.secondlife.secondlife.service.WalletService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
+
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
-@Service @RequiredArgsConstructor
+@Service
 public class SettlementServiceImpl implements SettlementService {
+
     private final OrderRepository orders;
     private final OrderSettlementRepository settlements;
     private final CommissionService commissions;
@@ -21,15 +31,35 @@ public class SettlementServiceImpl implements SettlementService {
     private final WalletService wallets;
     private final SystemWalletService systemWallet;
     private final SellerReputationService reputation;
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private final SettlementMapper settlementMapper;
+
+    @Autowired(required = false)
     private InspectionOrderRepository inspectionOrders;
+
+    public SettlementServiceImpl(OrderRepository orders,
+                                 OrderSettlementRepository settlements,
+                                 CommissionService commissions,
+                                 CommissionCalculator calculator,
+                                 WalletService wallets,
+                                 SystemWalletService systemWallet,
+                                 SellerReputationService reputation,
+                                 SettlementMapper settlementMapper) {
+        this.orders = orders;
+        this.settlements = settlements;
+        this.commissions = commissions;
+        this.calculator = calculator;
+        this.wallets = wallets;
+        this.systemWallet = systemWallet;
+        this.reputation = reputation;
+        this.settlementMapper = settlementMapper;
+    }
 
     @Override @Transactional(propagation = Propagation.MANDATORY)
     public SettlementResponse settle(Order requestedOrder) {
         // Lock even if invoked by another service: money is released once per order.
         Order order = orders.findByIdForUpdate(requestedOrder.getId()).orElseThrow(() -> new NotFoundException("Order not found"));
         var existing = settlements.findByOrderId(order.getId());
-        if (existing.isPresent()) return SettlementResponse.from(existing.get());
+        if (existing.isPresent()) return settlementMapper.toResponse(existing.get());
         if (order.getStatus() != OrderStatus.DELIVERED || order.getShippingDeliveredAt() == null || order.getEscrowStatus() != EscrowStatus.HELD)
             throw new ConflictException("Settlement requires delivered goods and HELD escrow");
         var snapshot = commissions.requireSnapshot(order.getId());
@@ -53,12 +83,12 @@ public class SettlementServiceImpl implements SettlementService {
         if (inspectionOrders != null) {
             inspectionOrders.findByOrderId(order.getId()).ifPresent(io -> {
                 if ("ACTIVE".equals(io.getVideoCleanupStatus())) {
-                    io.setVideoRetentionUntil(Instant.now().plus(14, java.time.temporal.ChronoUnit.DAYS));
+                    io.setVideoRetentionUntil(Instant.now().plus(14, ChronoUnit.DAYS));
                     inspectionOrders.save(io);
                 }
             });
         }
-        return SettlementResponse.from(settlement);
+        return settlementMapper.toResponse(settlement);
     }
     @Override @Transactional(readOnly = true)
     public OrderCommissionResponse getCommission(UUID actorId, boolean canReadAny, UUID orderId) {
@@ -68,7 +98,7 @@ public class SettlementServiceImpl implements SettlementService {
     @Override @Transactional(readOnly = true)
     public SettlementResponse getSettlement(UUID actorId, boolean canReadAny, UUID orderId) {
         authorize(actorId, canReadAny, orderId);
-        return SettlementResponse.from(settlements.findByOrderId(orderId).orElseThrow(() -> new NotFoundException("Order has not been settled")));
+        return settlementMapper.toResponse(settlements.findByOrderId(orderId).orElseThrow(() -> new NotFoundException("Order has not been settled")));
     }
     @Override @Transactional
     public OrderCommissionResponse captureLegacy(UUID actorId, UUID orderId, String reason) {

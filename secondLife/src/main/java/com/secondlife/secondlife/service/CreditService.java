@@ -1,8 +1,7 @@
 package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.entity.TopupPackage;
-import com.secondlife.secondlife.dto.credit.CreditBalanceResponse;
-
+import com.secondlife.secondlife.dto.response.CreditBalanceResponse;
 import java.util.List;
 import java.util.UUID;
 

@@ -1,24 +1,18 @@
 package com.secondlife.secondlife.controller;
 
+import com.secondlife.secondlife.common.ApiResponse;
+import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
 import com.secondlife.secondlife.dto.response.InspectionChecklistResponse;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
-import com.secondlife.secondlife.entity.InspectionOrder;
-import com.secondlife.secondlife.exception.NotFoundException;
-import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
-import com.secondlife.secondlife.service.InspectionChecklistService;
+import com.secondlife.secondlife.service.InspectionOrderChecklistService;
 import com.secondlife.secondlife.service.InspectionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
-import com.secondlife.secondlife.dto.response.InspectorPayoutResponse;
-import com.secondlife.secondlife.dto.response.InspectorStatsResponse;
-import org.springdoc.core.annotations.ParameterObject;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -34,17 +28,14 @@ import java.util.UUID;
 public class InspectorController {
 
     private final InspectionService inspectionService;
-    private final InspectionChecklistService checklistService;
-    private final InspectionOrderRepository orderRepository;
+    private final InspectionOrderChecklistService orderChecklistService;
     private final CurrentUserProvider currentUserProvider;
 
     public InspectorController(InspectionService inspectionService,
-                               InspectionChecklistService checklistService,
-                               InspectionOrderRepository orderRepository,
+                               InspectionOrderChecklistService orderChecklistService,
                                CurrentUserProvider currentUserProvider) {
         this.inspectionService = inspectionService;
-        this.checklistService = checklistService;
-        this.orderRepository = orderRepository;
+        this.orderChecklistService = orderChecklistService;
         this.currentUserProvider = currentUserProvider;
     }
 
@@ -55,6 +46,27 @@ public class InspectorController {
             @AuthenticationPrincipal CustomUserDetails userDetails) {
         UUID inspectorId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(inspectionService.getMyOrders(inspectorId));
+    }
+
+    @GetMapping("/orders/all")
+    @PreAuthorize("hasAuthority('INSPECTION_ORDER_READ_ANY') or hasAuthority('INSPECTION_ORDER_READ_SELF')")
+    @Operation(summary = "Xem danh sách tất cả các đơn kiểm định (hỗ trợ lọc status và phân trang)")
+    public ResponseEntity<ApiResponse<PageResponse<InspectionOrderResponse>>> getAllOrders(
+            @RequestParam(required = false) String status,
+            Pageable pageable) {
+        return ResponseEntity.ok(ApiResponse.success(
+                PageResponse.from(inspectionService.getAllOrders(status, pageable))));
+    }
+
+    @PostMapping("/orders/{orderId}/assign")
+    @PreAuthorize("hasAuthority('INSPECTION_ORDER_ASSIGN')")
+    @Operation(summary = "Điều phối phân công Kỹ thuật viên (Inspector) cho đơn kiểm định")
+    public ResponseEntity<InspectionOrderResponse> assignInspector(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID orderId,
+            @RequestParam UUID inspectorId) {
+        UUID managerId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(inspectionService.assignInspector(orderId, inspectorId, managerId));
     }
 
     @PostMapping("/orders/{orderId}/schedule")
@@ -71,11 +83,7 @@ public class InspectorController {
     @Operation(summary = "Lấy biểu mẫu checklist theo danh mục của sản phẩm trong đơn để KTV thực hiện chấm điểm")
     public ResponseEntity<InspectionChecklistResponse> getChecklistForOrder(
             @PathVariable UUID orderId) {
-        InspectionOrder order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
-
-        UUID categoryId = order.getPost() != null ? order.getPost().getCategoryId() : null;
-        return ResponseEntity.ok(checklistService.getByCategoryId(categoryId));
+        return ResponseEntity.ok(orderChecklistService.getForOrder(orderId));
     }
 
     @PostMapping("/orders/{orderId}/start")
@@ -102,32 +110,11 @@ public class InspectorController {
     @PostMapping("/orders/{orderId}/generate-seal")
     @PreAuthorize("hasAuthority('INSPECTION_REPORT_SUBMIT')")
     @Operation(summary = "Kỹ thuật viên yêu cầu hệ thống tự sinh mã tem niêm phong số chuẩn kèm checksum")
-    public ResponseEntity<com.secondlife.secondlife.common.ApiResponse<String>> generateSeal(
+    public ResponseEntity<ApiResponse<String>> generateSeal(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID orderId) {
         UUID inspectorId = currentUserProvider.resolveUserId(userDetails);
         String sealCode = inspectionService.generateSealForOrder(inspectorId, orderId);
-        return ResponseEntity.ok(com.secondlife.secondlife.common.ApiResponse.success("Sinh mã tem thành công", sealCode));
-    }
-
-    @GetMapping("/stats")
-    @PreAuthorize("hasAuthority('INSPECTION_ORDER_READ_SELF')")
-    @Operation(summary = "Kỹ thuật viên xem thống kê hiệu suất KPI và tổng thu nhập theo tháng")
-    public ResponseEntity<InspectorStatsResponse> getMyStats(
-            @AuthenticationPrincipal CustomUserDetails userDetails,
-            @RequestParam(required = false) Integer month,
-            @RequestParam(required = false) Integer year) {
-        UUID inspectorId = currentUserProvider.resolveUserId(userDetails);
-        return ResponseEntity.ok(inspectionService.getInspectorStats(inspectorId, month, year));
-    }
-
-    @GetMapping("/payouts")
-    @PreAuthorize("hasAuthority('INSPECTION_ORDER_READ_SELF')")
-    @Operation(summary = "Kỹ thuật viên xem danh sách lịch sử thù lao và phụ cấp theo từng đơn")
-    public ResponseEntity<Page<InspectorPayoutResponse>> getPayoutHistory(
-            @AuthenticationPrincipal CustomUserDetails userDetails,
-            @ParameterObject Pageable pageable) {
-        UUID inspectorId = currentUserProvider.resolveUserId(userDetails);
-        return ResponseEntity.ok(inspectionService.getPayoutHistory(inspectorId, pageable));
+        return ResponseEntity.ok(ApiResponse.success("Sinh mã tem thành công", sealCode));
     }
 }

@@ -1,71 +1,89 @@
 package com.secondlife.secondlife.service.impl;
 
-import com.secondlife.secondlife.dto.commission.*;
+import com.secondlife.secondlife.dto.request.CommissionRuleRequest;
+import com.secondlife.secondlife.dto.response.CommissionAuditResponse;
+import com.secondlife.secondlife.dto.response.CommissionRuleResponse;
+import com.secondlife.secondlife.dto.response.OrderCommissionResponse;
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.enums.CommissionRuleType;
 import com.secondlife.secondlife.exception.*;
+import com.secondlife.secondlife.mapper.CommissionMapper;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.CommissionCalculator;
 import com.secondlife.secondlife.service.CommissionService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
 import tools.jackson.databind.ObjectMapper;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.*;
 
-@Service @RequiredArgsConstructor
+@Service
 public class CommissionServiceImpl implements CommissionService {
+
     private final CommissionRuleRepository rules;
     private final CommissionRuleAuditRepository audits;
     private final OrderCommissionSnapshotRepository snapshots;
     private final CommissionCalculator calculator;
     private final ObjectMapper mapper;
-    private final JdbcTemplate jdbc;
+    private final CommissionMapper commissionMapper;
+
+    public CommissionServiceImpl(CommissionRuleRepository rules,
+                                 CommissionRuleAuditRepository audits,
+                                 OrderCommissionSnapshotRepository snapshots,
+                                 CommissionCalculator calculator,
+                                 ObjectMapper mapper,
+                                 CommissionMapper commissionMapper) {
+        this.rules = rules;
+        this.audits = audits;
+        this.snapshots = snapshots;
+        this.calculator = calculator;
+        this.mapper = mapper;
+        this.commissionMapper = commissionMapper;
+    }
 
     @Override @Transactional(readOnly = true)
     public Page<CommissionRuleResponse> list(Pageable pageable) {
-        return rules.findByType(CommissionRuleType.DEFAULT, pageable).map(CommissionRuleResponse::from);
+        return rules.findByType(CommissionRuleType.DEFAULT, pageable).map(commissionMapper::toRuleResponse);
     }
     @Override @Transactional(readOnly = true)
-    public CommissionRuleResponse get(UUID id) { return CommissionRuleResponse.from(defaultRule(id)); }
+    public CommissionRuleResponse get(UUID id) { return commissionMapper.toRuleResponse(defaultRule(id)); }
     @Override @Transactional
     public CommissionRuleResponse create(UUID actorId, CommissionRuleRequest request) {
-        lockPolicy(); validate(request, null);
+        rules.lockPolicy(); validate(request, null);
         var rule = new CommissionRule(); rule.setCreatedAt(Instant.now()); rule.setRevision(1);
         apply(rule, actorId, request);
         rules.saveAndFlush(rule); audit(rule, actorId, "CREATE", null, request.reason());
-        return CommissionRuleResponse.from(rule);
+        return commissionMapper.toRuleResponse(rule);
     }
     @Override @Transactional
     public CommissionRuleResponse update(UUID actorId, UUID id, CommissionRuleRequest request) {
-        lockPolicy(); var rule = defaultRule(id); validate(request, id);
+        rules.lockPolicy(); var rule = defaultRule(id); validate(request, id);
         String oldValue = json(rule); rule.setRevision(rule.getRevision() + 1); apply(rule, actorId, request);
         rules.saveAndFlush(rule); audit(rule, actorId, "UPDATE", oldValue, request.reason());
-        return CommissionRuleResponse.from(rule);
+        return commissionMapper.toRuleResponse(rule);
     }
     @Override @Transactional
     public CommissionRuleResponse deactivate(UUID actorId, UUID id, String reason) {
-        lockPolicy(); var rule = defaultRule(id); String oldValue = json(rule);
+        rules.lockPolicy(); var rule = defaultRule(id); String oldValue = json(rule);
         if (rule.isActive()) {
             rule.setActive(false); rule.setRevision(rule.getRevision() + 1);
             rule.setUpdatedBy(actorId); rule.setUpdatedAt(Instant.now()); rules.saveAndFlush(rule);
             audit(rule, actorId, "DEACTIVATE", oldValue, reason);
         }
-        return CommissionRuleResponse.from(rule);
+        return commissionMapper.toRuleResponse(rule);
     }
     @Override @Transactional(readOnly = true)
     public Page<CommissionAuditResponse> history(UUID id, Pageable pageable) {
-        rule(id); return audits.findByRuleIdOrderByChangedAtDesc(id, pageable).map(CommissionAuditResponse::from);
+        rule(id); return audits.findByRuleIdOrderByChangedAtDesc(id, pageable).map(commissionMapper::toAuditResponse);
     }
     @Override @Transactional(propagation = Propagation.MANDATORY)
     public OrderCommissionSnapshot capture(Order order, UUID actorId, String reason) {
         // The caller locks the order/post. Serialize with policy writes across all app instances.
-        lockPolicy();
+        rules.lockPolicy();
         var existing = snapshots.findByOrderId(order.getId());
         if (existing.isPresent()) return existing.get();
         UUID categoryId = order.getPost().getCategoryId();
@@ -89,10 +107,7 @@ public class CommissionServiceImpl implements CommissionService {
     }
     @Override public OrderCommissionResponse describe(OrderCommissionSnapshot s) {
         var amounts = calculator.calculate(s.getCommissionBase(), s.getRate(), s.getMinCommission(), s.getMaxCommission());
-        return new OrderCommissionResponse(s.getId(), s.getOrderId(), s.getRuleId(), s.getRuleRevision(), s.getRuleName(),
-                s.getRuleType(), s.getCategoryId(), s.getTransactionValueFrom(), s.getTransactionValueTo(), s.getRate(),
-                s.getMinCommission(), s.getMaxCommission(), s.getBaseType(), s.getCommissionBase(), amounts.rawCommission(),
-                amounts.platformCommission(), amounts.sellerPayout(), s.getCurrency(), s.getSnapshottedAt(), s.getCapturedBy(), s.getReason());
+        return commissionMapper.toOrderResponse(s, amounts.rawCommission(), amounts.platformCommission(), amounts.sellerPayout());
     }
     private CommissionRule rule(UUID id) { return rules.findById(id).orElseThrow(() -> new NotFoundException("Commission rule not found")); }
     private CommissionRule defaultRule(UUID id) {
@@ -101,7 +116,6 @@ public class CommissionServiceImpl implements CommissionService {
             throw new ConflictException("Only default commission policies can be managed");
         return rule;
     }
-    private void lockPolicy() { jdbc.query("SELECT pg_advisory_xact_lock(?)", rs -> {}, 0x534C434F4D4D4953L); }
     private void apply(CommissionRule rule, UUID actor, CommissionRuleRequest r) {
         rule.setName(r.name().trim()); rule.setType(CommissionRuleType.DEFAULT); rule.setCategoryId(null);
         rule.setTransactionValueFrom(null); rule.setTransactionValueTo(null);
@@ -115,7 +129,7 @@ public class CommissionServiceImpl implements CommissionService {
         rules.findByTypeAndActiveTrue(CommissionRuleType.DEFAULT).filter(other -> !other.getId().equals(excludedId))
                 .ifPresent(other -> { throw new ConflictException("An active default commission policy already exists"); });
     }
-    private String json(CommissionRule rule) { return mapper.writeValueAsString(CommissionRuleResponse.from(rule)); }
+    private String json(CommissionRule rule) { return mapper.writeValueAsString(commissionMapper.toRuleResponse(rule)); }
     private void audit(CommissionRule rule, UUID actor, String action, String old, String reason) {
         var audit = new CommissionRuleAudit(); audit.setRuleId(rule.getId()); audit.setActorId(actor);
         audit.setAction(action); audit.setOldValue(old); audit.setNewValue(json(rule));

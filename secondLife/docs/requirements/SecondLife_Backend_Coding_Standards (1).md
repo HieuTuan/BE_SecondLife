@@ -3,56 +3,37 @@
 > **Project:** SecondLife - AI Powered Second-Hand Marketplace  
 > **Backend:** Spring Boot Modular Monolith  
 > **Database:** PostgreSQL  
-> **Principles:** package-by-feature, clean layering, externalized configuration, secure defaults, consistent API.
+> **Principles:** package-by-layer, clean layering, externalized configuration, secure defaults, consistent API.
 
 ---
 
 ## 1. Architecture
 
-Use **Modular Monolith**: one Spring Boot application, separated by business domain.
+Use **one Spring Boot application with global technical layers**. Keep service interfaces separate from their implementations.
 
 ```text
-src/main/java/com/secondlife
-├── common/
-│   ├── api/
-│   ├── config/
-│   ├── exception/
-│   ├── security/
-│   └── util/
-├── auth/
-├── user/
-├── rbac/
-├── sellerverification/
-├── listing/
-├── ai/
-├── chat/
-├── offer/
-├── order/
-├── inspection/
-├── escrow/
-├── shipment/
-├── dispute/
-├── review/
-├── notification/
-└── audit/
-```
-
-Each feature should follow:
-
-```text
-feature/
+src/main/java/com/secondlife/secondlife/
+├── SecondLifeApplication.java
 ├── controller/
 ├── dto/
 │   ├── request/
 │   └── response/
 ├── entity/
 ├── repository/
+├── mapper/
 ├── service/
-├── service/impl/
-└── mapper/
+│   └── impl/
+├── integration/
+├── scheduler/
+├── seeder/
+├── config/
+├── security/
+├── exception/
+├── enums/
+└── common/
 ```
 
-External integrations may add `provider/` or `client/`.
+All business service interfaces live directly in `service/`; business implementations and implementation helpers live directly in `service/impl/`. External provider contracts, adapters, and delivery-specific models live under `integration/`, grouped by integration. API DTOs live in `dto/request/` or `dto/response/`. Keep existing nested records with their enclosing types. Tests live under `src/test/java/com/secondlife/secondlife/`, with test resources in `src/test/resources/`.
 
 Dependency direction:
 
@@ -84,6 +65,7 @@ Vendor Adapter
 - Controller contains no business logic.
 - Service interface goes in `service/`.
 - Service implementation goes in `service/impl/`.
+- Repositories are interfaces extending `JpaRepository<Entity, Id>` in `repository/`; Spring Data creates the implementations.
 - Use constructor injection only.
 - Inject interfaces, not implementation classes.
 - Transaction boundaries belong in Service layer.
@@ -287,6 +269,16 @@ public record ListingResponse(
 - Use Jakarta Validation.
 - Controller request DTO must use `@Valid`.
 
+### Mapping
+
+- Entity/DTO mappers are concrete `@Component` classes in `mapper/`.
+- Each class delegates to its nested `Delegate` interface annotated with `@Mapper(config = MapStructConfiguration.class)`.
+- Keep mapping declarations and fallback helpers in the nested interface; inject the concrete mapper through its constructor.
+- Keep DTOs as records. Let MapStruct generate mapping implementations under `target/generated-sources/annotations/`.
+- Declare renamed fields with `@Mapping`; retain only custom formatting or fallback logic in mapper methods.
+- Keep validation, repository calls and business decisions in services. Address/payload parsing helpers remain ordinary classes.
+- Unmapped target fields fail compilation; explicitly ignore fields that are intentionally absent from a response.
+
 ---
 
 ## 5. Controller Standard
@@ -394,6 +386,19 @@ public interface ListingRepository
     );
 }
 ```
+
+All repositories live directly under `repository/` as interfaces extending `JpaRepository<Entity, Id>`.
+Spring Data creates the implementations; do not create ordinary repository classes or a `repository/impl/` folder.
+Keep one primary repository for each entity. Group the entity's normal queries, atomic updates,
+seed operations, advisory locks and managed-state refresh in that repository.
+Services inject each entity repository once; keep coordination between entities in the service.
+Keep projections used only by one repository nested inside that repository.
+The architecture test rejects multiple repository interfaces for the same entity.
+Use derived methods, JPQL, or native `@Query`/`@Modifying` methods for database access.
+Keep atomic upserts, deduplication, row locks, and advisory locks at the database boundary.
+Repositories that must refresh an already managed entity also extend `JpaRepositoryConfiguration.RefreshOperations`.
+Its shared Spring Data base preserves `EntityManager.refresh` and mandatory transactions without exposing an entity manager to services.
+See the [Spring Data base repository extension documentation](https://docs.spring.io/spring-data/jpa/reference/repositories/custom-implementations.html#repositories.customize-base-repository).
 
 Do not put business decisions inside Repository.
 

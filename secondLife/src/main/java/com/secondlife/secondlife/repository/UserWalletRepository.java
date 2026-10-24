@@ -4,6 +4,7 @@ import com.secondlife.secondlife.entity.UserWallet;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -18,4 +19,12 @@ public interface UserWalletRepository extends JpaRepository<UserWallet, UUID> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT w FROM UserWallet w WHERE w.user.id = :userId")
     Optional<UserWallet> findByUserIdWithLock(@Param("userId") UUID userId);
+
+    @Modifying
+    @Query(value = """
+            INSERT INTO user_wallets(id,user_id,balance,created_at,updated_at)
+            VALUES (:id,:userId,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id) DO NOTHING
+            """, nativeQuery = true)
+    int ensureWalletExists(@Param("id") UUID id, @Param("userId") UUID userId);
 }

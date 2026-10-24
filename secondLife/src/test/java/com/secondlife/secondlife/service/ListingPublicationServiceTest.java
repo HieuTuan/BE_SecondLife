@@ -57,7 +57,7 @@ class ListingPublicationServiceTest {
 
     private static ListingPublicationService service(PostRepository posts, InspectionOrderRepository inspections,
                                                      long window, int limit) {
-        return new ListingPublicationService(mock(ListingCreditService.class), mock(ListingAccessService.class),
+        return new com.secondlife.secondlife.service.impl.ListingPublicationServiceImpl(mock(ListingCreditService.class), mock(ListingAccessService.class),
                 posts, inspections, new BigDecimal("100"), new BigDecimal("20"), new BigDecimal("5"), window, limit);
     }
 }

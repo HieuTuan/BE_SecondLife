@@ -1,5 +1,7 @@
 package com.secondlife.secondlife.service;
 
+import com.secondlife.secondlife.service.impl.InspectionTravelFeeCalculator;
+
 import com.secondlife.secondlife.entity.InspectionTravelTier;
 import com.secondlife.secondlife.repository.InspectionTravelTierRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -91,7 +93,7 @@ class InspectionTravelFeeCalculatorTest {
         assertEquals(0, BigDecimal.valueOf(7000).compareTo(result.getOneWayFee()));
         assertEquals(0, BigDecimal.valueOf(14000).compareTo(result.getRoundTripFee()));
         assertEquals(1, result.getAppliedTiers().size());
-        assertEquals(1, result.getAppliedTiers().get(0).getTierNumber());
+        assertEquals(1, result.getAppliedTiers().get(0).tierNumber());
     }
 
     @Test

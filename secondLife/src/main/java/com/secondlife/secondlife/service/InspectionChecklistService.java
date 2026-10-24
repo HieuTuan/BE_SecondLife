@@ -2,7 +2,6 @@ package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.dto.request.InspectionChecklistTemplateRequest;
 import com.secondlife.secondlife.dto.response.InspectionChecklistResponse;
-
 import java.util.List;
 import java.util.UUID;
 

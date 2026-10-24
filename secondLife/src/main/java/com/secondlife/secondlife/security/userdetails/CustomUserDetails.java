@@ -46,7 +46,7 @@ public class CustomUserDetails implements UserDetails {
                 }
             }
         }
-        this.authorities = auths;
+        this.authorities = Set.copyOf(auths);
     }
 
     @Override

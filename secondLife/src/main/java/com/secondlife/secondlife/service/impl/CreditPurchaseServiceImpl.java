@@ -1,42 +1,51 @@
 package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.common.PageResponse;
-import com.secondlife.secondlife.dto.credit.*;
+import com.secondlife.secondlife.dto.request.CreateCreditPurchaseRequest;
+import com.secondlife.secondlife.dto.response.CreditLedgerResponse;
+import com.secondlife.secondlife.dto.response.CreditPurchaseResponse;
+import com.secondlife.secondlife.dto.response.CreditQuoteResponse;
 import com.secondlife.secondlife.entity.CreditLedgerEntry;
-import com.secondlife.secondlife.enums.CreditType;
 import com.secondlife.secondlife.entity.CreditPurchase;
 import com.secondlife.secondlife.entity.PaymentIntent;
 import com.secondlife.secondlife.enums.CreditPurchaseStatus;
+import com.secondlife.secondlife.enums.CreditType;
 import com.secondlife.secondlife.exception.BadRequestException;
-import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.integration.payment.PaymentProvider;
+import com.secondlife.secondlife.mapper.CreditMapper;
+import com.secondlife.secondlife.repository.CreditBalanceRepository;
 import com.secondlife.secondlife.repository.CreditLedgerRepository;
 import com.secondlife.secondlife.repository.CreditPurchaseRepository;
 import com.secondlife.secondlife.repository.PaymentIntentRepository;
 import com.secondlife.secondlife.service.CreditPricingService;
 import com.secondlife.secondlife.service.CreditPurchaseService;
-import com.secondlife.secondlife.service.payment.PaymentIntentRequest;
-import com.secondlife.secondlife.service.payment.PaymentIntentResult;
-import com.secondlife.secondlife.service.payment.PaymentProvider;
-import com.secondlife.secondlife.service.payment.PaymentStatus;
+import com.secondlife.secondlife.service.WalletService;
+
 import lombok.RequiredArgsConstructor;
+
+import org.springframework.dao.IncorrectResultSizeDataAccessException;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class CreditPurchaseServiceImpl implements CreditPurchaseService {
+
     private final CreditPricingService pricingService;
     private final CreditPurchaseRepository purchaseRepository;
     private final PaymentIntentRepository intentRepository;
     private final CreditLedgerRepository ledgerRepository;
     private final PaymentProvider paymentProvider;
-    private final com.secondlife.secondlife.service.WalletService walletService;
-    private final com.secondlife.secondlife.repository.CreditBalanceGrantRepository balanceGrantRepository;
+    private final WalletService walletService;
+    private final CreditBalanceRepository balanceRepository;
+    private final CreditMapper creditMapper;
 
     @Override
     @Transactional
@@ -79,12 +88,12 @@ public class CreditPurchaseServiceImpl implements CreditPurchaseService {
         grant(purchase, CreditType.VALUATION, purchase.getValuationQuantity());
         grant(purchase, CreditType.AI_CHAT, purchase.getAiChatQuantity());
 
-        return toResponse(purchase, null);
+        return creditMapper.toPurchaseResponse(purchase, null);
     }
 
     private void grant(CreditPurchase purchase, CreditType type, int quantity) {
         if (quantity <= 0) return;
-        long balanceAfter = balanceGrantRepository.grant(purchase.getUserId(), type, quantity);
+        long balanceAfter = balanceRepository.grant(purchase.getUserId(), type, quantity);
 
         CreditLedgerEntry entry = new CreditLedgerEntry();
         entry.setUserId(purchase.getUserId());
@@ -101,32 +110,23 @@ public class CreditPurchaseServiceImpl implements CreditPurchaseService {
     @Override
     @Transactional(readOnly = true)
     public PageResponse<CreditPurchaseResponse> getPurchases(UUID sellerId, Pageable pageable) {
-        return PageResponse.from(purchaseRepository.findByUserIdOrderByCreatedAtDesc(sellerId, pageable)
-                .map(purchase -> toResponse(purchase,
-                        intentRepository.findByPurchaseId(purchase.getId()).orElse(null))));
+        var page = purchaseRepository.findByUserIdOrderByCreatedAtDesc(sellerId, pageable);
+        Map<UUID, PaymentIntent> intents = new HashMap<>();
+        if (!page.isEmpty()) {
+            for (PaymentIntent intent : intentRepository.findByPurchaseIdIn(page.stream().map(CreditPurchase::getId).toList())) {
+                if (intents.putIfAbsent(intent.getPurchaseId(), intent) != null) {
+                    throw new IncorrectResultSizeDataAccessException(1);
+                }
+            }
+        }
+        return PageResponse.from(page.map(purchase -> creditMapper.toPurchaseResponse(purchase, intents.get(purchase.getId()))));
     }
 
     @Override
     @Transactional(readOnly = true)
     public PageResponse<CreditLedgerResponse> getLedger(UUID sellerId, Pageable pageable) {
         return PageResponse.from(ledgerRepository.findByUserIdOrderByCreatedAtDesc(sellerId, pageable)
-                .map(this::toLedgerResponse));
-    }
-
-    private CreditPurchaseResponse toResponse(CreditPurchase purchase, PaymentIntent intent) {
-        CreditQuoteResponse snapshot = new CreditQuoteResponse(purchase.getListingQuantity(),
-                purchase.getValuationQuantity(), purchase.getAiChatQuantity(), purchase.getListingUnitPrice(),
-                purchase.getValuationUnitPrice(), purchase.getAiChatUnitPrice(), purchase.getSubtotal(),
-                purchase.getFinalFee(), purchase.getCurrency());
-        return new CreditPurchaseResponse(purchase.getId(), purchase.getStatus(), snapshot,
-                intent == null ? null : intent.getId(), intent == null ? null : intent.getProvider(),
-                intent == null ? null : intent.getProviderIntentId(),
-                intent == null ? null : intent.getStatus(), purchase.getCreatedAt(), purchase.getPaidAt());
-    }
-
-    private CreditLedgerResponse toLedgerResponse(CreditLedgerEntry entry) {
-        return new CreditLedgerResponse(entry.getId(), entry.getCreditType(), entry.getPurchaseId(),
-                entry.getEntryType(), entry.getQuantityDelta(), entry.getBalanceAfter(), entry.getCreatedAt());
+                .map(creditMapper::toLedgerResponse));
     }
 
     private boolean fitsMoneyColumn(BigDecimal value) {

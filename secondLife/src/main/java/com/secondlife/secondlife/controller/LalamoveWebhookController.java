@@ -2,8 +2,8 @@ package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.exception.BadRequestException;
-import com.secondlife.secondlife.service.shipping.LalamoveWebhookVerifier;
-import com.secondlife.secondlife.service.shipping.ShipmentService;
+import com.secondlife.secondlife.integration.shipping.LalamoveWebhookVerifier;
+import com.secondlife.secondlife.service.ShipmentService;
 import io.swagger.v3.oas.annotations.Operation;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;

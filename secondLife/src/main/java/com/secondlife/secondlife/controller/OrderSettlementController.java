@@ -1,7 +1,8 @@
 package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.ApiResponse;
-import com.secondlife.secondlife.dto.commission.*;
+import com.secondlife.secondlife.dto.response.OrderCommissionResponse;
+import com.secondlife.secondlife.dto.response.SettlementResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.SettlementService;
@@ -11,8 +12,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @RestController @RequestMapping("/api/v1/orders/{orderId}") @RequiredArgsConstructor
 @PreAuthorize("isAuthenticated()")
@@ -32,7 +35,7 @@ public class OrderSettlementController {
         return ApiResponse.success(settlements.getSettlement(currentUser.resolveUserId(user), canReadAny(user), orderId));
     }
     private boolean canReadAny(CustomUserDetails user) {
-        Set<String> authorities = user.getAuthorities().stream().map(a -> a.getAuthority()).collect(java.util.stream.Collectors.toSet());
+        Set<String> authorities = user.getAuthorities().stream().map(a -> a.getAuthority()).collect(Collectors.toSet());
         return (authorities.contains("ROLE_ADMIN") && authorities.contains("ADMIN_COMMISSION_MANAGE"))
                 || (authorities.contains("ROLE_STAFF") && authorities.contains("STAFF_PAYOUT_REVIEW"));
     }

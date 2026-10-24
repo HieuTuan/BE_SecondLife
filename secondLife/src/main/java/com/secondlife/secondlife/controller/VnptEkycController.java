@@ -1,9 +1,9 @@
 package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.ApiResponse;
-import com.secondlife.secondlife.dto.ekyc.vnpt.VnptResults;
+import com.secondlife.secondlife.dto.response.VnptResults;
 import com.secondlife.secondlife.exception.BadRequestException;
-import com.secondlife.secondlife.service.ekyc.vnpt.VnptEkycOrchestrator;
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptEkycOrchestrator;
 import com.secondlife.secondlife.service.SellerOnboardingService;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;

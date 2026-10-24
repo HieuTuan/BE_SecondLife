@@ -1,7 +1,7 @@
 package com.secondlife.secondlife.service.impl;
 
-import com.secondlife.secondlife.dto.ekyc.EkycResult;
-import com.secondlife.secondlife.dto.risk.SellerRiskResult;
+import com.secondlife.secondlife.dto.response.EkycResult;
+import com.secondlife.secondlife.dto.response.SellerRiskResult;
 import com.secondlife.secondlife.entity.SellerVerification;
 import com.secondlife.secondlife.entity.IdentityRestriction;
 import com.secondlife.secondlife.entity.User;

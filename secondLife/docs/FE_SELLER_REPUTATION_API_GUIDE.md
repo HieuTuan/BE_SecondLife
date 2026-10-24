@@ -84,6 +84,8 @@ body bên dưới là JSON đã parse. Axios: lấy axiosResponse.data làm body
 | API | Quyền | Dữ liệu |
 |---|---|---|
 | GET /api/v1/sellers/{sellerId}/reputation | Công khai | body.data |
+| GET /api/v1/users/me | PROFILE_READ_SELF | body.data.sellerReputation (khi có role SELLER) |
+| PATCH /api/v1/users/me | PROFILE_UPDATE_SELF | body.data.sellerReputation (khi có role SELLER) |
 | GET /api/v1/seller/reputation/me | SELLER + PROFILE_READ_SELF | body.data |
 | GET /api/v1/seller/reputation/me/history?page=0&size=10 | SELLER + PROFILE_READ_SELF | body.data.items |
 | GET /api/v1/orders/seller?page=0&size=10 | Đăng nhập, đơn của mình | body.content |
@@ -96,6 +98,8 @@ body bên dưới là JSON đã parse. Axios: lấy axiosResponse.data làm body
 | PATCH /api/v1/notifications/{id}/read | Người nhận | DTO trực tiếp |
 | GET /api/v1/wallets/me | Ví của mình | body.balance |
 | GET /api/v1/wallets/me/transactions?page=0&size=10 | Giao dịch của mình | body.items |
+
+GET và PATCH `/api/v1/users/me` trả thêm object `sellerReputation` cho tài khoản có role SELLER. Object này có cùng contract với `GET /api/v1/seller/reputation/me`; FE đọc điểm tại `body.data.sellerReputation.score`, không tự tính lại hoặc đổi null thành 0. SELLER chưa có giao dịch vẫn nhận object với `score: null`, `evaluatedOrders: 0`, `assessmentStatus: "NO_TRANSACTIONS"`. Tài khoản không có role SELLER không có field `sellerReputation`. Các field hồ sơ và quyền truy cập hiện có giữ nguyên.
 
 Trang bắt đầu 0. Không gửi sort trong các ví dụ. size thực tế chịu giới hạn cấu hình BE. page vượt totalPages có thể trả items rỗng dù totalElements > 0. Không có endpoint công khai xem private history SELLER khác.
 

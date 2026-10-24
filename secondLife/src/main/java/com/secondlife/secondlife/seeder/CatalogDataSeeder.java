@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,7 +17,7 @@ import java.util.List;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "app.seeder.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "app.seeder.enabled", havingValue = "true")
 public class CatalogDataSeeder implements ApplicationRunner {
 
     private final CategoryRepository categoryRepository;

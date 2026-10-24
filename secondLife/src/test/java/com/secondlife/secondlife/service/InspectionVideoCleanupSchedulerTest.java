@@ -1,10 +1,11 @@
 package com.secondlife.secondlife.service;
 
 import com.cloudinary.Cloudinary;
+import com.secondlife.secondlife.integration.storage.CloudinaryMediaStorage;
 import com.cloudinary.Uploader;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
-import com.secondlife.secondlife.service.impl.InspectionVideoCleanupScheduler;
+import com.secondlife.secondlife.scheduler.InspectionVideoCleanupScheduler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -43,7 +44,7 @@ class InspectionVideoCleanupSchedulerTest {
     @BeforeEach
     void setUp() {
         clock = Clock.fixed(Instant.parse("2026-10-14T10:00:00Z"), ZoneOffset.UTC);
-        scheduler = new InspectionVideoCleanupScheduler(inspectionOrderRepository, cloudinary, clock);
+        scheduler = new InspectionVideoCleanupScheduler(inspectionOrderRepository, new CloudinaryMediaStorage(cloudinary), clock);
     }
 
     @Test

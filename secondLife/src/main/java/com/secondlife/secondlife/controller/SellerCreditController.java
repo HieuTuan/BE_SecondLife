@@ -2,11 +2,11 @@ package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.common.PageResponse;
-import com.secondlife.secondlife.dto.credit.CreditBalanceResponse;
-import com.secondlife.secondlife.dto.credit.CreateCreditPurchaseRequest;
-import com.secondlife.secondlife.dto.credit.CreditLedgerResponse;
-import com.secondlife.secondlife.dto.credit.CreditPricingResponse;
-import com.secondlife.secondlife.dto.credit.CreditPurchaseResponse;
+import com.secondlife.secondlife.dto.request.CreateCreditPurchaseRequest;
+import com.secondlife.secondlife.dto.response.CreditBalanceResponse;
+import com.secondlife.secondlife.dto.response.CreditLedgerResponse;
+import com.secondlife.secondlife.dto.response.CreditPricingResponse;
+import com.secondlife.secondlife.dto.response.CreditPurchaseResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.CreditBalanceService;
@@ -16,6 +16,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -71,7 +72,7 @@ public class SellerCreditController {
     @PreAuthorize("hasRole('SELLER') and hasAuthority('CREDIT_READ_SELF')")
     public ResponseEntity<ApiResponse<PageResponse<CreditPurchaseResponse>>> getPurchases(
             @AuthenticationPrincipal CustomUserDetails currentUser,
-            @org.springdoc.core.annotations.ParameterObject Pageable pageable) {
+            @ParameterObject Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success(purchaseService.getPurchases(
                 currentUserProvider.resolveUserId(currentUser), pageable)));
     }
@@ -81,7 +82,7 @@ public class SellerCreditController {
     @PreAuthorize("hasRole('SELLER') and hasAuthority('CREDIT_READ_SELF')")
     public ResponseEntity<ApiResponse<PageResponse<CreditLedgerResponse>>> getLedger(
             @AuthenticationPrincipal CustomUserDetails currentUser,
-            @org.springdoc.core.annotations.ParameterObject Pageable pageable) {
+            @ParameterObject Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success(purchaseService.getLedger(
                 currentUserProvider.resolveUserId(currentUser), pageable)));
     }

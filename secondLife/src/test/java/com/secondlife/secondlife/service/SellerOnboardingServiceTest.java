@@ -3,24 +3,27 @@ package com.secondlife.secondlife.service;
 import com.secondlife.secondlife.config.SellerOnboardingProperties;
 import com.secondlife.secondlife.dto.request.SellerOnboardingRequest;
 import com.secondlife.secondlife.dto.request.SellerPickupAddressRequest;
-import com.secondlife.secondlife.dto.shipping.ShippingAddress;
+import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.entity.SellerOnboarding;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.exception.*;
+import com.secondlife.secondlife.integration.mail.SellerOnboardingMailer;
+import com.secondlife.secondlife.mapper.SellerOnboardingMapper;
 import com.secondlife.secondlife.repository.*;
-import com.secondlife.secondlife.service.shipping.ShippingQuoteService;
-import com.secondlife.secondlife.service.shipping.SellerPickupAddressResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import tools.jackson.databind.json.JsonMapper;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -46,7 +49,7 @@ class SellerOnboardingServiceTest {
         properties.setOtpTtlSeconds(600);
         properties.setResendCooldownSeconds(60);
         properties.setMaxAttempts(2);
-        service = new SellerOnboardingService(onboarding, users, verifications, shipping, mailer, properties, passwords, mapper, pickupAddresses);
+        service = new com.secondlife.secondlife.service.impl.SellerOnboardingServiceImpl(onboarding, users, verifications, shipping, mailer, properties, passwords, mapper, pickupAddresses, MapperTestSupport.mapper(SellerOnboardingMapper.class));
         address = new ShippingAddress("Nguyễn A", "+84976404178", "123, Ấp Vĩnh Thành", new BigDecimal("10.7756"), new BigDecimal("106.7019"));
         row = new SellerOnboarding();
         row.setUserId(userId); row.setShopName("Shop A"); row.setEmail("shop@example.test");

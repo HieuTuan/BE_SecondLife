@@ -10,6 +10,8 @@ import com.secondlife.secondlife.repository.AiChatSessionRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.impl.AiChatServiceImpl;
+import com.secondlife.secondlife.integration.ai.AiChatGateway;
+import com.secondlife.secondlife.integration.ai.SpringAiChatGateway;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -87,8 +89,7 @@ class AiChatConfigurationTest {
 
     @Test
     void configuredImageSizeRejectsImageAboveListingLimit() {
-        var request = request();
-        request.setImages(List.of(new MockMultipartFile("images", "photo.jpg", "image/jpeg", new byte[4])));
+        var request = new AiChatRequest(session.getId(), null, "Describe the product", List.of(new MockMultipartFile("images", "photo.jpg", "image/jpeg", new byte[4])));
         var service = configuredService();
 
         assertThrows(BadRequestException.class, () -> service.processChat(request, owner.getId()));
@@ -96,8 +97,7 @@ class AiChatConfigurationTest {
 
     @Test
     void configuredImageCountRejectsImagesAboveListingLimit() {
-        var request = request();
-        request.setImages(List.of(
+        var request = new AiChatRequest(session.getId(), null, "Describe the product", List.of(
                 new MockMultipartFile("images", "first.jpg", "image/jpeg", new byte[1]),
                 new MockMultipartFile("images", "second.jpg", "image/jpeg", new byte[1]),
                 new MockMultipartFile("images", "third.jpg", "image/jpeg", new byte[1])));
@@ -108,13 +108,12 @@ class AiChatConfigurationTest {
 
     @Test
     void imageChatSendsAllImagesInOneMessageToGoogle() {
-        var request = request();
-        request.setImages(List.of(
+        var request = new AiChatRequest(session.getId(), null, "Describe the product", List.of(
                 new MockMultipartFile("images", "first.jpg", "image/jpeg", new byte[]{1}),
                 new MockMultipartFile("images", "second.png", "image/png", new byte[]{2})));
         var service = configuredService();
 
-        assertEquals("Product description", service.processChat(request, owner.getId()).getReply());
+        assertEquals("Product description", service.processChat(request, owner.getId()).reply());
 
         var prompt = ArgumentCaptor.forClass(Prompt.class);
         verify(google).call(prompt.capture());
@@ -122,7 +121,7 @@ class AiChatConfigurationTest {
         var userMessages = prompt.getValue().getInstructions().stream()
                 .filter(UserMessage.class::isInstance).map(UserMessage.class::cast).toList();
         assertEquals(1, userMessages.size());
-        assertEquals(request.getMessage(), userMessages.getFirst().getText());
+        assertEquals(request.message(), userMessages.getFirst().getText());
         assertEquals(2, userMessages.getFirst().getMedia().size());
         assertEquals("image/jpeg", userMessages.getFirst().getMedia().getFirst().getMimeType().toString());
         assertEquals("image/png", userMessages.getFirst().getMedia().getLast().getMimeType().toString());
@@ -152,7 +151,7 @@ class AiChatConfigurationTest {
     void textChatUsesConfiguredOllamaModel() {
         var service = configuredService();
 
-        assertEquals("Product description", service.processChat(request(), owner.getId()).getReply());
+        assertEquals("Product description", service.processChat(request(), owner.getId()).reply());
 
         var prompt = ArgumentCaptor.forClass(Prompt.class);
         verify(ollama).call(prompt.capture());
@@ -163,7 +162,7 @@ class AiChatConfigurationTest {
     void finalDescriptionUsesConfiguredOllamaModel() {
         var service = configuredService();
 
-        assertEquals("Product description", service.finalizeChat(session.getId(), owner.getId()).getDescription());
+        assertEquals("Product description", service.finalizeChat(session.getId(), owner.getId()).description());
 
         var prompt = ArgumentCaptor.forClass(Prompt.class);
         verify(ollama).call(prompt.capture());
@@ -201,6 +200,8 @@ class AiChatConfigurationTest {
             context.registerBean(UserRepository.class, () -> users);
             context.registerBean(PostRepository.class, () -> posts);
             context.registerBean(ListingCreditService.class, () -> org.mockito.Mockito.mock(ListingCreditService.class));
+            context.registerBean("ollamaChatGateway", AiChatGateway.class, () -> new SpringAiChatGateway(ollama));
+            context.registerBean("googleChatGateway", AiChatGateway.class, () -> new SpringAiChatGateway(google));
             context.registerBean(AiChatServiceImpl.class);
             context.refresh();
             return context.getBean(AiChatServiceImpl.class);
@@ -208,9 +209,12 @@ class AiChatConfigurationTest {
     }
 
     private AiChatRequest request() {
-        AiChatRequest request = new AiChatRequest();
-        request.setSessionId(session.getId());
-        request.setMessage("Describe the product");
+        AiChatRequest request = new AiChatRequest(
+                session.getId(),
+                null,
+                "Describe the product",
+                null
+        );
         return request;
     }
 

@@ -5,8 +5,11 @@ import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.PostImage;
 import com.secondlife.secondlife.exception.AiProviderException;
 import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.integration.ai.AiPriceProvider;
+import com.secondlife.secondlife.mapper.AiPriceEstimationMapper;
 import com.secondlife.secondlife.repository.*;
 import org.junit.jupiter.api.Test;
+import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -26,8 +29,9 @@ class AiValuationVisionTest {
     private final AiPriceProvider provider = mock(AiPriceProvider.class);
     private final CategoryRepository categories = mock(CategoryRepository.class);
     private final ItemRepository items = mock(ItemRepository.class);
-    private final AiValuationService service = new AiValuationService(access, credits, estimates, posts,
-            provider, JsonMapper.builder().build(), categories, items);
+    private final ListingFingerprint listingFingerprint = new com.secondlife.secondlife.service.impl.ListingFingerprintImpl();
+    private final AiValuationService service = new com.secondlife.secondlife.service.impl.AiValuationServiceImpl(access, credits, estimates, posts,
+            provider, JsonMapper.builder().build(), categories, items, listingFingerprint, MapperTestSupport.mapper(AiPriceEstimationMapper.class));
     private final UUID userId = UUID.randomUUID(), postId = UUID.randomUUID(), requestId = UUID.randomUUID();
 
     private Post savedProduct() {
@@ -62,7 +66,7 @@ class AiValuationVisionTest {
         assertEquals(3, input.get("imageUrls").size());
         for (int index = 0; index < 3; index++)
             assertEquals(post.getImageUrls().get(index), input.get("imageUrls").get(index).asText());
-        assertEquals(ListingFingerprint.sha256(snapshot.getValue()), saved.getValue().getInputFingerprint());
+        assertEquals(listingFingerprint.sha256(snapshot.getValue()), saved.getValue().getInputFingerprint());
         assertEquals("gemini-test", saved.getValue().getModelVersion());
     }
 

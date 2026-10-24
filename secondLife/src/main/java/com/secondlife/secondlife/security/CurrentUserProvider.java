@@ -16,11 +16,4 @@ public class CurrentUserProvider {
         }
         throw new UnauthorizedException("Authentication is required");
     }
-
-    public UUID resolveAdminId(CustomUserDetails currentAdmin) {
-        if (currentAdmin != null && currentAdmin.getId() != null) {
-            return currentAdmin.getId();
-        }
-        throw new UnauthorizedException("Authentication is required");
-    }
 }

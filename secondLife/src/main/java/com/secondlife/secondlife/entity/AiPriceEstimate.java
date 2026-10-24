@@ -4,13 +4,14 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.Immutable;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@org.hibernate.annotations.Immutable
+@Immutable
 @Table(name = "ai_price_estimates")
 @Getter
 @Setter

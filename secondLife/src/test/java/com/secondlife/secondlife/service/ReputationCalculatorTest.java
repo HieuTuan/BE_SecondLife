@@ -2,7 +2,7 @@ package com.secondlife.secondlife.service;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 class ReputationCalculatorTest {
-    private final ReputationCalculator calculator=new ReputationCalculator();
+    private final ReputationCalculator calculator=new com.secondlife.secondlife.service.impl.ReputationCalculatorImpl();
     @Test void noTransactionsHaveNoScore() { assertNull(calculator.score(0,0)); }
     @Test void scoreEqualsPercentageOfGoodEvaluatedTransactions() {
         assertEquals("100.00",calculator.score(1,0).toPlainString());

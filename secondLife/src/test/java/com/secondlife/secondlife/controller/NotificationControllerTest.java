@@ -6,6 +6,7 @@ import com.secondlife.secondlife.dto.response.UnreadCountResponseDTO;
 import com.secondlife.secondlife.exception.GlobalExceptionHandler;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.service.NotificationDeviceService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,10 +41,7 @@ class NotificationControllerTest {
     private CurrentUserProvider currentUserProvider;
 
     @Mock
-    private com.secondlife.secondlife.repository.UserDeviceTokenRepository deviceTokenRepository;
-
-    @Mock
-    private com.secondlife.secondlife.repository.UserRepository userRepository;
+    private NotificationDeviceService deviceService;
 
     @InjectMocks
     private NotificationController notificationController;
@@ -202,11 +200,6 @@ class NotificationControllerTest {
         UUID userId = UUID.randomUUID();
         when(currentUserProvider.resolveUserId(any())).thenReturn(userId);
 
-        com.secondlife.secondlife.entity.User user = new com.secondlife.secondlife.entity.User();
-        user.setId(userId);
-        when(userRepository.findById(userId)).thenReturn(java.util.Optional.of(user));
-        when(deviceTokenRepository.findByToken("test_fcm_token_123")).thenReturn(java.util.Optional.empty());
-
         mockMvc.perform(post("/api/v1/notifications/devices")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"token\":\"test_fcm_token_123\",\"deviceType\":\"ANDROID\"}"))
@@ -214,7 +207,8 @@ class NotificationControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.message").value("Đăng ký token thiết bị thành công"));
 
-        verify(deviceTokenRepository, times(1)).save(any());
+        verify(deviceService).registerDevice(eq(userId), argThat(request ->
+                "test_fcm_token_123".equals(request.token()) && "ANDROID".equals(request.deviceType())));
     }
 
     @Test
@@ -225,6 +219,6 @@ class NotificationControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.message").value("Hủy đăng ký token thiết bị thành công"));
 
-        verify(deviceTokenRepository, times(1)).deleteByToken("test_fcm_token_123");
+        verify(deviceService).unregisterDevice("test_fcm_token_123");
     }
 }

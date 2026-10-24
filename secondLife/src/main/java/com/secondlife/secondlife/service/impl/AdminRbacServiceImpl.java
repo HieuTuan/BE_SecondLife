@@ -1,7 +1,12 @@
 package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.common.PageResponse;
-import com.secondlife.secondlife.dto.rbac.*;
+import com.secondlife.secondlife.dto.request.CreatePermissionRequest;
+import com.secondlife.secondlife.dto.request.ReplaceRolePermissionsRequest;
+import com.secondlife.secondlife.dto.request.UpdatePermissionRequest;
+import com.secondlife.secondlife.dto.response.PermissionResponse;
+import com.secondlife.secondlife.dto.response.RolePermissionAuditResponse;
+import com.secondlife.secondlife.dto.response.RolePermissionsResponse;
 import com.secondlife.secondlife.entity.Permission;
 import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.RolePermissionAudit;
@@ -10,34 +15,37 @@ import com.secondlife.secondlife.enums.RoleCode;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.mapper.RbacMapper;
 import com.secondlife.secondlife.repository.PermissionRepository;
 import com.secondlife.secondlife.repository.RolePermissionAuditRepository;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.service.AdminRbacService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Pageable;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.TreeSet;
-import java.util.HashSet;
+import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class AdminRbacServiceImpl implements AdminRbacService {
+
     private final PermissionRepository permissionRepository;
     private final RoleRepository roleRepository;
     private final RolePermissionAuditRepository auditRepository;
+    private final RbacMapper rbacMapper;
 
     @Override
     @Transactional(readOnly = true)
@@ -228,8 +236,7 @@ public class AdminRbacServiceImpl implements AdminRbacService {
         Role role = roleRepository.findByCode(code.name())
                 .orElseThrow(() -> new NotFoundException("Role not found"));
         return PageResponse.from(auditRepository.findByRoleIdOrderByChangedAtDesc(role.getId(), pageable)
-                .map(entry -> new RolePermissionAuditResponse(entry.getId(), entry.getPermissionCode(),
-                        entry.getAction(), entry.getChangedBy(), entry.getChangedAt())));
+                .map(rbacMapper::toRolePermissionAuditResponse));
     }
 
     private void audit(UUID adminId, Role role, String permission, String action) {
@@ -243,15 +250,11 @@ public class AdminRbacServiceImpl implements AdminRbacService {
     }
 
     private RolePermissionsResponse toRoleResponse(Role role) {
-        Set<String> codes = role.getPermissions().stream().map(Permission::getCode)
-                .collect(Collectors.toCollection(java.util.TreeSet::new));
-        return new RolePermissionsResponse(role.getCode(), role.getName(), role.getDescription(),
-                !RoleCode.ADMIN.name().equals(role.getCode()), codes);
+        return rbacMapper.toRoleResponse(role);
     }
 
     private PermissionResponse toPermissionResponse(Permission permission) {
-        return new PermissionResponse(permission.getCode(), permission.getName(), permission.getDescription(),
-                assignableRoles(permission), systemPermission(permission.getCode()));
+        return rbacMapper.toPermissionResponse(permission, assignableRoles(permission), systemPermission(permission.getCode()));
     }
 
     private boolean systemPermission(String code) {
@@ -273,7 +276,7 @@ public class AdminRbacServiceImpl implements AdminRbacService {
         return EnumSet.complementOf(EnumSet.of(RoleCode.ADMIN)).stream()
                 .filter(role -> assignable(role, code))
                 .map(Enum::name)
-                .collect(Collectors.toCollection(java.util.TreeSet::new));
+                .collect(Collectors.toCollection(TreeSet::new));
     }
 
     private boolean assignable(RoleCode role, PermissionCode permission) {

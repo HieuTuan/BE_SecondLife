@@ -2,7 +2,6 @@ package com.secondlife.secondlife.security.userdetails;
 
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.repository.UserRepository;
-import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -12,10 +11,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class CustomUserDetailsService implements UserDetailsService {
 
     private final UserRepository userRepository;
+
+    public CustomUserDetailsService(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
 
     @Override
     @Transactional(readOnly = true)
@@ -26,7 +28,7 @@ public class CustomUserDetailsService implements UserDetailsService {
     }
 
     @Transactional(readOnly = true)
-    public UserDetails loadUserById(UUID id) throws UsernameNotFoundException {
+    public CustomUserDetails loadUserById(UUID id) throws UsernameNotFoundException {
         User user = userRepository.findByIdWithAuthorities(id)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found with id: " + id));
         return new CustomUserDetails(user);

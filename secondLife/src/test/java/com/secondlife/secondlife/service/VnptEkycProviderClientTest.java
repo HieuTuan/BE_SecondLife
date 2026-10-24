@@ -1,13 +1,41 @@
 package com.secondlife.secondlife.service;
 
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptUploadException;
+
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptTokenService;
+
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptResponseMapper;
+
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptOcrClient;
+
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptMaskFaceClient;
+
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptHttpClient;
+
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptFileClient;
+
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptFaceLivenessClient;
+
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptFaceCompareClient;
+
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptEkycOrchestrator;
+
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptCardLivenessClient;
+
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptAuthenticationException;
+
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptApiException;
+
+import com.secondlife.secondlife.integration.ekyc.vnpt.EkycVerificationPolicy;
+
 import com.secondlife.secondlife.config.VnptEkycProperties;
-import com.secondlife.secondlife.dto.ekyc.vnpt.VnptResults;
-import com.secondlife.secondlife.dto.ekyc.EkycRequest;
+import com.secondlife.secondlife.dto.response.VnptResults;
+import com.secondlife.secondlife.dto.request.EkycRequest;
 import com.secondlife.secondlife.enums.EkycStatus;
 import com.secondlife.secondlife.enums.ReasonCode;
 import com.secondlife.secondlife.enums.VerificationType;
-import com.secondlife.secondlife.service.ekyc.impl.VnptEkycProviderClient;
-import com.secondlife.secondlife.service.ekyc.vnpt.*;
+import com.secondlife.secondlife.integration.ekyc.impl.VnptEkycProviderClient;
+import com.secondlife.secondlife.integration.ekyc.vnpt.*;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import org.junit.jupiter.api.Test;

@@ -1,8 +1,12 @@
 package com.secondlife.secondlife.repository;
 
 import com.secondlife.secondlife.entity.InspectionOrder;
+
+import jakarta.persistence.LockModeType;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -18,19 +22,22 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
     @Query("select o.post.user.id from InspectionOrder o where o.id = :id")
     Optional<UUID> findOwnerId(@Param("id") UUID id);
 
-    @Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from InspectionOrder o where o.id = :id")
     Optional<InspectionOrder> findByIdForUpdate(@Param("id") UUID id);
 
     List<InspectionOrder> findByInspectorId(UUID inspectorId);
 
+    @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
     List<InspectionOrder> findByInspectorIdOrderByCreatedAtDesc(UUID inspectorId);
 
-    @Query("SELECT o FROM InspectionOrder o WHERE o.inspector.id = :inspectorId AND o.status IN ('PASSED', 'FAILED', 'COMPLETED') ORDER BY o.updatedAt DESC")
-    Page<InspectionOrder> findPayoutOrdersByInspectorId(@Param("inspectorId") UUID inspectorId, Pageable pageable);
-
+    @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
     Page<InspectionOrder> findByStatus(String status, Pageable pageable);
 
+    @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
+    Page<InspectionOrder> findByStatusIn(java.util.Collection<String> statuses, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
     Page<InspectionOrder> findAll(Pageable pageable);
 
     Optional<InspectionOrder> findByPostId(UUID postId);
@@ -41,8 +48,10 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
 
     Optional<InspectionOrder> findByTamperSealId(String tamperSealId);
 
+    @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
     Page<InspectionOrder> findByBuyerIdOrderByCreatedAtDesc(UUID buyerId, Pageable pageable);
 
+    @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
     Page<InspectionOrder> findBySellerIdOrderByCreatedAtDesc(UUID sellerId, Pageable pageable);
 
     @Query("SELECT o FROM InspectionOrder o WHERE o.status = 'WAITING_FEE_PAYMENT' AND o.paymentDeadline IS NOT NULL AND o.paymentDeadline < :now")

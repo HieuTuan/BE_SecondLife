@@ -1,6 +1,6 @@
 package com.secondlife.secondlife.dto.request;
 
-import com.secondlife.secondlife.validation.StrongPassword;
+import com.secondlife.secondlife.common.validation.StrongPassword;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;

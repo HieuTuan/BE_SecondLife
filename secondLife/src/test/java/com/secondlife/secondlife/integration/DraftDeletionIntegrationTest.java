@@ -1,10 +1,13 @@
 package com.secondlife.secondlife.integration;
 
+import com.secondlife.secondlife.integration.ai.AiPriceProvider;
+
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
-import com.secondlife.secondlife.service.*;
+import com.secondlife.secondlife.service.CloudinaryService;
+import com.secondlife.secondlife.service.ListingCreditService;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -51,7 +54,7 @@ class DraftDeletionIntegrationTest {
     @Autowired AiChatMessageRepository messages;
     @Autowired AiPriceEstimateRepository estimates;
     @Autowired InspectionOrderRepository inspections;
-    @Autowired CreditBalanceGrantRepository grants;
+    @Autowired CreditBalanceRepository balances;
     @Autowired ListingCreditService credits;
     @Autowired PlatformTransactionManager transactionManager;
     @Autowired JwtTokenProvider jwt;
@@ -82,7 +85,7 @@ class DraftDeletionIntegrationTest {
 
     @Test void deletionRetainsImmutableValuationAndDoesNotRefundSpentCredit() throws Exception {
         User seller = user("SELLER"); Post draft = draft(seller);
-        grants.grant(seller.getId(), CreditType.VALUATION, 1);
+        balances.grant(seller.getId(), CreditType.VALUATION, 1);
         new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
             var estimate = new AiPriceEstimate(); estimate.setListingId(draft.getId()); estimate.setRequestId(UUID.randomUUID());
             estimate.setInputFingerprint("a".repeat(64)); estimate.setInputSnapshot("{\"title\":\"Draft product\"}");

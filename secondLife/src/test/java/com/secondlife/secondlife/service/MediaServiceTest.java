@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.service;
 
 import com.cloudinary.Cloudinary;
+import com.secondlife.secondlife.integration.storage.CloudinaryMediaStorage;
 import com.cloudinary.Uploader;
 import com.secondlife.secondlife.dto.response.MediaUploadResponse;
 import com.secondlife.secondlife.exception.BadRequestException;
@@ -35,7 +36,7 @@ class MediaServiceTest {
 
     @BeforeEach
     void setUp() {
-        mediaService = new MediaServiceImpl(cloudinary, 10_485_760L, "secondlife/verifications");
+        mediaService = new MediaServiceImpl(new CloudinaryMediaStorage(cloudinary), 10_485_760L, "secondlife/verifications");
     }
 
     @Test
@@ -106,6 +107,7 @@ class MediaServiceTest {
     void configuredByteLimitRejectsOversizedImageBeforeUpload() {
         new ApplicationContextRunner()
                 .withBean(Cloudinary.class, () -> cloudinary)
+                .withBean(CloudinaryMediaStorage.class)
                 .withBean(MediaServiceImpl.class)
                 .withPropertyValues("app.media.max-file-size-bytes=4", "app.media.default-folder=test-default")
                 .run(context -> {
@@ -126,6 +128,7 @@ class MediaServiceTest {
         });
         new ApplicationContextRunner()
                 .withBean(Cloudinary.class, () -> cloudinary)
+                .withBean(CloudinaryMediaStorage.class)
                 .withBean(MediaServiceImpl.class)
                 .withPropertyValues("app.media.max-file-size-bytes=4", "app.media.default-folder=test-default")
                 .run(context -> {

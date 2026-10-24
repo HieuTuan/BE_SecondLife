@@ -4,9 +4,9 @@ import com.secondlife.secondlife.config.OrderAutoReleaseProperties;
 import com.secondlife.secondlife.entity.Order;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.repository.OrderRepository;
-import com.secondlife.secondlife.repository.DueSettlementOrder;
-import com.secondlife.secondlife.service.impl.OrderAutoReleaseScheduler;
-import com.secondlife.secondlife.service.impl.OrderAutoReleaseService;
+import com.secondlife.secondlife.repository.OrderRepository.DueSettlementOrder;
+import com.secondlife.secondlife.scheduler.OrderAutoReleaseScheduler;
+import com.secondlife.secondlife.service.OrderAutoReleaseService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -20,7 +20,7 @@ class OrderAutoReleaseTest {
     private final OrderRepository orders = mock(OrderRepository.class);
     private final SettlementService settlements = mock(SettlementService.class);
     private final OrderAutoReleaseProperties properties = new OrderAutoReleaseProperties(true, 48, 60000, 100);
-    private final OrderAutoReleaseService service = new OrderAutoReleaseService(orders, settlements, properties,
+    private final OrderAutoReleaseService service = new com.secondlife.secondlife.service.impl.OrderAutoReleaseServiceImpl(orders, settlements, properties,
             Clock.fixed(now, ZoneOffset.UTC));
 
     @Test void releasesAtExactly48HoursButNotOneNanosecondEarlier() {

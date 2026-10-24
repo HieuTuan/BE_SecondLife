@@ -1,7 +1,7 @@
 package com.secondlife.secondlife.service;
 
 import com.cloudinary.Cloudinary;
-import com.secondlife.secondlife.service.impl.CloudinaryServiceImpl;
+import com.secondlife.secondlife.integration.storage.CloudinaryServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 import java.io.IOException;

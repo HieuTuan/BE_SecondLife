@@ -1,6 +1,8 @@
 package com.secondlife.secondlife.controller;
 import com.secondlife.secondlife.common.*;
-import com.secondlife.secondlife.dto.reputation.*;
+import com.secondlife.secondlife.dto.request.ReportRequests;
+import com.secondlife.secondlife.dto.response.ReputationHistoryResponse;
+import com.secondlife.secondlife.dto.response.ReputationResponse;
 import com.secondlife.secondlife.security.*;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.SellerReputationService;

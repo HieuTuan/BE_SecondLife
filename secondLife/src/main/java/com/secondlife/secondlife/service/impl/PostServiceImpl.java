@@ -1,88 +1,83 @@
 package com.secondlife.secondlife.service.impl;
 
-
-
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.secondlife.secondlife.dto.request.AcceptDescriptionRequest;
 import com.secondlife.secondlife.dto.request.AiChatRequest;
-
 import com.secondlife.secondlife.dto.request.PostInitRequest;
-
+import com.secondlife.secondlife.dto.request.PostSubmitRequest;
+import com.secondlife.secondlife.dto.request.UpdateDraftRequest;
 import com.secondlife.secondlife.dto.response.AiChatResponse;
-
 import com.secondlife.secondlife.dto.response.AiPriceEstimationResponse;
-
+import com.secondlife.secondlife.dto.response.PostDto;
+import com.secondlife.secondlife.dto.response.PostFinalizeResponse;
 import com.secondlife.secondlife.dto.response.PostInitResponse;
-
 import com.secondlife.secondlife.dto.response.PostSubmitResponse;
-
+import com.secondlife.secondlife.entity.AiChatMessage;
+import com.secondlife.secondlife.entity.AiChatSession;
+import com.secondlife.secondlife.entity.Category;
 import com.secondlife.secondlife.entity.CategoryQuestionTemplate;
-
-import com.secondlife.secondlife.entity.InspectionOrder;
-
+import com.secondlife.secondlife.entity.Item;
 import com.secondlife.secondlife.entity.Post;
-
+import com.secondlife.secondlife.entity.PostImage;
 import com.secondlife.secondlife.entity.User;
-
-import com.secondlife.secondlife.repository.CategoryQuestionTemplateRepository;
-
-import com.secondlife.secondlife.repository.CategoryRepository;
-
-import com.secondlife.secondlife.repository.InspectionOrderRepository;
-
-import com.secondlife.secondlife.repository.ItemRepository;
-
-import com.secondlife.secondlife.repository.PostRepository;
-
-import com.secondlife.secondlife.repository.UserRepository;
-
-import com.secondlife.secondlife.exception.ForbiddenException;
-
-import com.secondlife.secondlife.exception.NotFoundException;
-
-import com.secondlife.secondlife.service.AiChatService;
-
-import com.secondlife.secondlife.service.ListingAccessService;
-
-import com.secondlife.secondlife.service.ListingCreditService;
-
-import com.secondlife.secondlife.service.ListingFingerprint;
-
-import com.secondlife.secondlife.service.ListingImageSimilarity;
-
 import com.secondlife.secondlife.enums.CreditType;
-
-import com.secondlife.secondlife.exception.BadRequestException;
-
-import com.secondlife.secondlife.exception.ConflictException;
-
 import com.secondlife.secondlife.exception.AiProviderException;
-
+import com.secondlife.secondlife.exception.BadRequestException;
+import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.exception.ForbiddenException;
+import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.integration.ai.AiChatGateway;
+import com.secondlife.secondlife.mapper.PostMapper;
+import com.secondlife.secondlife.repository.AiChatMessageRepository;
+import com.secondlife.secondlife.repository.AiChatSessionRepository;
+import com.secondlife.secondlife.repository.CategoryQuestionTemplateRepository;
+import com.secondlife.secondlife.repository.CategoryRepository;
+import com.secondlife.secondlife.repository.InspectionOrderRepository;
+import com.secondlife.secondlife.repository.ItemRepository;
+import com.secondlife.secondlife.repository.PostRepository;
+import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.service.AiChatService;
+import com.secondlife.secondlife.service.CloudinaryService;
+import com.secondlife.secondlife.service.ListingAccessService;
+import com.secondlife.secondlife.service.ListingCreditService;
+import com.secondlife.secondlife.service.ListingFingerprint;
+import com.secondlife.secondlife.service.ListingImageSimilarity;
+import com.secondlife.secondlife.service.ListingPublicationService;
+import com.secondlife.secondlife.service.ListingReviewService;
 import com.secondlife.secondlife.service.PostService;
-
-import org.springframework.ai.chat.client.ChatClient;
-
+import jakarta.persistence.criteria.Fetch;
+import jakarta.persistence.criteria.JoinType;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.UserMessage;
-
 import org.springframework.ai.chat.prompt.Prompt;
-
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
-
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
-
-
+import java.io.IOException;
 import java.math.BigDecimal;
-
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
-
-
-@lombok.extern.slf4j.Slf4j
+@Slf4j
 @Service
 public class PostServiceImpl implements PostService {
-
-
+    private final PostMapper postMapper;
 
     private final BigDecimal inspectionFee;
 
@@ -97,8 +92,7 @@ public class PostServiceImpl implements PostService {
     private final int maxImages;
 
     private final ListingImageSimilarity imageSimilarity;
-
-
+    private final ListingFingerprint listingFingerprint;
 
     private final PostRepository postRepository;
 
@@ -112,28 +106,26 @@ public class PostServiceImpl implements PostService {
 
     private final CategoryQuestionTemplateRepository templateRepository;
 
-    private final com.secondlife.secondlife.repository.AiChatSessionRepository sessionRepository;
+    private final AiChatSessionRepository sessionRepository;
 
     private final CategoryRepository categoryRepository;
 
     private final ItemRepository itemRepository;
 
-    private final ChatClient chatClient;
+    private final AiChatGateway chatGateway;
 
-    private final com.secondlife.secondlife.service.CloudinaryService cloudinaryService;
+    private final CloudinaryService cloudinaryService;
 
     private final InspectionOrderRepository inspectionOrderRepository;
 
-    private final org.springframework.ai.chat.model.ChatModel googleChatModel;
+    private final AiChatGateway googleChatGateway;
 
-    private final com.secondlife.secondlife.repository.AiChatMessageRepository chatMessageRepository;
+    private final AiChatMessageRepository chatMessageRepository;
 
-    private final com.secondlife.secondlife.service.ListingPublicationService publication;
+    private final ListingPublicationService publication;
 
-    private final com.secondlife.secondlife.service.ListingReviewService reviews;
-
-    private final com.secondlife.secondlife.service.ListingSubmissionLock submissionLock;
-
+    private final ListingReviewService reviews;
+    private final TransactionTemplate transactionTemplate;
 
 
     public PostServiceImpl(PostRepository postRepository,
@@ -148,31 +140,30 @@ public class PostServiceImpl implements PostService {
 
                            CategoryQuestionTemplateRepository templateRepository,
 
-                           com.secondlife.secondlife.repository.AiChatSessionRepository sessionRepository,
+                           AiChatSessionRepository sessionRepository,
 
-                           com.secondlife.secondlife.repository.AiChatMessageRepository chatMessageRepository,
+                           AiChatMessageRepository chatMessageRepository,
 
                            CategoryRepository categoryRepository,
 
                            ItemRepository itemRepository,
 
-                           ChatClient.Builder chatClientBuilder,
+                           @Qualifier("defaultChatGateway") AiChatGateway chatGateway,
 
-                           com.secondlife.secondlife.service.CloudinaryService cloudinaryService,
+                           CloudinaryService cloudinaryService,
 
                            InspectionOrderRepository inspectionOrderRepository,
 
-                           @org.springframework.beans.factory.annotation.Qualifier("googleGenAiChatModel")
+                           @Qualifier("googleChatGateway")
 
-                           org.springframework.ai.chat.model.ChatModel googleChatModel,
+                           AiChatGateway googleChatGateway,
 
-                           com.secondlife.secondlife.service.ListingPublicationService publication,
+                           ListingPublicationService publication,
 
-                           com.secondlife.secondlife.service.ListingReviewService reviews,
-
-                           com.secondlife.secondlife.service.ListingSubmissionLock submissionLock,
+                           ListingReviewService reviews,
 
                            ListingImageSimilarity imageSimilarity,
+                           ListingFingerprint listingFingerprint,
 
                            @Value("${app.inspection.inspection-fee}") BigDecimal inspectionFee,
 
@@ -184,7 +175,10 @@ public class PostServiceImpl implements PostService {
 
                            @Value("${app.listing.min-images}") int minImages,
 
-                           @Value("${app.listing.max-images}") int maxImages) {
+                           @Value("${app.listing.max-images}") int maxImages, PostMapper postMapper,
+                           PlatformTransactionManager transactions) {
+        this.transactionTemplate = transactions != null ? new TransactionTemplate(transactions) : null;
+        this.postMapper = postMapper;
 
         if (inspectionFee.signum() < 0 || shippingFee.signum() < 0)
 
@@ -216,13 +210,13 @@ public class PostServiceImpl implements PostService {
 
         this.itemRepository = itemRepository;
 
-        this.chatClient = chatClientBuilder.build();
+        this.chatGateway = chatGateway;
 
         this.cloudinaryService = cloudinaryService;
 
         this.inspectionOrderRepository = inspectionOrderRepository;
 
-        this.googleChatModel = googleChatModel;
+        this.googleChatGateway = googleChatGateway;
 
         this.chatMessageRepository = chatMessageRepository;
 
@@ -230,9 +224,8 @@ public class PostServiceImpl implements PostService {
 
         this.reviews = reviews;
 
-        this.submissionLock = submissionLock;
-
         this.imageSimilarity = imageSimilarity;
+        this.listingFingerprint = listingFingerprint;
 
         this.inspectionFee = inspectionFee;
 
@@ -248,113 +241,82 @@ public class PostServiceImpl implements PostService {
 
     }
 
-
-
     @Override
-
-    @Transactional
-
     public PostInitResponse initPost(UUID userId, PostInitRequest request) {
-
-        User user = userRepository.findByIdForRoleUpdate(userId)
-
+        User user = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
-        if (request.getCategoryId() == null || !categoryRepository.existsById(request.getCategoryId()))
-
+        if (request.categoryId() == null || !categoryRepository.existsById(request.categoryId()))
             throw new BadRequestException("A valid categoryId is required");
 
-        if (request.getItemId() != null) {
-
-            var item = itemRepository.findById(request.getItemId()).orElseThrow(() -> new BadRequestException("Invalid itemId"));
-
-            if (!request.getCategoryId().equals(item.getCategory().getId()))
-
+        if (request.itemId() != null) {
+            var item = itemRepository.findById(request.itemId()).orElseThrow(() -> new BadRequestException("Invalid itemId"));
+            if (!request.categoryId().equals(item.getCategory().getId()))
                 throw new BadRequestException("itemId does not belong to categoryId");
-
         }
 
-        if (postRepository.countByUser_IdAndStatusIn(userId, java.util.List.of("DRAFT", "REJECTED", "PENDING", "PENDING_INSPECTION")) >= maxUnfinishedDrafts)
-
+        if (postRepository.countByUser_IdAndStatusIn(userId, List.of("DRAFT", "REJECTED", "PENDING", "PENDING_INSPECTION")) >= maxUnfinishedDrafts)
             throw new ConflictException("Maximum " + maxUnfinishedDrafts + " unfinished drafts; finish an existing draft first");
 
-        if (request.getImages() == null || request.getImages().size() < minImages || request.getImages().size() > maxImages)
-
+        if (request.images() == null || request.images().size() < minImages || request.images().size() > maxImages)
             throw new BadRequestException("Upload between " + minImages + " and " + maxImages + " product images");
 
-        for (var image : request.getImages()) {
-
+        for (var image : request.images()) {
             if (image == null || image.isEmpty() || image.getSize() > maxImageBytes || image.getContentType() == null
-
-                    || !java.util.Set.of("image/jpeg", "image/png", "image/webp").contains(image.getContentType()))
-
+                    || !Set.of("image/jpeg", "image/png", "image/webp").contains(image.getContentType()))
                 throw new BadRequestException("Every image must be a non-empty JPEG, PNG or WebP no larger than " + maxImageBytes + " bytes");
-
         }
 
-
-
-        Post post = new Post();
-
-        post.setUser(user);
-
-        post.setCategoryId(request.getCategoryId());
-
-        post.setItemId(request.getItemId());
-
-        post.setStatus("DRAFT");
-
-        
-
-        for (var image : request.getImages()) {
-
+        List<PostImage> postImages = new ArrayList<>();
+        for (var image : request.images()) {
             try {
-
                 byte[] imageBytes = image.getBytes();
-
                 String perceptualFingerprint = imageSimilarity.fingerprint(imageBytes);
-
                 String imageUrl = cloudinaryService.uploadImage(image);
-
                 if (imageUrl == null || imageUrl.isBlank()) throw new IllegalStateException("Image upload returned an empty URL");
-
-                post.getImages().add(new com.secondlife.secondlife.entity.PostImage(imageUrl,
-
-                        ListingFingerprint.sha256(imageBytes), perceptualFingerprint));
-
-            } catch (java.io.IOException e) {
-
+                postImages.add(new PostImage(imageUrl,
+                        listingFingerprint.sha256(imageBytes), perceptualFingerprint));
+            } catch (IOException e) {
                 throw new RuntimeException("Failed to upload image to Cloudinary", e);
-
             } catch (IllegalArgumentException e) {
-
                 throw new BadRequestException("Invalid or excessively large image dimensions");
-
             }
-
         }
 
-
-
-        post.setImageUrl(post.getImages().getFirst().getImageUrl());
-
-        post.setImageFingerprint(post.getImages().getFirst().getImageFingerprint());
-
-
-
-        post = postRepository.save(post);
-
-
+        Post post;
+        if (transactionTemplate != null) {
+            post = transactionTemplate.execute(tx -> {
+                Post p = new Post();
+                p.setUser(userRepository.getReferenceById(userId));
+                p.setCategoryId(request.categoryId());
+                p.setItemId(request.itemId());
+                p.setStatus("DRAFT");
+                p.getImages().addAll(postImages);
+                p.setImageUrl(postImages.getFirst().getImageUrl());
+                p.setImageFingerprint(postImages.getFirst().getImageFingerprint());
+                return postRepository.save(p);
+            });
+        } else {
+            Post p = new Post();
+            p.setUser(userRepository.getReferenceById(userId));
+            p.setCategoryId(request.categoryId());
+            p.setItemId(request.itemId());
+            p.setStatus("DRAFT");
+            p.getImages().addAll(postImages);
+            p.setImageUrl(postImages.getFirst().getImageUrl());
+            p.setImageFingerprint(postImages.getFirst().getImageFingerprint());
+            post = postRepository.save(p);
+        }
 
         // Extract names early
-        final String categoryName = categoryRepository.findById(request.getCategoryId())
-                .map(com.secondlife.secondlife.entity.Category::getName).orElse("Không xác định");
-        final String itemName = request.getItemId() != null ?
-                itemRepository.findById(request.getItemId())
-                    .map(com.secondlife.secondlife.entity.Item::getName).orElse("Không xác định")
+        final String categoryName = categoryRepository.findById(request.categoryId())
+                .map(Category::getName).orElse("Không xác định");
+        final String itemName = request.itemId() != null ?
+                itemRepository.findById(request.itemId())
+                    .map(Item::getName).orElse("Không xác định")
                 : "Không xác định";
 
-        boolean isAiMode = request.getMode() == null || !"manual".equalsIgnoreCase(request.getMode().trim());
+        boolean isAiMode = request.mode() == null || !"manual".equalsIgnoreCase(request.mode().trim());
 
         if (isAiMode) {
             // Deduct 1 AI_CHAT credit immediately in an autonomous transaction because AI Vision scan consumes costly GPU/LLM resources
@@ -362,13 +324,11 @@ public class PostServiceImpl implements PostService {
             listingCredits.consumeImmediately(userId, CreditType.AI_CHAT, chatCreditKey);
 
             // 3. Call AI to analyze image
-            AiChatRequest aiRequest = new AiChatRequest();
-            aiRequest.setPostId(post.getId());
 
             // Prompt for AI Vision: Check match between images and selected category/item/brand
-            String selectedCategoryName = categoryRepository.findById(request.getCategoryId()).orElseThrow().getName();
-            String selectedItemName = request.getItemId() == null ? "Không xác định" : itemRepository.findById(request.getItemId()).orElseThrow().getName();
-            String declaredBrand = request.getBrand() != null && !request.getBrand().isBlank() ? request.getBrand().trim() : null;
+            String selectedCategoryName = categoryRepository.findById(request.categoryId()).orElseThrow().getName();
+            String selectedItemName = request.itemId() == null ? "Không xác định" : itemRepository.findById(request.itemId()).orElseThrow().getName();
+            String declaredBrand = request.brand() != null && !request.brand().isBlank() ? request.brand().trim() : null;
 
             StringBuilder visionCheckPrompt = new StringBuilder();
             visionCheckPrompt.append("Người bán đang đăng bài với thông tin khai báo ở Bước 1:\n");
@@ -420,11 +380,11 @@ public class PostServiceImpl implements PostService {
                     Sau đó nhận xét ngắn gọn, khách quan về ngoại quan, màu sắc, tình trạng và các đặc điểm nhìn thấy được của sản phẩm để phục vụ đăng bán. Chỉ mô tả sản phẩm nhìn thấy, không suy đoán hãng hay tuổi đời nếu ảnh không chứng minh. Không đề xuất giá, không thêm lời chào, không tự đặt câu hỏi.
                     """, selectedItemName, declaredBrand != null ? " và đúng/không mâu thuẫn hãng " + declaredBrand : ""));
 
-            aiRequest.setMessage(visionCheckPrompt.toString());
-            aiRequest.setImages(request.getImages());
+            AiChatRequest aiRequest = new AiChatRequest(
+                    null, post.getId(), visionCheckPrompt.toString(), request.images());
 
             AiChatResponse aiResponse = aiChatService.processChat(aiRequest, userId);
-            String aiReply = aiResponse.getReply() != null ? aiResponse.getReply().trim() : "";
+            String aiReply = aiResponse.reply() != null ? aiResponse.reply().trim() : "";
 
             // 1. Kiểm tra không khớp loại sản phẩm
             boolean isTypeMismatch = aiReply.contains("[CẢNH_BÁO_KHÔNG_KHỚP_LOAI]")
@@ -456,13 +416,17 @@ public class PostServiceImpl implements PostService {
                         .trim();
                 log.warn("Post init blocked: Image does not match category/item. Selected: {} / {}, Reason: {}",
                         selectedCategoryName, selectedItemName, cleanReason);
-                postRepository.delete(post);
+                if (transactionTemplate != null) {
+                    transactionTemplate.executeWithoutResult(tx -> postRepository.delete(post));
+                } else {
+                    postRepository.delete(post);
+                }
                 throw new BadRequestException("HÌNH ẢNH KHÔNG KHỚP LOẠI SẢN PHẨM: " + cleanReason);
             }
 
             if (isBrandMismatch) {
                 String detectedBrand = "";
-                java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\[CẢNH_BÁO_KHÔNG_KHỚP_HANG:\\s*([^\\]]+)\\]").matcher(aiReply);
+                Matcher m = Pattern.compile("\\[CẢNH_BÁO_KHÔNG_KHỚP_HANG:\\s*([^\\]]+)\\]").matcher(aiReply);
                 if (m.find()) {
                     detectedBrand = m.group(1).trim();
                 }
@@ -472,22 +436,21 @@ public class PostServiceImpl implements PostService {
                         .trim();
                 log.warn("Post init blocked: Image does not match brand. Declared: {}, Detected: {}, Reason: {}",
                         declaredBrand, detectedBrand, cleanReason);
-                postRepository.delete(post);
+                if (transactionTemplate != null) {
+                    transactionTemplate.executeWithoutResult(tx -> postRepository.delete(post));
+                } else {
+                    postRepository.delete(post);
+                }
                 String brandPrefix = detectedBrand.isEmpty() ? "" : "[DETECTED_BRAND:" + detectedBrand + "] ";
                 throw new BadRequestException("HÌNH ẢNH KHÔNG KHỚP THƯƠNG HIỆU: " + brandPrefix + cleanReason);
             }
 
             // Nếu hợp lệ: làm sạch tiền tố [HỢP_LỆ]
             String cleanDescription = aiReply.replaceFirst("^\\[HỢP_LỆ\\]\\s*", "").trim();
-            post.setAiDescription(cleanDescription);
-            // QUAN TRỌNG: description bài đăng để trống khi vừa khởi tạo.
-            // Chỉ lưu kết quả thẩm định ảnh vào aiDescription, KHÔNG tự gán văn bản thô vào description bài đăng.
-            post.setDescription(null);
-            post.setDescriptionAccepted(false);
 
             // 4. Fetch or Generate Template:
             CategoryQuestionTemplate template = templateRepository
-                    .findByCategoryIdAndItemId(request.getCategoryId(), request.getItemId())
+                    .findByCategoryIdAndItemId(request.categoryId(), request.itemId())
                     .orElse(null);
 
             boolean isLegacyTemplate = template != null && template.getTemplateText() != null && (
@@ -543,15 +506,31 @@ public class PostServiceImpl implements PostService {
                         """,
                         itemName, categoryName, itemName, itemName, itemName, itemName, itemName);
 
-                String generatedTemplate = chatClient.prompt(promptText).call().content();
+                String generatedTemplate = chatGateway.complete(promptText);
+                final String genText = generatedTemplate;
 
-                if (template == null) {
-                    template = new CategoryQuestionTemplate();
-                    template.setCategoryId(request.getCategoryId());
-                    template.setItemId(request.getItemId());
+                if (transactionTemplate != null) {
+                    template = transactionTemplate.execute(tx -> {
+                        CategoryQuestionTemplate t = templateRepository
+                                .findByCategoryIdAndItemId(request.categoryId(), request.itemId())
+                                .orElse(null);
+                        if (t == null) {
+                            t = new CategoryQuestionTemplate();
+                            t.setCategoryId(request.categoryId());
+                            t.setItemId(request.itemId());
+                        }
+                        t.setTemplateText(genText);
+                        return templateRepository.save(t);
+                    });
+                } else {
+                    if (template == null) {
+                        template = new CategoryQuestionTemplate();
+                        template.setCategoryId(request.categoryId());
+                        template.setItemId(request.itemId());
+                    }
+                    template.setTemplateText(genText);
+                    template = templateRepository.save(template);
                 }
-                template.setTemplateText(generatedTemplate);
-                template = templateRepository.save(template);
             }
 
             String templateText = template != null ? template.getTemplateText() : "";
@@ -561,24 +540,50 @@ public class PostServiceImpl implements PostService {
                 templateText = templateText.replaceAll("\\?\\s+(?=[A-ZÀ-Ỹ0-9\\*\\#])", "?\n");
             }
 
-            // Fetch session to set on post
-            com.secondlife.secondlife.entity.AiChatSession session = sessionRepository.findById(aiResponse.getSessionId())
-                    .orElse(null);
-            post.setAiChatSession(session);
-            post.setTemplate(template);
-            postRepository.save(post);
+            // Update post with session and template
+            final CategoryQuestionTemplate finalTemplate = template;
+            final UUID finalPostId = post.getId();
+            if (transactionTemplate != null) {
+                transactionTemplate.executeWithoutResult(tx -> {
+                    Post managed = postRepository.findById(finalPostId).orElse(post);
+                    AiChatSession session = sessionRepository.findById(aiResponse.sessionId()).orElse(null);
+                    managed.setAiDescription(cleanDescription);
+                    managed.setDescription(null);
+                    managed.setDescriptionAccepted(false);
+                    managed.setAiChatSession(session);
+                    managed.setTemplate(finalTemplate);
+                    postRepository.save(managed);
+                });
+            } else {
+                AiChatSession session = sessionRepository.findById(aiResponse.sessionId()).orElse(null);
+                post.setAiDescription(cleanDescription);
+                post.setDescription(null);
+                post.setDescriptionAccepted(false);
+                post.setAiChatSession(session);
+                post.setTemplate(finalTemplate);
+                postRepository.save(post);
+            }
 
             return new PostInitResponse(
                     post.getId(),
-                    aiResponse.getSessionId(),
+                    aiResponse.sessionId(),
                     templateText,
                     cleanDescription);
         } else {
             // Manual mode: No AI visual scan, no credit deducted
-            post.setAiDescription(null);
-            post.setDescription(null);
-            post.setDescriptionAccepted(false);
-            postRepository.save(post);
+            if (transactionTemplate != null) {
+                transactionTemplate.executeWithoutResult(tx -> {
+                    post.setAiDescription(null);
+                    post.setDescription(null);
+                    post.setDescriptionAccepted(false);
+                    postRepository.save(post);
+                });
+            } else {
+                post.setAiDescription(null);
+                post.setDescription(null);
+                post.setDescriptionAccepted(false);
+                postRepository.save(post);
+            }
 
             return new PostInitResponse(
                     post.getId(),
@@ -590,16 +595,16 @@ public class PostServiceImpl implements PostService {
 
     @Override
     @Transactional
-    public com.secondlife.secondlife.dto.response.PostFinalizeResponse finalizeChatAndDescription(UUID userId, UUID sessionId) {
+    public PostFinalizeResponse finalizeChatAndDescription(UUID userId, UUID sessionId) {
         return finalizeChatAndDescription(userId, sessionId, null);
     }
 
     @Override
     @Transactional
-    public com.secondlife.secondlife.dto.response.PostFinalizeResponse finalizeChatAndDescription(UUID userId,
+    public PostFinalizeResponse finalizeChatAndDescription(UUID userId,
                                                                                                   UUID sessionId,
                                                                                                   String message) {
-        com.secondlife.secondlife.entity.AiChatSession session = sessionRepository.findById(sessionId)
+        AiChatSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new NotFoundException("Session not found"));
         if (session.getUser() == null || !userId.equals(session.getUser().getId())) {
             throw new ForbiddenException("This chat session belongs to another user");
@@ -610,10 +615,10 @@ public class PostServiceImpl implements PostService {
 
         // Deduct 1 AI_CHAT credit each time seller clicks finalize
         String idempotencyKey = "AI_FINALIZE:" + sessionId + ":" + UUID.randomUUID();
-        listingCredits.consume(userId, com.secondlife.secondlife.enums.CreditType.AI_CHAT, idempotencyKey);
+        listingCredits.consume(userId, CreditType.AI_CHAT, idempotencyKey);
 
         if (message != null && !message.isBlank()) {
-            com.secondlife.secondlife.entity.AiChatMessage userDbMsg = new com.secondlife.secondlife.entity.AiChatMessage();
+            AiChatMessage userDbMsg = new AiChatMessage();
             userDbMsg.setSession(session);
             userDbMsg.setRole("USER");
             userDbMsg.setMessageContent(message.trim());
@@ -625,11 +630,11 @@ public class PostServiceImpl implements PostService {
         var finalizeResponse = aiChatService.finalizeChat(sessionId, userId);
 
         if (post != null) {
-            post.setAiDescription(finalizeResponse.getDescription());
-            post.setDescription(finalizeResponse.getDescription());
+            post.setAiDescription(finalizeResponse.description());
+            post.setDescription(finalizeResponse.description());
             post.setDescriptionAccepted(false);
-            if (finalizeResponse.getTitle() != null && !finalizeResponse.getTitle().isBlank()) {
-                post.setTitle(finalizeResponse.getTitle());
+            if (finalizeResponse.title() != null && !finalizeResponse.title().isBlank()) {
+                post.setTitle(finalizeResponse.title());
             }
             postRepository.save(post);
         }
@@ -639,16 +644,16 @@ public class PostServiceImpl implements PostService {
 
     @Override
     @Transactional
-    public com.secondlife.secondlife.dto.response.PostFinalizeResponse regenerateChatAndDescription(UUID userId, UUID sessionId) {
+    public PostFinalizeResponse regenerateChatAndDescription(UUID userId, UUID sessionId) {
         return regenerateChatAndDescription(userId, sessionId, null);
     }
 
     @Override
     @Transactional
-    public com.secondlife.secondlife.dto.response.PostFinalizeResponse regenerateChatAndDescription(UUID userId,
+    public PostFinalizeResponse regenerateChatAndDescription(UUID userId,
                                                                                                     UUID sessionId,
                                                                                                     String message) {
-        com.secondlife.secondlife.entity.AiChatSession session = sessionRepository.findById(sessionId)
+        AiChatSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new NotFoundException("Session not found"));
         if (session.getUser() == null || !userId.equals(session.getUser().getId())) {
             throw new ForbiddenException("This chat session belongs to another user");
@@ -659,10 +664,10 @@ public class PostServiceImpl implements PostService {
 
         // Deduct 1 AI_CHAT credit each time seller clicks regenerate
         String idempotencyKey = "AI_REGENERATE:" + sessionId + ":" + UUID.randomUUID();
-        listingCredits.consume(userId, com.secondlife.secondlife.enums.CreditType.AI_CHAT, idempotencyKey);
+        listingCredits.consume(userId, CreditType.AI_CHAT, idempotencyKey);
 
         if (message != null && !message.isBlank()) {
-            com.secondlife.secondlife.entity.AiChatMessage userDbMsg = new com.secondlife.secondlife.entity.AiChatMessage();
+            AiChatMessage userDbMsg = new AiChatMessage();
             userDbMsg.setSession(session);
             userDbMsg.setRole("USER");
             userDbMsg.setMessageContent(message.trim());
@@ -673,11 +678,11 @@ public class PostServiceImpl implements PostService {
 
         var finalizeResponse = aiChatService.regenerateDescription(sessionId, userId);
         if (post != null) {
-            post.setAiDescription(finalizeResponse.getDescription());
-            post.setDescription(finalizeResponse.getDescription());
+            post.setAiDescription(finalizeResponse.description());
+            post.setDescription(finalizeResponse.description());
             post.setDescriptionAccepted(false);
-            if (finalizeResponse.getTitle() != null && !finalizeResponse.getTitle().isBlank()) {
-                post.setTitle(finalizeResponse.getTitle());
+            if (finalizeResponse.title() != null && !finalizeResponse.title().isBlank()) {
+                post.setTitle(finalizeResponse.title());
             }
             postRepository.save(post);
         }
@@ -696,10 +701,10 @@ public class PostServiceImpl implements PostService {
         listingCredits.consume(userId, CreditType.AI_CHAT, idempotencyKey);
 
         final String categoryName = post.getCategoryId() != null ?
-                categoryRepository.findById(post.getCategoryId()).map(com.secondlife.secondlife.entity.Category::getName).orElse("Không xác định")
+                categoryRepository.findById(post.getCategoryId()).map(Category::getName).orElse("Không xác định")
                 : "Không xác định";
         final String itemName = post.getItemId() != null ?
-                itemRepository.findById(post.getItemId()).map(com.secondlife.secondlife.entity.Item::getName).orElse("Không xác định")
+                itemRepository.findById(post.getItemId()).map(Item::getName).orElse("Không xác định")
                 : "Không xác định";
         final String description = post.getDescription() != null && !post.getDescription().isBlank() ? post.getDescription() : post.getAiDescription();
 
@@ -718,7 +723,7 @@ public class PostServiceImpl implements PostService {
                 """,
                 categoryName, itemName, context != null ? context : "", description != null ? description : "");
 
-        String generatedTitle = chatClient.prompt(promptText).call().content();
+        String generatedTitle = chatGateway.complete(promptText);
         if (generatedTitle != null && !generatedTitle.isBlank()) {
             generatedTitle = generatedTitle.replaceAll("^[\\\"'\\*\\-\\s]+|[\\\"'\\*\\-\\s]+$", "").trim();
             post.setTitle(generatedTitle);
@@ -731,17 +736,17 @@ public class PostServiceImpl implements PostService {
 
     @Override
     @Transactional
-    public PostSubmitResponse submitPost(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.PostSubmitRequest request) {
+    public PostSubmitResponse submitPost(UUID userId, UUID postId, PostSubmitRequest request) {
 
         Post post = listingAccess.owned(userId, postId, true);
 
-        if (request.getTitle() == null || request.getTitle().isBlank() || request.getTitle().length() > 255
+        if (request.title() == null || request.title().isBlank() || request.title().length() > 255
 
-                || request.getDescription() == null || request.getDescription().isBlank() || request.getDescription().length() > 10000
+                || request.description() == null || request.description().isBlank() || request.description().length() > 10000
 
-                || request.getPrice() == null || request.getPrice().compareTo(BigDecimal.ONE) < 0
+                || request.price() == null || request.price().compareTo(BigDecimal.ONE) < 0
 
-                || request.getPrice().scale() > 2 || request.getPrice().precision() - request.getPrice().scale() > 16)
+                || request.price().scale() > 2 || request.price().precision() - request.price().scale() > 16)
 
             throw new BadRequestException("A valid title, description and positive VND price are required");
 
@@ -751,11 +756,11 @@ public class PostServiceImpl implements PostService {
 
             if (!("ACTIVE".equals(post.getStatus()) || "PENDING_INSPECTION".equals(post.getStatus()) || "PENDING".equals(post.getStatus()))
 
-                    || !ListingFingerprint.normalize(request.getTitle()).equals(ListingFingerprint.normalize(post.getTitle()))
+                    || !listingFingerprint.normalize(request.title()).equals(listingFingerprint.normalize(post.getTitle()))
 
-                    || !ListingFingerprint.normalize(request.getDescription()).equals(ListingFingerprint.normalize(post.getDescription()))
+                    || !listingFingerprint.normalize(request.description()).equals(listingFingerprint.normalize(post.getDescription()))
 
-                    || request.getPrice().compareTo(post.getPrice()) != 0)
+                    || request.price().compareTo(post.getPrice()) != 0)
 
                 throw new ConflictException("This post has already been submitted; re-up is not supported");
 
@@ -767,7 +772,7 @@ public class PostServiceImpl implements PostService {
 
         listingAccess.requireVerifiedSeller(userId);
 
-        if (!post.isDescriptionAccepted() || !ListingFingerprint.normalize(request.getDescription()).equals(ListingFingerprint.normalize(post.getDescription())))
+        if (!post.isDescriptionAccepted() || !listingFingerprint.normalize(request.description()).equals(listingFingerprint.normalize(post.getDescription())))
 
             throw new ConflictException("Accept the latest product description before submitting");
 
@@ -775,41 +780,41 @@ public class PostServiceImpl implements PostService {
 
         publication.requirePublishAvailable(userId);
 
-        post.setTitle(request.getTitle().trim());
+        post.setTitle(request.title().trim());
 
-        post.setDescription(request.getDescription().trim());
+        post.setDescription(request.description().trim());
 
-        post.setPrice(request.getPrice());
+        post.setPrice(request.price());
 
-        post.setShippingWeight(request.getShippingWeight());
+        post.setShippingWeight(request.shippingWeight());
 
-        post.setShippingLength(request.getShippingLength());
+        post.setShippingLength(request.shippingLength());
 
-        post.setShippingWidth(request.getShippingWidth());
+        post.setShippingWidth(request.shippingWidth());
 
-        post.setShippingHeight(request.getShippingHeight());
+        post.setShippingHeight(request.shippingHeight());
 
-        submissionLock.lock();
+        postRepository.lockForSubmission();
 
-        var matches = new java.util.ArrayList<UUID>();
+        var matches = new ArrayList<UUID>();
 
         for (Post other : postRepository.findByIdNotAndStatusIn(postId,
 
-                java.util.List.of("ACTIVE", "PENDING_INSPECTION", "PENDING"))) {
+                List.of("ACTIVE", "PENDING_INSPECTION", "PENDING"))) {
 
-            boolean sameImage = !java.util.Collections.disjoint(post.getImageFingerprints(), other.getImageFingerprints());
+            boolean sameImage = !Collections.disjoint(post.getImageFingerprints(), other.getImageFingerprints());
 
             boolean visuallySimilar = post.getImages().stream().anyMatch(image -> other.getImages().stream().anyMatch(candidate ->
 
                     imageSimilarity.similar(image.getPerceptualFingerprint(), candidate.getPerceptualFingerprint())));
 
-            boolean sameProduct = userId.equals(other.getUser().getId()) && java.util.Objects.equals(post.getCategoryId(), other.getCategoryId())
+            boolean sameProduct = userId.equals(other.getUser().getId()) && Objects.equals(post.getCategoryId(), other.getCategoryId())
 
-                    && java.util.Objects.equals(post.getItemId(), other.getItemId())
+                    && Objects.equals(post.getItemId(), other.getItemId())
 
-                    && ListingFingerprint.normalize(post.getTitle()).equals(ListingFingerprint.normalize(other.getTitle()))
+                    && listingFingerprint.normalize(post.getTitle()).equals(listingFingerprint.normalize(other.getTitle()))
 
-                    && ListingFingerprint.normalize(post.getDescription()).equals(ListingFingerprint.normalize(other.getDescription()));
+                    && listingFingerprint.normalize(post.getDescription()).equals(listingFingerprint.normalize(other.getDescription()));
 
             if (sameImage || visuallySimilar || sameProduct) matches.add(other.getId());
 
@@ -829,7 +834,7 @@ public class PostServiceImpl implements PostService {
 
             post.setReviewReason("Possible duplicate product images or listing content; STAFF review required");
 
-            post.setDuplicatePostIds(matches.stream().map(UUID::toString).collect(java.util.stream.Collectors.joining(",")));
+            post.setDuplicatePostIds(matches.stream().map(UUID::toString).collect(Collectors.joining(",")));
 
             postRepository.save(post);
 
@@ -867,8 +872,6 @@ public class PostServiceImpl implements PostService {
 
         }
 
-
-
         publication.accept(post);
 
         postRepository.save(post);
@@ -876,8 +879,6 @@ public class PostServiceImpl implements PostService {
         return submitResponse(post);
 
     }
-
-
 
     private PostSubmitResponse submitResponse(Post post) {
 
@@ -896,8 +897,6 @@ public class PostServiceImpl implements PostService {
                 : "Bài đăng đã được duyệt và hiển thị trên sàn.", null);
 
     }
-
-
 
     /**
 
@@ -921,8 +920,6 @@ public class PostServiceImpl implements PostService {
 
                 Giá: %s VNĐ
 
-
-
                 TIÊU CHÍ KIỂM DUYỆT:
 
                 1. HỢP LỆ (APPROVED):
@@ -940,8 +937,6 @@ public class PostServiceImpl implements PostService {
                    - Dấu hiệu lừa đảo trắng trợn, spam vô nghĩa, lôi kéo giao dịch ngoài sàn.
 
                    - Tiêu đề và mô tả hoàn toàn sai lệch hoặc không liên quan đến đồ dùng cần bán.
-
-
 
                 QUY TẮC BẮT BUỘC:
 
@@ -961,11 +956,9 @@ public class PostServiceImpl implements PostService {
 
         Prompt aiPrompt = new Prompt(new UserMessage(prompt));
 
-        ChatClient googleClient = ChatClient.builder(googleChatModel).build();
-
         String result;
 
-        try { result = googleClient.prompt(aiPrompt).call().content(); }
+        try { result = googleChatGateway.complete(aiPrompt); }
 
         catch (Exception ex) { throw new AiProviderException("AI moderation unavailable; no listing credit was consumed", ex); }
 
@@ -980,8 +973,6 @@ public class PostServiceImpl implements PostService {
         return result;
 
     }
-
-
 
     @Override
 
@@ -999,8 +990,6 @@ public class PostServiceImpl implements PostService {
 
         }
 
-
-
         listingAccess.requireVerifiedSeller(post.getUser().getId());
 
         post.setStatus("ACTIVE");
@@ -1010,8 +999,6 @@ public class PostServiceImpl implements PostService {
         reviews.approve(postId, null);
 
     }
-
-
 
     @Override
 
@@ -1025,15 +1012,11 @@ public class PostServiceImpl implements PostService {
 
                 .orElseThrow(() -> new RuntimeException("Post not found"));
 
-
-
         if (!"PENDING".equals(post.getStatus())) {
 
             throw new RuntimeException("Post must be in PENDING status to be rejected");
 
         }
-
-
 
         post.setStatus("REJECTED");
 
@@ -1043,23 +1026,21 @@ public class PostServiceImpl implements PostService {
 
     }
 
-
-
     @Override
 
     @Transactional(readOnly = true)
 
-    public org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto> getAdminPosts(
+    public Page<PostDto> getAdminPosts(
 
-            String status, UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable) {
+            String status, UUID categoryId, UUID itemId, Pageable pageable) {
 
-        org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> {
+        Specification<Post> spec = (root, query, cb) -> {
 
             if (Long.class != query.getResultType()) {
 
-                jakarta.persistence.criteria.Fetch<Object, Object> userFetch = root.fetch("user", jakarta.persistence.criteria.JoinType.LEFT);
+                Fetch<Object, Object> userFetch = root.fetch("user", JoinType.LEFT);
 
-                userFetch.fetch("profile", jakarta.persistence.criteria.JoinType.LEFT);
+                userFetch.fetch("profile", JoinType.LEFT);
 
             }
 
@@ -1085,27 +1066,25 @@ public class PostServiceImpl implements PostService {
 
         }
 
-        return postRepository.findAll(spec, pageable).map(com.secondlife.secondlife.dto.response.PostDto::fromEntity);
+        return postRepository.findAll(spec, pageable).map(postMapper::toResponse);
 
     }
-
-
 
     @Override
 
     @Transactional(readOnly = true)
 
-    public org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto> getPublicPosts(UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable) {
+    public Page<PostDto> getPublicPosts(UUID categoryId, UUID itemId, Pageable pageable) {
 
         // Public posts should only return ACTIVE ones
 
-        org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> {
+        Specification<Post> spec = (root, query, cb) -> {
 
             if (Long.class != query.getResultType()) {
 
-                jakarta.persistence.criteria.Fetch<Object, Object> userFetch = root.fetch("user", jakarta.persistence.criteria.JoinType.LEFT);
+                Fetch<Object, Object> userFetch = root.fetch("user", JoinType.LEFT);
 
-                userFetch.fetch("profile", jakarta.persistence.criteria.JoinType.LEFT);
+                userFetch.fetch("profile", JoinType.LEFT);
 
             }
 
@@ -1127,25 +1106,21 @@ public class PostServiceImpl implements PostService {
 
         }
 
-        return postRepository.findAll(spec, pageable).map(com.secondlife.secondlife.dto.response.PostDto::fromEntity);
+        return postRepository.findAll(spec, pageable).map(postMapper::toResponse);
 
     }
-
-
 
     @Override
 
     @Transactional(readOnly = true)
 
-    public com.secondlife.secondlife.dto.response.PostDto getPostDetail(UUID postId) {
+    public PostDto getPostDetail(UUID postId) {
 
         Post post = postRepository.findById(postId).orElseThrow(() -> new NotFoundException("Post not found"));
 
-        return com.secondlife.secondlife.dto.response.PostDto.fromEntity(post);
+        return postMapper.toResponse(post);
 
     }
-
-
 
     @Override
     @Transactional
@@ -1160,9 +1135,7 @@ public class PostServiceImpl implements PostService {
 
         // Deduct 1 valuation credit (each valuation / re-valuation consumes 1 credit)
         String valuationKey = "VALUATION:" + postId + ":" + UUID.randomUUID();
-        listingCredits.consume(userId, com.secondlife.secondlife.enums.CreditType.VALUATION, valuationKey);
-
-
+        listingCredits.consume(userId, CreditType.VALUATION, valuationKey);
 
         // Build context from post data
 
@@ -1170,7 +1143,7 @@ public class PostServiceImpl implements PostService {
 
                 itemRepository.findById(post.getItemId())
 
-                        .map(com.secondlife.secondlife.entity.Item::getName).orElse("Không xác định")
+                        .map(Item::getName).orElse("Không xác định")
 
                 : "Không xác định";
 
@@ -1182,13 +1155,11 @@ public class PostServiceImpl implements PostService {
 
                 : "";
 
-
-
         StringBuilder chatContext = new StringBuilder();
-        java.util.UUID targetSessionId = null;
+        UUID targetSessionId = null;
         if (requestId != null && !requestId.trim().isEmpty()) {
             try {
-                targetSessionId = java.util.UUID.fromString(requestId.trim());
+                targetSessionId = UUID.fromString(requestId.trim());
             } catch (Exception ignored) {
             }
         }
@@ -1199,7 +1170,7 @@ public class PostServiceImpl implements PostService {
         }
 
         if (targetSessionId != null) {
-            java.util.List<com.secondlife.secondlife.entity.AiChatMessage> messages =
+            List<AiChatMessage> messages =
                     chatMessageRepository.findBySessionIdOrderBySentAtAsc(targetSessionId);
 
             // Nếu sessionId do client truyền lên không có tin nhắn nhưng post có aiChatSession, ưu tiên session của post
@@ -1208,7 +1179,7 @@ public class PostServiceImpl implements PostService {
                 messages = chatMessageRepository.findBySessionIdOrderBySentAtAsc(targetSessionId);
             }
 
-            for (com.secondlife.secondlife.entity.AiChatMessage msg : messages) {
+            for (AiChatMessage msg : messages) {
                 // Chỉ lấy các thông tin người dùng cung cấp thực tế, bỏ qua prompt kỹ thuật phân tích ảnh ban đầu
                 if ("USER".equals(msg.getRole()) && msg.getMessageContent() != null && !msg.getMessageContent().isBlank()) {
                     String content = msg.getMessageContent().trim();
@@ -1218,8 +1189,6 @@ public class PostServiceImpl implements PostService {
                 }
             }
         }
-
-
 
         String pricePrompt = String.format(
                 """
@@ -1246,11 +1215,8 @@ public class PostServiceImpl implements PostService {
                 {"fairPriceMin": <số nguyên VND>, "fairPriceMax": <số nguyên VND>, "suggestedPrice": <số nguyên VND>, "expectedSellTime": "<ví dụ: 3-5 ngày>"}
                 """,
                 itemName, description, priceContext, chatContext.length() > 0 ? chatContext.toString() : "Không có thêm thông tin");
-        ChatClient googleClient = ChatClient.builder(googleChatModel).build();
 
-        String aiResult = googleClient.prompt(pricePrompt).call().content();
-
-
+        String aiResult = googleChatGateway.complete(pricePrompt);
 
         BigDecimal fairPriceMin = BigDecimal.ZERO;
 
@@ -1259,8 +1225,6 @@ public class PostServiceImpl implements PostService {
         BigDecimal suggestedPrice = BigDecimal.ZERO;
 
         String expectedSellTime = "3-5 ngày";
-
-
 
         try {
 
@@ -1274,9 +1238,9 @@ public class PostServiceImpl implements PostService {
 
             }
 
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            ObjectMapper mapper = new ObjectMapper();
 
-            com.fasterxml.jackson.databind.JsonNode node = mapper.readTree(jsonStr);
+            JsonNode node = mapper.readTree(jsonStr);
 
             fairPriceMin = BigDecimal.valueOf(node.get("fairPriceMin").asLong());
 
@@ -1294,9 +1258,9 @@ public class PostServiceImpl implements PostService {
 
             // Fallback: try to extract numbers from raw text
 
-            java.util.regex.Matcher m = java.util.regex.Pattern.compile("[0-9]{5,}").matcher(aiResult.replaceAll("[.,]", ""));
+            Matcher m = Pattern.compile("[0-9]{5,}").matcher(aiResult.replaceAll("[.,]", ""));
 
-            java.util.List<Long> nums = new java.util.ArrayList<>();
+            List<Long> nums = new ArrayList<>();
 
             while (m.find()) nums.add(Long.parseLong(m.group()));
 
@@ -1312,8 +1276,6 @@ public class PostServiceImpl implements PostService {
 
         }
 
-
-
         if (suggestedPrice != null && suggestedPrice.compareTo(BigDecimal.ZERO) > 0) {
             post.setAiSuggestedPrice(suggestedPrice);
             postRepository.save(post);
@@ -1326,45 +1288,43 @@ public class PostServiceImpl implements PostService {
                 .suggestedPrice(suggestedPrice)
                 .modelVersion("SecondLife-AI-v2.1")
                 .expectedSellTime(expectedSellTime)
-                .createdAt(java.time.Instant.now())
+                .createdAt(Instant.now())
                 .build();
     }
-
-
 
     @Override
 
     @Transactional(readOnly = true)
 
-    public org.springframework.data.domain.Page<com.secondlife.secondlife.dto.response.PostDto> getMyPosts(UUID userId,
+    public Page<PostDto> getMyPosts(UUID userId,
 
-                                                                                                           org.springframework.data.domain.Pageable pageable) {
+                                                                                                           Pageable pageable) {
 
-        org.springframework.data.jpa.domain.Specification<Post> spec = (root, query, cb) -> {
+        Specification<Post> spec = (root, query, cb) -> {
 
             if (Long.class != query.getResultType()) {
 
-                jakarta.persistence.criteria.Fetch<Object, Object> userFetch = root.fetch("user", jakarta.persistence.criteria.JoinType.LEFT);
+                Fetch<Object, Object> userFetch = root.fetch("user", JoinType.LEFT);
 
-                userFetch.fetch("profile", jakarta.persistence.criteria.JoinType.LEFT);
+                userFetch.fetch("profile", JoinType.LEFT);
 
             }
 
             return cb.equal(root.get("user").get("id"), userId);
-
         };
 
-        return postRepository.findAll(spec, pageable).map(com.secondlife.secondlife.dto.response.PostDto::fromEntity);
-
+        Page<Post> page = postRepository.findAll(spec, pageable);
+        if (!page.isEmpty()) {
+            postRepository.findAllWithImagesByIdIn(page.getContent().stream().map(Post::getId).toList());
+        }
+        return page.map(postMapper::toResponse);
     }
-
-
 
     @Override
 
     @Transactional
 
-    public com.secondlife.secondlife.dto.response.PostDto updateDraft(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.UpdateDraftRequest request) {
+    public PostDto updateDraft(UUID userId, UUID postId, UpdateDraftRequest request) {
 
         Post post = postRepository.findById(postId)
 
@@ -1376,27 +1336,23 @@ public class PostServiceImpl implements PostService {
 
         }
 
+        post.setTitle(request.title());
 
+        post.setDescription(request.description());
 
-        post.setTitle(request.getTitle());
+        post.setItemCondition(request.itemCondition());
 
-        post.setDescription(request.getDescription());
-
-        post.setItemCondition(request.getItemCondition());
-
-        post.setPrice(request.getPrice());
+        post.setPrice(request.price());
 
         
 
-        if (request.getShippingWeight() != null) post.setShippingWeight(request.getShippingWeight());
+        if (request.shippingWeight() != null) post.setShippingWeight(request.shippingWeight());
 
-        if (request.getShippingLength() != null) post.setShippingLength(request.getShippingLength());
+        if (request.shippingLength() != null) post.setShippingLength(request.shippingLength());
 
-        if (request.getShippingWidth() != null) post.setShippingWidth(request.getShippingWidth());
+        if (request.shippingWidth() != null) post.setShippingWidth(request.shippingWidth());
 
-        if (request.getShippingHeight() != null) post.setShippingHeight(request.getShippingHeight());
-
-
+        if (request.shippingHeight() != null) post.setShippingHeight(request.shippingHeight());
 
         // Status may remain DRAFT or whatever it is, unless we explicitly change it.
 
@@ -1404,17 +1360,15 @@ public class PostServiceImpl implements PostService {
 
         post = postRepository.save(post);
 
-        return com.secondlife.secondlife.dto.response.PostDto.fromEntity(post);
+        return postMapper.toResponse(post);
 
     }
-
-
 
     @Override
 
     @Transactional
 
-    public com.secondlife.secondlife.dto.response.PostDto acceptDescription(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.AcceptDescriptionRequest request) {
+    public PostDto acceptDescription(UUID userId, UUID postId, AcceptDescriptionRequest request) {
 
         Post post = postRepository.findById(postId)
 
@@ -1426,9 +1380,7 @@ public class PostServiceImpl implements PostService {
 
         }
 
-
-
-        post.setDescription(request.getDescription());
+        post.setDescription(request.description());
 
         // For 'descriptionAccepted' behavior, we save it to description.
 
@@ -1436,9 +1388,8 @@ public class PostServiceImpl implements PostService {
 
         post = postRepository.save(post);
 
-        return com.secondlife.secondlife.dto.response.PostDto.fromEntity(post);
+        return postMapper.toResponse(post);
 
     }
 
 }
-

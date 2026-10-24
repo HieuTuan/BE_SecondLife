@@ -39,6 +39,15 @@ class InspectionEscrowServiceTest {
     @Mock
     private PostRepository postRepository;
 
+    @Mock
+    private com.secondlife.secondlife.mapper.InspectionOrderMapper inspectionOrderMapper;
+
+    @Mock
+    private NotificationService notificationService;
+
+    @Mock
+    private com.secondlife.secondlife.repository.UserRepository userRepository;
+
     @InjectMocks
     private com.secondlife.secondlife.service.impl.InspectionEscrowServiceImpl escrowService;
 

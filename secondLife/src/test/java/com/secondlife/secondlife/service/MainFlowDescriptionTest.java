@@ -40,8 +40,8 @@ class MainFlowDescriptionTest {
                 new AiChatServiceImpl(ollama, google, sessions, messages, users, posts,
                 10 * 1024 * 1024L, 6, 20, 60, 30, "gemma4:31b-cloud", mock(com.secondlife.secondlife.service.ListingCreditService.class));
         var response = service.finalizeChat(session.getId(), owner.getId());
-        assertEquals("Mô tả sản phẩm", response.getDescription());
-        assertNull(response.getSuggestedPrice(), "Only the paid valuation endpoint may produce a price");
+        assertEquals("Mô tả sản phẩm", response.description());
+        assertNull(response.suggestedPrice(), "Only the paid valuation endpoint may produce a price");
         verify(ollama, times(1)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
         verifyNoInteractions(legacyCredits);
     }
@@ -68,8 +68,8 @@ class MainFlowDescriptionTest {
                 new AiChatServiceImpl(ollama, google, sessions, messages, users, posts,
                 10 * 1024 * 1024L, 6, 20, 60, 30, "gemma4:31b-cloud", mock(com.secondlife.secondlife.service.ListingCreditService.class));
         var response = service.finalizeChat(session.getId(), owner.getId());
-        assertEquals("Fallback Description", response.getDescription());
-        assertEquals("Test Title", response.getTitle());
+        assertEquals("Fallback Description", response.description());
+        assertEquals("Test Title", response.title());
         verify(ollama, times(1)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
         verify(google, times(1)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
     }

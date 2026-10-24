@@ -2,10 +2,10 @@ package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.dto.request.InspectionFeeProposalRequest;
 import com.secondlife.secondlife.dto.request.InspectionQuoteRequest;
+import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.response.InspectionFeeProposalResponse;
 import com.secondlife.secondlife.dto.response.InspectionQuoteResponse;
 import com.secondlife.secondlife.dto.response.InspectionTravelTierDto;
-import com.secondlife.secondlife.dto.shipping.ShippingAddress;
 import com.secondlife.secondlife.entity.InspectionFeeProposal;
 import com.secondlife.secondlife.entity.InspectionTravelTier;
 import com.secondlife.secondlife.entity.Post;
@@ -13,15 +13,14 @@ import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.InspectionFeeProposalStatus;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.mapper.InspectionPricingMapper;
 import com.secondlife.secondlife.repository.CategoryRepository;
 import com.secondlife.secondlife.repository.InspectionFeeProposalRepository;
 import com.secondlife.secondlife.repository.InspectionTravelTierRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.InspectionPricingService;
-import com.secondlife.secondlife.service.InspectionTravelFeeCalculator;
-import com.secondlife.secondlife.service.shipping.ShippingQuoteService;
-import lombok.RequiredArgsConstructor;
+import com.secondlife.secondlife.service.ShippingQuoteService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -39,7 +38,6 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class InspectionPricingServiceImpl implements InspectionPricingService {
 
     private final PostRepository postRepository;
@@ -50,6 +48,27 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
     private final CategoryRepository categoryRepository;
     private final ShippingQuoteService shippingQuoteService;
     private final ObjectMapper objectMapper;
+    private final InspectionPricingMapper inspectionPricingMapper;
+
+    public InspectionPricingServiceImpl(PostRepository postRepository,
+                                       InspectionTravelFeeCalculator travelFeeCalculator,
+                                       InspectionFeeProposalRepository proposalRepository,
+                                       InspectionTravelTierRepository travelTierRepository,
+                                       UserRepository userRepository,
+                                       CategoryRepository categoryRepository,
+                                       ShippingQuoteService shippingQuoteService,
+                                       ObjectMapper objectMapper,
+                                       InspectionPricingMapper inspectionPricingMapper) {
+        this.postRepository = postRepository;
+        this.travelFeeCalculator = travelFeeCalculator;
+        this.proposalRepository = proposalRepository;
+        this.travelTierRepository = travelTierRepository;
+        this.userRepository = userRepository;
+        this.categoryRepository = categoryRepository;
+        this.shippingQuoteService = shippingQuoteService;
+        this.objectMapper = objectMapper;
+        this.inspectionPricingMapper = inspectionPricingMapper;
+    }
 
     @Value("${app.inspection.inspection-fee:100000}")
     private BigDecimal defaultBaseInspectionFee;
@@ -66,7 +85,7 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
     @Override
     @Transactional(readOnly = true)
     public InspectionQuoteResponse quote(InspectionQuoteRequest request) {
-        Post post = postRepository.findById(request.getPostId())
+        Post post = postRepository.findById(request.postId())
                 .orElseThrow(() -> new NotFoundException("Post not found"));
 
         BigDecimal baseFee = resolveBaseInspectionFee(post);
@@ -137,7 +156,7 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
         if (post != null && post.getCategoryId() != null) {
             UUID categoryId = post.getCategoryId();
             Optional<InspectionFeeProposal> proposal =
-                    proposalRepository.findFirstByCategory_IdAndStatusOrderByReviewedAtDesc(categoryId, InspectionFeeProposalStatus.APPROVED);
+                    proposalRepository.findFirstByCategoryIdAndStatusOrderByReviewedAtDesc(categoryId, InspectionFeeProposalStatus.APPROVED);
             if (proposal.isPresent()) {
                 return proposal.get().getBaseInspectionFee();
             }
@@ -157,14 +176,7 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
     @Transactional(readOnly = true)
     public List<InspectionTravelTierDto> getActiveTiers() {
         return travelTierRepository.findAllActive().stream()
-                .map(t -> InspectionTravelTierDto.builder()
-                        .tierNumber(t.getTierNumber())
-                        .name(t.getName())
-                        .fromKm(t.getFromKm())
-                        .toKm(t.getToKm())
-                        .pricePerKm(t.getPricePerKm())
-                        .status(t.getStatus())
-                        .build())
+                .map(inspectionPricingMapper::toTierResponse)
                 .collect(Collectors.toList());
     }
 
@@ -174,17 +186,17 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
         if (dtoList == null || dtoList.isEmpty()) return getActiveTiers();
 
         for (InspectionTravelTierDto dto : dtoList) {
-            InspectionTravelTier tier = travelTierRepository.findByTierNumber(dto.getTierNumber())
+            InspectionTravelTier tier = travelTierRepository.findByTierNumber(dto.tierNumber())
                     .orElseGet(() -> {
                         InspectionTravelTier newTier = new InspectionTravelTier();
-                        newTier.setTierNumber(dto.getTierNumber());
+                        newTier.setTierNumber(dto.tierNumber());
                         return newTier;
                     });
-            tier.setName(dto.getName());
-            tier.setFromKm(dto.getFromKm());
-            tier.setToKm(dto.getToKm());
-            tier.setPricePerKm(dto.getPricePerKm());
-            tier.setStatus(dto.getStatus() != null ? dto.getStatus() : "ACTIVE");
+            tier.setName(dto.name());
+            tier.setFromKm(dto.fromKm());
+            tier.setToKm(dto.toKm());
+            tier.setPricePerKm(dto.pricePerKm());
+            tier.setStatus(dto.status() != null ? dto.status() : "ACTIVE");
             travelTierRepository.save(tier);
         }
 
@@ -199,17 +211,17 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
 
         String tiersJson;
         try {
-            tiersJson = objectMapper.writeValueAsString(request.getTiers());
+            tiersJson = objectMapper.writeValueAsString(request.tiers());
         } catch (Exception e) {
             tiersJson = "[]";
         }
 
         InspectionFeeProposal proposal = new InspectionFeeProposal();
-        if (request.getCategoryId() != null) {
-            categoryRepository.findById(request.getCategoryId())
+        if (request.categoryId() != null) {
+            categoryRepository.findById(request.categoryId())
                     .ifPresent(proposal::setCategory);
         }
-        proposal.setBaseInspectionFee(request.getBaseInspectionFee());
+        proposal.setBaseInspectionFee(request.baseInspectionFee());
         proposal.setTiersJson(tiersJson);
         proposal.setProposedBy(proposer);
         proposal.setStatus(InspectionFeeProposalStatus.PENDING_APPROVAL);
@@ -268,19 +280,6 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
             }
         } catch (Exception ignored) {}
 
-        return InspectionFeeProposalResponse.builder()
-                .id(p.getId())
-                .categoryId(p.getCategoryId())
-                .baseInspectionFee(p.getBaseInspectionFee())
-                .tiers(tiers)
-                .proposedById(p.getProposedBy() != null ? p.getProposedBy().getId() : null)
-                .proposedByName(p.getProposedBy() != null ? p.getProposedBy().getEmail() : null)
-                .reviewedById(p.getReviewedBy() != null ? p.getReviewedBy().getId() : null)
-                .reviewedByName(p.getReviewedBy() != null ? p.getReviewedBy().getEmail() : null)
-                .status(p.getStatus())
-                .rejectReason(p.getRejectReason())
-                .createdAt(p.getCreatedAt())
-                .reviewedAt(p.getReviewedAt())
-                .build();
+        return inspectionPricingMapper.toProposalResponse(p, tiers);
     }
 }

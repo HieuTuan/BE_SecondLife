@@ -5,6 +5,7 @@ import com.secondlife.secondlife.dto.request.AdminStatusUpdateRequest;
 import com.secondlife.secondlife.dto.request.ChangePasswordRequest;
 import com.secondlife.secondlife.dto.request.CreateInspectionCenterRequest;
 import com.secondlife.secondlife.dto.request.UpdateProfileRequest;
+import com.secondlife.secondlife.dto.response.ReputationResponse;
 import com.secondlife.secondlife.dto.response.UserAdminResponse;
 import com.secondlife.secondlife.dto.response.UserProfileResponse;
 import com.secondlife.secondlife.dto.response.UserSummaryResponse;
@@ -20,16 +21,26 @@ import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.service.SellerReputationService;
 import com.secondlife.secondlife.service.TokenService;
 import com.secondlife.secondlife.service.UserService;
+
+import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.JoinType;
+import jakarta.persistence.criteria.Predicate;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Slf4j
@@ -43,19 +54,20 @@ public class UserServiceImpl implements UserService {
     private final TokenService tokenService;
     private final UserMapper userMapper;
     private final NotificationService notificationService;
+    private final SellerReputationService sellerReputationService;
 
     @Override
     @Transactional(readOnly = true)
     public UserProfileResponse getProfile(UUID userId) {
-        User user = userRepository.findByIdWithAuthorities(userId)
+        User user = userRepository.findByIdWithProfileDetails(userId)
                 .orElseThrow(() -> new NotFoundException("User not found with id: " + userId));
-        return userMapper.toProfileResponse(user);
+        return profileResponse(user);
     }
 
     @Override
     @Transactional
     public UserProfileResponse updateProfile(UUID userId, UpdateProfileRequest request) {
-        User user = userRepository.findByIdWithAuthorities(userId)
+        User user = userRepository.findByIdWithProfileDetails(userId)
                 .orElseThrow(() -> new NotFoundException("User not found with id: " + userId));
 
         UserProfile profile = user.getProfile();
@@ -97,7 +109,13 @@ public class UserServiceImpl implements UserService {
 
         User savedUser = userRepository.save(user);
         log.info("Profile updated for user: {}", savedUser.getEmail());
-        return userMapper.toProfileResponse(savedUser);
+        return profileResponse(savedUser);
+    }
+
+    private UserProfileResponse profileResponse(User user) {
+        ReputationResponse sellerReputation = user.hasRole(RoleCode.SELLER.name())
+                ? sellerReputationService.get(user.getId()) : null;
+        return userMapper.toProfileResponse(user, sellerReputation);
     }
 
     @Override
@@ -128,11 +146,12 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional(readOnly = true)
     public PageResponse<UserAdminResponse> getAdminUsers(String email, AccountStatus status, String role, Pageable pageable) {
-        org.springframework.data.jpa.domain.Specification<User> spec = (root, query, cb) -> {
+        Specification<User> spec = (root, query, cb) -> {
             if (Long.class != query.getResultType() && long.class != query.getResultType()) {
                 query.distinct(true);
+                root.fetch("profile", JoinType.LEFT);
             }
-            java.util.List<jakarta.persistence.criteria.Predicate> predicates = new java.util.ArrayList<>();
+            List<Predicate> predicates = new ArrayList<>();
 
             if (email != null && !email.trim().isEmpty()) {
                 predicates.add(cb.like(cb.lower(root.get("email")), "%" + email.trim().toLowerCase() + "%"));
@@ -141,15 +160,18 @@ public class UserServiceImpl implements UserService {
                 predicates.add(cb.equal(root.get("accountStatus"), status));
             }
             if (role != null && !role.trim().isEmpty()) {
-                jakarta.persistence.criteria.Join<Object, Object> userRoles = root.join("userRoles", jakarta.persistence.criteria.JoinType.LEFT);
-                jakarta.persistence.criteria.Join<Object, Object> r = userRoles.join("role", jakarta.persistence.criteria.JoinType.LEFT);
+                Join<Object, Object> userRoles = root.join("userRoles", JoinType.LEFT);
+                Join<Object, Object> r = userRoles.join("role", JoinType.LEFT);
                 predicates.add(cb.equal(cb.upper(r.get("code")), role.trim().toUpperCase()));
             }
 
-            return cb.and(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
+            return cb.and(predicates.toArray(new Predicate[0]));
         };
 
         Page<User> page = userRepository.findAll(spec, pageable);
+        if (!page.isEmpty()) {
+            userRepository.findAllWithRolesByIdIn(page.stream().map(User::getId).toList());
+        }
         Page<UserAdminResponse> dtoPage = page.map(userMapper::toAdminResponse);
         return PageResponse.from(dtoPage);
     }

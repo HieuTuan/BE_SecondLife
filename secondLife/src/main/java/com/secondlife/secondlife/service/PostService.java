@@ -1,13 +1,16 @@
 package com.secondlife.secondlife.service;
 
+import com.secondlife.secondlife.dto.request.AcceptDescriptionRequest;
 import com.secondlife.secondlife.dto.request.PostInitRequest;
 import com.secondlife.secondlife.dto.request.PostSubmitRequest;
+import com.secondlife.secondlife.dto.request.UpdateDraftRequest;
 import com.secondlife.secondlife.dto.response.AiPriceEstimationResponse;
-import com.secondlife.secondlife.dto.response.PostInitResponse;
+import com.secondlife.secondlife.dto.response.PostDto;
 import com.secondlife.secondlife.dto.response.PostFinalizeResponse;
+import com.secondlife.secondlife.dto.response.PostInitResponse;
 import com.secondlife.secondlife.dto.response.PostSubmitResponse;
-import com.secondlife.secondlife.entity.Post;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.util.UUID;
 
@@ -25,19 +28,19 @@ public interface PostService {
 
     AiPriceEstimationResponse estimatePrice(UUID userId, UUID postId, String requestId);
 
-    com.secondlife.secondlife.dto.response.PostDto updateDraft(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.UpdateDraftRequest request);
+    PostDto updateDraft(UUID userId, UUID postId, UpdateDraftRequest request);
 
-    com.secondlife.secondlife.dto.response.PostDto acceptDescription(UUID userId, UUID postId, com.secondlife.secondlife.dto.request.AcceptDescriptionRequest request);
+    PostDto acceptDescription(UUID userId, UUID postId, AcceptDescriptionRequest request);
 
     void approvePost(UUID postId);
 
     void rejectPost(UUID postId, String reason);
 
-    Page<com.secondlife.secondlife.dto.response.PostDto> getAdminPosts(String status, UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable);
+    Page<PostDto> getAdminPosts(String status, UUID categoryId, UUID itemId, Pageable pageable);
 
-    Page<com.secondlife.secondlife.dto.response.PostDto> getPublicPosts(UUID categoryId, UUID itemId, org.springframework.data.domain.Pageable pageable);
+    Page<PostDto> getPublicPosts(UUID categoryId, UUID itemId, Pageable pageable);
 
-    com.secondlife.secondlife.dto.response.PostDto getPostDetail(UUID postId);
+    PostDto getPostDetail(UUID postId);
 
-    Page<com.secondlife.secondlife.dto.response.PostDto> getMyPosts(UUID userId, org.springframework.data.domain.Pageable pageable);
+    Page<PostDto> getMyPosts(UUID userId, Pageable pageable);
 }

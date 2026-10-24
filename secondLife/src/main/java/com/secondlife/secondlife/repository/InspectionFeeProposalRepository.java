@@ -13,11 +13,7 @@ public interface InspectionFeeProposalRepository extends JpaRepository<Inspectio
 
     Page<InspectionFeeProposal> findByStatusOrderByCreatedAtDesc(InspectionFeeProposalStatus status, Pageable pageable);
 
-    Optional<InspectionFeeProposal> findFirstByCategory_IdAndStatusOrderByReviewedAtDesc(UUID categoryId, InspectionFeeProposalStatus status);
-
-    default Optional<InspectionFeeProposal> findFirstByCategoryIdAndStatusOrderByReviewedAtDesc(UUID categoryId, InspectionFeeProposalStatus status) {
-        return findFirstByCategory_IdAndStatusOrderByReviewedAtDesc(categoryId, status);
-    }
+    Optional<InspectionFeeProposal> findFirstByCategoryIdAndStatusOrderByReviewedAtDesc(UUID categoryId, InspectionFeeProposalStatus status);
 
     Optional<InspectionFeeProposal> findFirstByStatusOrderByReviewedAtDesc(InspectionFeeProposalStatus status);
 }

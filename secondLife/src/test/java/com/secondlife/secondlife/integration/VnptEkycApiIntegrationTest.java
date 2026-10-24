@@ -1,13 +1,13 @@
 package com.secondlife.secondlife.integration;
 
-import com.secondlife.secondlife.dto.ekyc.vnpt.VnptResults;
+import com.secondlife.secondlife.dto.response.VnptResults;
 import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.AccountStatus;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
-import com.secondlife.secondlife.service.ekyc.vnpt.VnptEkycOrchestrator;
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptEkycOrchestrator;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

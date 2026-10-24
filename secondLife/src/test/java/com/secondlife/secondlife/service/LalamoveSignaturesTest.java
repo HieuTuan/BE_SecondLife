@@ -1,6 +1,6 @@
 package com.secondlife.secondlife.service;
 
-import com.secondlife.secondlife.service.shipping.LalamoveSignatures;
+import com.secondlife.secondlife.integration.shipping.LalamoveSignatures;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;

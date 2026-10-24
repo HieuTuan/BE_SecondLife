@@ -1,14 +1,13 @@
 package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.common.PageResponse;
-import com.secondlife.secondlife.dto.rbac.PermissionResponse;
-import com.secondlife.secondlife.dto.rbac.CreatePermissionRequest;
-import com.secondlife.secondlife.dto.rbac.UpdatePermissionRequest;
-import com.secondlife.secondlife.dto.rbac.ReplaceRolePermissionsRequest;
-import com.secondlife.secondlife.dto.rbac.RolePermissionAuditResponse;
-import com.secondlife.secondlife.dto.rbac.RolePermissionsResponse;
+import com.secondlife.secondlife.dto.response.PermissionResponse;
+import com.secondlife.secondlife.dto.request.CreatePermissionRequest;
+import com.secondlife.secondlife.dto.request.UpdatePermissionRequest;
+import com.secondlife.secondlife.dto.request.ReplaceRolePermissionsRequest;
+import com.secondlife.secondlife.dto.response.RolePermissionAuditResponse;
+import com.secondlife.secondlife.dto.response.RolePermissionsResponse;
 import org.springframework.data.domain.Pageable;
-
 import java.util.List;
 import java.util.UUID;
 

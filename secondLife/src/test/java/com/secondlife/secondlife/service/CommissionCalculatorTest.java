@@ -17,7 +17,7 @@ class CommissionCalculatorTest {
             "1000000, 1, 0, null, 1000000, 0"
     })
     void appliesMinimumMaximumAndNeverExceedsProductPrice(String base, String rate, String min, String max, String fee, String payout) {
-        var result = new CommissionCalculator().calculate(new BigDecimal(base), new BigDecimal(rate), new BigDecimal(min),
+        var result = new com.secondlife.secondlife.service.impl.CommissionCalculatorImpl().calculate(new BigDecimal(base), new BigDecimal(rate), new BigDecimal(min),
                 "null".equals(max) ? null : new BigDecimal(max));
         assertEquals(0, new BigDecimal(fee).compareTo(result.platformCommission()));
         assertEquals(0, new BigDecimal(payout).compareTo(result.sellerPayout()));

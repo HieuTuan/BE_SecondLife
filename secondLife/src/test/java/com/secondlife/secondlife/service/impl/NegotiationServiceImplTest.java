@@ -6,10 +6,12 @@ import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.NegotiationStatus;
 import com.secondlife.secondlife.exception.BadRequestException;
+import com.secondlife.secondlife.mapper.NegotiationMapper;
 import com.secondlife.secondlife.repository.NegotiationRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import org.junit.jupiter.api.Test;
+import com.secondlife.secondlife.mapper.MapperTestSupport;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -34,14 +36,15 @@ class NegotiationServiceImplTest {
         when(negotiations.countRejectedNegotiations(post.getId(), buyer.getId())).thenReturn(1L);
         when(negotiations.findMaxRejectedPrice(post.getId(), buyer.getId())).thenReturn(Optional.empty());
         when(negotiations.save(any(Negotiation.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        var request = new NegotiationRequestDTO();
-        request.setPostId(post.getId());
-        request.setOfferedPrice(new BigDecimal("40"));
+        var request = new NegotiationRequestDTO(
+                post.getId(),
+                new BigDecimal("40")
+        );
 
-        var limitOne = new NegotiationServiceImpl(negotiations, posts, users, mock(com.secondlife.secondlife.service.ChatService.class), 1, 2L);
+        var limitOne = new NegotiationServiceImpl(negotiations, posts, users, mock(com.secondlife.secondlife.service.ChatService.class), 1, 2L, MapperTestSupport.mapper(NegotiationMapper.class));
         assertThrows(BadRequestException.class, () -> limitOne.createNegotiation(buyer.getId(), request));
-        var limitTwo = new NegotiationServiceImpl(negotiations, posts, users, mock(com.secondlife.secondlife.service.ChatService.class), 2, 2L);
-        assertEquals(NegotiationStatus.PENDING, limitTwo.createNegotiation(buyer.getId(), request).getStatus());
+        var limitTwo = new NegotiationServiceImpl(negotiations, posts, users, mock(com.secondlife.secondlife.service.ChatService.class), 2, 2L, MapperTestSupport.mapper(NegotiationMapper.class));
+        assertEquals(NegotiationStatus.PENDING, limitTwo.createNegotiation(buyer.getId(), request).status());
     }
 
     @Test
@@ -57,15 +60,15 @@ class NegotiationServiceImplTest {
         when(negotiations.save(any(Negotiation.class))).thenAnswer(invocation -> invocation.getArgument(0));
         var posts=mock(PostRepository.class);
         when(posts.findByIdForUpdate(negotiation.getPost().getId())).thenReturn(Optional.of(negotiation.getPost()));
-        var service = new NegotiationServiceImpl(negotiations, posts, mock(UserRepository.class), mock(com.secondlife.secondlife.service.ChatService.class), 3, 2L);
+        var service = new NegotiationServiceImpl(negotiations, posts, mock(UserRepository.class), mock(com.secondlife.secondlife.service.ChatService.class), 3, 2L, MapperTestSupport.mapper(NegotiationMapper.class));
 
         Instant before = Instant.now().plus(2, ChronoUnit.HOURS);
         var accepted = service.acceptNegotiation(seller.getId(), negotiation.getId());
         Instant after = Instant.now().plus(2, ChronoUnit.HOURS);
 
-        assertEquals(NegotiationStatus.ACCEPTED, accepted.getStatus());
-        assertFalse(accepted.getExpiredAt().isBefore(before));
-        assertFalse(accepted.getExpiredAt().isAfter(after));
+        assertEquals(NegotiationStatus.ACCEPTED, accepted.status());
+        assertFalse(accepted.expiredAt().isBefore(before));
+        assertFalse(accepted.expiredAt().isAfter(after));
     }
 
     private static User user() {

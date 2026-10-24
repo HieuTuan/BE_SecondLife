@@ -2,7 +2,20 @@ package com.secondlife.secondlife.entity;
 
 import com.secondlife.secondlife.enums.EscrowStatus;
 import com.secondlife.secondlife.enums.OrderStatus;
-import jakarta.persistence.*;
+import com.secondlife.secondlife.enums.OrderPaymentMethod;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -19,11 +32,13 @@ import java.util.UUID;
 public class Order {
     @Enumerated(EnumType.STRING)
     @Column(nullable=false, length=20)
-    private com.secondlife.secondlife.enums.OrderPaymentMethod paymentMethod = com.secondlife.secondlife.enums.OrderPaymentMethod.WALLET;
+    private OrderPaymentMethod paymentMethod = OrderPaymentMethod.WALLET;
     private UUID shippingQuoteId;
     @Column(nullable=false, precision=18, scale=2) private BigDecimal shippingFee=BigDecimal.ZERO;
     @Column(columnDefinition="TEXT") private String deliveryAddress;
     private Instant shippingDeliveredAt;
+    @Column(name = "shipping_hold", nullable = false)
+    private boolean shippingHold;
     private UUID requestId;
     private Instant paidAt;
     private Instant sellerConfirmedAt;

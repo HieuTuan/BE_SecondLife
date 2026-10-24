@@ -1,17 +1,18 @@
 package com.secondlife.secondlife.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
+import jakarta.validation.constraints.Size;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
 import java.util.UUID;
 
-@Data
-public class AiChatRequest {
-    private UUID sessionId; // null to start a new chat
-    private UUID postId; // required if starting a new chat
-    
+public record AiChatRequest(
+    UUID sessionId, // null to start a new chat
+    UUID postId, // required if starting a new chat
     @NotBlank
-    @jakarta.validation.constraints.Size(max = 4000)
-    private String message;
-
-    private java.util.List<org.springframework.web.multipart.MultipartFile> images;
+    @Size(max = 4000)
+    String message,
+    List<MultipartFile> images
+) {
 }

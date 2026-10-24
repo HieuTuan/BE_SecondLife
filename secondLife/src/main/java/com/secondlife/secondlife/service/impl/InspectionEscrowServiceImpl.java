@@ -1,31 +1,58 @@
 package com.secondlife.secondlife.service.impl;
 
+import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Post;
+import com.secondlife.secondlife.enums.NotificationType;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.mapper.InspectionOrderMapper;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
+import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.InspectionEscrowService;
+import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.WalletService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class InspectionEscrowServiceImpl implements InspectionEscrowService {
 
     private final InspectionOrderRepository inspectionOrderRepository;
     private final WalletService walletService;
     private final PostRepository postRepository;
+    private final InspectionOrderMapper inspectionOrderMapper;
+    private final NotificationService notificationService;
+    private final UserRepository userRepository;
+
+    public InspectionEscrowServiceImpl(InspectionOrderRepository inspectionOrderRepository,
+                                       WalletService walletService,
+                                       PostRepository postRepository,
+                                       InspectionOrderMapper inspectionOrderMapper,
+                                       NotificationService notificationService,
+                                       UserRepository userRepository) {
+        this.inspectionOrderRepository = inspectionOrderRepository;
+        this.walletService = walletService;
+        this.postRepository = postRepository;
+        this.inspectionOrderMapper = inspectionOrderMapper;
+        this.notificationService = notificationService;
+        this.userRepository = userRepository;
+    }
+
+    @Override
+    @Transactional
+    public InspectionOrderResponse payInspectionFeeResponse(UUID userId, UUID inspectionOrderId) {
+        return inspectionOrderMapper.toResponse(payInspectionFee(userId, inspectionOrderId));
+    }
 
     @Override
     @Transactional
@@ -77,6 +104,22 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
         if (buyerDone && sellerDone) {
             order.setStatus("CONFIRMED_PENDING_DISPATCH");
             log.info("Inspection order {} fully funded and transitioned to CONFIRMED_PENDING_DISPATCH", order.getId());
+
+            if (notificationService != null && userRepository != null) {
+                String postTitle = order.getPost() != null && order.getPost().getTitle() != null ? order.getPost().getTitle() : "";
+                List<UUID> centerManagerIds = userRepository.findActiveInspectionCenterUserIds();
+                for (UUID centerId : centerManagerIds) {
+                    notificationService.notify(
+                        centerId,
+                        "Đơn kiểm định mới cần phân công KTV",
+                        "Đơn kiểm định cho sản phẩm \"" + postTitle + "\" đã hoàn tất đóng phí và đang chờ bạn phân công Kỹ thuật viên.",
+                        NotificationType.INSPECTION,
+                        order.getId(),
+                        "INSPECTION_ORDER",
+                        "/inspector-center/orders"
+                    );
+                }
+            }
         }
 
         return inspectionOrderRepository.save(order);

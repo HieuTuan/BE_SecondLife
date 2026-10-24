@@ -4,12 +4,14 @@ import com.secondlife.secondlife.dto.response.ChatRoomDto;
 import com.secondlife.secondlife.entity.ChatRoom;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.mapper.ChatMapper;
 import com.secondlife.secondlife.repository.ChatMessageRepository;
 import com.secondlife.secondlife.repository.ChatRoomRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import java.util.List;
@@ -35,7 +37,7 @@ class ChatServiceTest {
         postRepository = mock(PostRepository.class);
         userRepository = mock(UserRepository.class);
         messagingTemplate = mock(SimpMessagingTemplate.class);
-        chatService = new ChatService(chatRoomRepository, chatMessageRepository, postRepository, userRepository, messagingTemplate);
+        chatService = new com.secondlife.secondlife.service.impl.ChatServiceImpl(chatRoomRepository, chatMessageRepository, postRepository, userRepository, messagingTemplate, MapperTestSupport.mapper(ChatMapper.class));
     }
 
     @Test
@@ -70,7 +72,7 @@ class ChatServiceTest {
         ChatRoomDto result = chatService.getOrCreateRoom(postId, buyerId);
 
         assertNotNull(result);
-        assertEquals(existingRoom.getId(), result.getId());
+        assertEquals(existingRoom.getId(), result.id());
         verify(chatRoomRepository, never()).save(any(ChatRoom.class));
     }
 
@@ -110,6 +112,6 @@ class ChatServiceTest {
         List<ChatRoomDto> rooms = chatService.getUserRooms(userId);
 
         assertEquals(1, rooms.size());
-        assertEquals(room1.getId(), rooms.get(0).getId());
+        assertEquals(room1.getId(), rooms.get(0).id());
     }
 }

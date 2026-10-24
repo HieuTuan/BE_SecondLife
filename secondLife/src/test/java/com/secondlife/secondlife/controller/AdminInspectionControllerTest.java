@@ -1,6 +1,5 @@
 package com.secondlife.secondlife.controller;
 
-import com.secondlife.secondlife.controller.admin.AdminInspectionController;
 import com.secondlife.secondlife.dto.request.ReviewFeeProposalRequest;
 import com.secondlife.secondlife.dto.response.InspectionFeeProposalResponse;
 import com.secondlife.secondlife.dto.response.InspectionTravelTierDto;
@@ -89,7 +88,7 @@ class AdminInspectionControllerTest {
                 .baseInspectionFee(BigDecimal.valueOf(120000))
                 .build();
 
-        when(currentUserProvider.resolveAdminId(any())).thenReturn(adminId);
+        when(currentUserProvider.resolveUserId(any())).thenReturn(adminId);
         when(pricingService.reviewProposal(eq(proposalId), eq(adminId), eq(true), anyString())).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/admin/inspection/fee-proposals/" + proposalId + "/review")
@@ -115,7 +114,7 @@ class AdminInspectionControllerTest {
                 .baseInspectionFee(BigDecimal.valueOf(120000))
                 .build();
 
-        when(currentUserProvider.resolveAdminId(any())).thenReturn(adminId);
+        when(currentUserProvider.resolveUserId(any())).thenReturn(adminId);
         when(pricingService.reviewProposal(eq(proposalId), eq(adminId), eq(true), anyString())).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/admin/inspection-fee-proposals/" + proposalId + "/review")

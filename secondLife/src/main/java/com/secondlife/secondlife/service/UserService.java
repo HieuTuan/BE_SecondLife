@@ -10,7 +10,6 @@ import com.secondlife.secondlife.dto.response.UserProfileResponse;
 import com.secondlife.secondlife.dto.response.UserSummaryResponse;
 import com.secondlife.secondlife.enums.AccountStatus;
 import org.springframework.data.domain.Pageable;
-
 import java.util.UUID;
 
 public interface UserService {

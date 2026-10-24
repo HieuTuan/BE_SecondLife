@@ -5,5 +5,6 @@ public enum WalletTransactionType {
     WITHDRAW,
     PAYMENT,
     EARNING,
-    REFUND
+    REFUND,
+    RETURN_SHIPPING_FEE
 }

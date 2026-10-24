@@ -1,7 +1,8 @@
 package com.secondlife.secondlife.controller;
 
-import com.secondlife.secondlife.entity.TopupPackage;
-import com.secondlife.secondlife.dto.credit.CreditBalanceResponse;
+import com.secondlife.secondlife.dto.response.TopupPackageResponse;
+import com.secondlife.secondlife.service.TopupPackageQueryService;
+import com.secondlife.secondlife.dto.response.CreditBalanceResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.CreditService;
@@ -18,17 +19,20 @@ import java.util.UUID;
 public class TopupController {
 
     private final CreditService creditService;
+    private final TopupPackageQueryService packageQueryService;
     private final CurrentUserProvider currentUserProvider;
 
-    public TopupController(CreditService creditService, CurrentUserProvider currentUserProvider) {
+    public TopupController(CreditService creditService, TopupPackageQueryService packageQueryService,
+                           CurrentUserProvider currentUserProvider) {
         this.creditService = creditService;
+        this.packageQueryService = packageQueryService;
         this.currentUserProvider = currentUserProvider;
     }
 
     @GetMapping("/packages")
     @PreAuthorize("hasAuthority('CREDIT_READ_SELF')")
-    public ResponseEntity<List<TopupPackage>> getPackages() {
-        return ResponseEntity.ok(creditService.getAllTopupPackages());
+    public ResponseEntity<List<TopupPackageResponse>> getPackages() {
+        return ResponseEntity.ok(packageQueryService.getPackages());
     }
 
     @GetMapping("/my-credit")

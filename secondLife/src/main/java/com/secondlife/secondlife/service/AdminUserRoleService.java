@@ -1,7 +1,9 @@
 package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.common.PageResponse;
-import com.secondlife.secondlife.dto.rbac.*;
+import com.secondlife.secondlife.dto.request.ReplaceUserRolesRequest;
+import com.secondlife.secondlife.dto.response.UserRoleAuditResponse;
+import com.secondlife.secondlife.dto.response.UserRolesResponse;
 import org.springframework.data.domain.Pageable;
 import java.util.UUID;
 

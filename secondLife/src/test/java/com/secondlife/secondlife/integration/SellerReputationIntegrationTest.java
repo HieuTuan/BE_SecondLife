@@ -1,13 +1,19 @@
 package com.secondlife.secondlife.integration;
 
+import com.secondlife.secondlife.integration.ai.AiPriceProvider;
+
+import com.secondlife.secondlife.integration.storage.ReportEvidenceStorage;
+
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.entity.Order;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
-import com.secondlife.secondlife.service.*;
+import com.secondlife.secondlife.service.CloudinaryService;
+import com.secondlife.secondlife.service.SellerReputationService;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIf;
+import org.hibernate.Hibernate;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,6 +24,9 @@ import org.springframework.test.context.*;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
+import org.springframework.transaction.support.TransactionTemplate;
+import java.math.BigDecimal;
+import static org.hamcrest.Matchers.nullValue;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -44,6 +53,7 @@ class SellerReputationIntegrationTest {
     @Autowired PostRepository posts;
     @Autowired OrderRepository orders;
     @Autowired SellerReputationService reputation;
+    @Autowired SellerReputationRepository reputationRows;
     @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
     @Autowired JwtTokenProvider jwt;
     @Autowired ObjectMapper mapper;
@@ -59,6 +69,80 @@ class SellerReputationIntegrationTest {
             return new ReportEvidenceStorage.StoredImage("report-evidence/"+UUID.randomUUID(),"image/png",file.getSize());
         });
         org.mockito.Mockito.when(evidenceStorage.read(org.mockito.ArgumentMatchers.anyString())).thenReturn(new byte[]{1,2,3});
+    }
+
+    @Test void inspectorProfileKeepsHubDetailsAndSellerReputationAfterMapperMerge() throws Exception {
+        User manager = user("INSPECTION_CENTER");
+        manager.setProfile(new UserProfile(manager, "Inspection Center 01", "0901234567", null));
+        manager = users.saveAndFlush(manager);
+        User inspector = user("INSPECTOR");
+        inspector.addRole(roles.findByCodeWithPermissions("SELLER").orElseThrow());
+        inspector.setManager(manager);
+        inspector.setProfile(new UserProfile(inspector, "Inspector One", "0901234568", null));
+        inspector = users.saveAndFlush(inspector);
+
+        User loaded = users.findByIdWithProfileDetails(inspector.getId()).orElseThrow();
+        assertTrue(Hibernate.isInitialized(loaded.getManager()));
+        assertTrue(Hibernate.isInitialized(loaded.getManager().getProfile()));
+        String rawId = inspector.getId().toString().replace("-", "");
+        String badge = "SL-TECH-" + rawId.substring(rawId.length() - 4).toUpperCase(Locale.ROOT);
+        mvc.perform(get("/api/v1/users/me").header("Authorization", bearer(inspector)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.fullName").value("Inspector One"))
+            .andExpect(jsonPath("$.data.badgeCode").value(badge))
+            .andExpect(jsonPath("$.data.stationHubId").value(manager.getId().toString()))
+            .andExpect(jsonPath("$.data.stationHubName").value("Inspection Center 01"))
+            .andExpect(jsonPath("$.data.certificationTitle").value("Kỹ thuật viên Thẩm định Thiết bị Bậc 3"))
+            .andExpect(jsonPath("$.data.sellerReputation.sellerId").value(inspector.getId().toString()));
+    }
+
+    @Test void ownProfileIncludesReputationForSellerWithoutTransactions() throws Exception {
+        var seller = user("SELLER");
+        mvc.perform(get("/api/v1/users/me").header("Authorization", bearer(seller)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.id").value(seller.getId().toString()))
+            .andExpect(jsonPath("$.data.sellerReputation.sellerId").value(seller.getId().toString()))
+            .andExpect(jsonPath("$.data.sellerReputation.score").value(nullValue()))
+            .andExpect(jsonPath("$.data.sellerReputation.evaluatedOrders").value(0))
+            .andExpect(jsonPath("$.data.sellerReputation.assessmentStatus").value("NO_TRANSACTIONS"));
+    }
+
+    @Test void ownProfileUsesSameReputationAndPenaltiesAsReputationEndpoint() throws Exception {
+        var seller = user("SELLER");
+        var completed = order(seller, user("BUYER"), true);
+        recordGood(completed);
+        new TransactionTemplate(transactions).executeWithoutResult(tx ->
+            reputation.recordConfirmationPenalty(completed, "LATE", new BigDecimal("2.00")));
+
+        var profileResult = mvc.perform(get("/api/v1/users/me").header("Authorization", bearer(seller)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.sellerReputation.score").value(98.0))
+            .andExpect(jsonPath("$.data.sellerReputation.transactionScore").value(100.0))
+            .andExpect(jsonPath("$.data.sellerReputation.confirmationPenaltyPoints").value(2.0))
+            .andReturn();
+        var reputationResult = mvc.perform(get("/api/v1/seller/reputation/me").header("Authorization", bearer(seller)))
+            .andExpect(status().isOk()).andReturn();
+        assertEquals(mapper.readTree(reputationResult.getResponse().getContentAsString()).path("data"),
+            mapper.readTree(profileResult.getResponse().getContentAsString()).path("data").path("sellerReputation"));
+    }
+
+    @Test void buyerProfileRemainsAvailableWithoutSellerReputation() throws Exception {
+        var buyer = user("BUYER");
+        mvc.perform(get("/api/v1/users/me").header("Authorization", bearer(buyer)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.id").value(buyer.getId().toString()))
+            .andExpect(jsonPath("$.data.sellerReputation").doesNotExist());
+    }
+
+    @Test void updatingSellerProfilePreservesReputationInResponse() throws Exception {
+        var seller = user("SELLER");
+        recordGood(order(seller, user("BUYER"), true));
+        mvc.perform(patch("/api/v1/users/me").header("Authorization", bearer(seller))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"fullName\":\"Updated Seller\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.fullName").value("Updated Seller"))
+            .andExpect(jsonPath("$.data.sellerReputation.sellerId").value(seller.getId().toString()))
+            .andExpect(jsonPath("$.data.sellerReputation.score").value(100.0));
     }
 
     @Test void newSellerHasProvisionalScoreAndNoPublicPrivateData() throws Exception {
@@ -104,6 +188,29 @@ class SellerReputationIntegrationTest {
             .andExpect(jsonPath("$.data.items.length()").value(2))
             .andExpect(jsonPath("$.data.items[0].formulaVersion").value("TRANSACTION_SUCCESS_RATE_V3"))
             .andExpect(jsonPath("$.data.items[0].actorId").doesNotExist());
+    }
+    @Test void nativeReputationUpdatesAndHistoryStayFreshWithAManagedEntityInTheSameTransaction() {
+        var seller=user("SELLER"); var completed=order(seller,user("BUYER"),true);
+        new org.springframework.transaction.support.TransactionTemplate(transactions).executeWithoutResult(tx -> {
+            reputationRows.initializeSellerState(seller.getId());
+            assertEquals(0,reputationRows.findById(seller.getId()).orElseThrow().getGoodTransactions());
+            reputation.recordCompletedSale(completed);
+            assertEquals(1,reputation.get(seller.getId()).goodTransactions());
+            var points=new java.math.BigDecimal("2.50");
+            assertTrue(reputation.recordConfirmationPenalty(completed,"LATE",points));
+            assertFalse(reputation.recordConfirmationPenalty(completed,"LATE",points));
+            var state=reputation.get(seller.getId());
+            assertEquals(1,state.goodTransactions()); assertEquals(points,state.confirmationPenaltyPoints());
+            assertNotNull(state.updatedAt());
+            var history=reputation.history(seller.getId(),org.springframework.data.domain.PageRequest.of(0,10));
+            assertEquals(2,history.totalElements());
+            var latest=history.items().getFirst();
+            assertEquals("ORDER_CONFIRMATION_LATE",latest.eventType());
+            assertEquals(1,latest.goodBefore()); assertEquals(1,latest.goodAfter());
+            assertEquals(0,latest.penaltyBefore().signum()); assertEquals(points,latest.penaltyAfter());
+            assertNull(latest.priorGood()); assertNull(latest.priorTotal());
+            assertNotNull(latest.createdAt()); assertNotNull(latest.eventSequence());
+        });
     }
     @Test void confirmedSellerFaultConvertsGoodToBadOnceAndResolutionRetryCannotChangeDecision() throws Exception {
         var seller=user("SELLER"); var buyer=user("BUYER"); var staff=user("STAFF");

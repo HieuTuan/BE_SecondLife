@@ -3,9 +3,12 @@ package com.secondlife.secondlife.controller;
 import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.dto.request.*;
 import com.secondlife.secondlife.dto.response.*;
+import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
-import com.secondlife.secondlife.service.*;
+import com.secondlife.secondlife.service.AiValuationService;
+import com.secondlife.secondlife.service.ListingDraftService;
+import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -14,6 +17,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.UUID;
 
 @RestController
@@ -39,7 +43,7 @@ public class ListingValuationController {
     }
     @DeleteMapping("/draft")
     @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
-    @io.swagger.v3.oas.annotations.Operation(summary = "Delete an owned unpublished draft",
+    @Operation(summary = "Delete an owned unpublished draft",
             description = "Only DRAFT posts can be deleted. AI valuation and credit history are retained; spent credits are not refunded.")
     public ApiResponse<Void> deleteDraft(@AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID postId) {
         drafts.delete(currentUser.resolveUserId(user), postId);
@@ -76,7 +80,7 @@ public class ListingValuationController {
     public ApiResponse<Page<AiPriceEstimationResponse>> history(@AuthenticationPrincipal CustomUserDetails user,
             @PathVariable UUID postId, @RequestParam(defaultValue = "${app.pagination.default-page}") int page,
             @RequestParam(defaultValue = "${app.pagination.default-size}") int size) {
-        if (page < 0 || size < 1 || size > maxPageSize) throw new com.secondlife.secondlife.exception.BadRequestException(
+        if (page < 0 || size < 1 || size > maxPageSize) throw new BadRequestException(
                 "page >= 0 and size between 1 and " + maxPageSize + " are required");
         return ApiResponse.success(valuations.history(currentUser.resolveUserId(user), postId, PageRequest.of(page, size)));
     }

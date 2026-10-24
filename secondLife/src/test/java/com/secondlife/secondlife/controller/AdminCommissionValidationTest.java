@@ -1,6 +1,5 @@
 package com.secondlife.secondlife.controller;
 
-import com.secondlife.secondlife.controller.admin.AdminCommissionController;
 import com.secondlife.secondlife.exception.GlobalExceptionHandler;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.service.CommissionService;
@@ -85,7 +84,7 @@ class AdminCommissionValidationTest {
     }
 
     @Test void optionalCapAndZeroCapAreAcceptedAsNumbers() throws Exception {
-        when(current.resolveAdminId(any())).thenReturn(ID);
+        when(current.resolveUserId(any())).thenReturn(ID);
         mvc.perform(post(BASE).contentType(MediaType.APPLICATION_JSON).content(payload("maxCommission", null)))
                 .andExpect(status().isCreated());
         mvc.perform(post(BASE).contentType(MediaType.APPLICATION_JSON).content("""
@@ -97,7 +96,7 @@ class AdminCommissionValidationTest {
     }
 
     @Test void missingCapIsAcceptedButMissingRequiredFieldIsRejected() throws Exception {
-        when(current.resolveAdminId(any())).thenReturn(ID);
+        when(current.resolveUserId(any())).thenReturn(ID);
         var body = mapper.readTree(payload("maxCommission", null)).deepCopy();
         ((tools.jackson.databind.node.ObjectNode) body).remove("maxCommission");
         mvc.perform(put(BASE + "/" + ID).contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(body)))

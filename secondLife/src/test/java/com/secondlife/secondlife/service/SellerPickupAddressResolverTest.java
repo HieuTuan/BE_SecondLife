@@ -1,10 +1,8 @@
 package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.dto.request.SellerPickupAddressRequest;
-import com.secondlife.secondlife.dto.shipping.ShippingAddress;
+import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.exception.BadRequestException;
-import com.secondlife.secondlife.service.shipping.SellerPickupAddressResolver;
-import com.secondlife.secondlife.service.shipping.ShippingProvider;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -13,8 +11,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class SellerPickupAddressResolverTest {
-    private final com.secondlife.secondlife.service.shipping.ReverseGeocodingService geocoding = mock(com.secondlife.secondlife.service.shipping.ReverseGeocodingService.class);
-    private final SellerPickupAddressResolver resolver = new SellerPickupAddressResolver(geocoding);
+    private final com.secondlife.secondlife.service.ReverseGeocodingService geocoding = mock(com.secondlife.secondlife.service.ReverseGeocodingService.class);
+    private final SellerPickupAddressResolver resolver = new com.secondlife.secondlife.service.impl.SellerPickupAddressResolverImpl(geocoding);
 
     @Test void lalamoveNormalizesCoordinatesWithoutCallingGhnCatalogues() {
 

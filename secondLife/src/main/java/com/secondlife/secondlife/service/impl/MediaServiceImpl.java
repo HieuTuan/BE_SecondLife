@@ -1,7 +1,6 @@
 package com.secondlife.secondlife.service.impl;
 
-import com.cloudinary.Cloudinary;
-import com.cloudinary.utils.ObjectUtils;
+import com.secondlife.secondlife.integration.storage.MediaStorage;
 import com.secondlife.secondlife.dto.response.MediaUploadResponse;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.service.MediaService;
@@ -14,7 +13,6 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 @Slf4j
@@ -32,26 +30,26 @@ public class MediaServiceImpl implements MediaService {
             "video/quicktime",
             "video/webm"
     );
-    private final Cloudinary cloudinary;
+    private final MediaStorage storage;
     private final long maxFileSizeBytes;
     private final String defaultFolder;
     private final long maxVideoSizeBytes;
 
     @Autowired
-    public MediaServiceImpl(Cloudinary cloudinary,
+    public MediaServiceImpl(MediaStorage storage,
             @Value("${app.media.max-file-size-bytes}") long maxFileSizeBytes,
             @Value("${app.media.default-folder}") String defaultFolder,
             @Value("${app.media.max-video-size-bytes:104857600}") long maxVideoSizeBytes) {
-        this.cloudinary = cloudinary;
+        this.storage = storage;
         this.maxFileSizeBytes = maxFileSizeBytes;
         this.defaultFolder = defaultFolder;
         this.maxVideoSizeBytes = maxVideoSizeBytes;
     }
 
-    public MediaServiceImpl(Cloudinary cloudinary,
+    public MediaServiceImpl(MediaStorage storage,
             long maxFileSizeBytes,
             String defaultFolder) {
-        this(cloudinary, maxFileSizeBytes, defaultFolder, 104857600L);
+        this(storage, maxFileSizeBytes, defaultFolder, 104857600L);
     }
 
     @Override
@@ -64,15 +62,12 @@ public class MediaServiceImpl implements MediaService {
             log.info("Uploading image [{}] of size {} bytes to Cloudinary folder [{}]",
                     file.getOriginalFilename(), file.getSize(), targetFolder);
 
-            Map<?, ?> uploadResult = cloudinary.uploader().upload(file.getBytes(), ObjectUtils.asMap(
-                    "folder", targetFolder,
-                    "resource_type", "auto"
-            ));
+            var uploadResult = storage.uploadImage(file.getBytes(), targetFolder);
 
-            String secureUrl = (String) uploadResult.get("secure_url");
-            String publicId = (String) uploadResult.get("public_id");
-            String format = (String) uploadResult.get("format");
-            long bytes = uploadResult.get("bytes") instanceof Number n ? n.longValue() : file.getSize();
+            String secureUrl = uploadResult.secureUrl();
+            String publicId = uploadResult.publicId();
+            String format = uploadResult.format();
+            long bytes = uploadResult.bytes() != null ? uploadResult.bytes() : file.getSize();
 
             log.info("Successfully uploaded image to Cloudinary: publicId={}, url={}", publicId, secureUrl);
 
@@ -112,15 +107,12 @@ public class MediaServiceImpl implements MediaService {
             log.info("Uploading video [{}] of size {} bytes to Cloudinary folder [{}]",
                     file.getOriginalFilename(), file.getSize(), targetFolder);
 
-            Map<?, ?> uploadResult = cloudinary.uploader().upload(file.getBytes(), ObjectUtils.asMap(
-                    "folder", targetFolder,
-                    "resource_type", "video"
-            ));
+            var uploadResult = storage.uploadVideo(file.getBytes(), targetFolder);
 
-            String secureUrl = (String) uploadResult.get("secure_url");
-            String publicId = (String) uploadResult.get("public_id");
-            String format = (String) uploadResult.get("format");
-            long bytes = uploadResult.get("bytes") instanceof Number n ? n.longValue() : file.getSize();
+            String secureUrl = uploadResult.secureUrl();
+            String publicId = uploadResult.publicId();
+            String format = uploadResult.format();
+            long bytes = uploadResult.bytes() != null ? uploadResult.bytes() : file.getSize();
 
             log.info("Successfully uploaded video to Cloudinary: publicId={}, url={}", publicId, secureUrl);
 

@@ -5,7 +5,7 @@ import com.secondlife.secondlife.dto.request.LoginRequest;
 import com.secondlife.secondlife.dto.request.RegisterRequest;
 import com.secondlife.secondlife.dto.request.ResetPasswordRequest;
 import com.secondlife.secondlife.dto.request.VerifyEmailRequest;
-import com.secondlife.secondlife.dto.GoogleUserInfo;
+import com.secondlife.secondlife.dto.response.GoogleUserInfo;
 import com.secondlife.secondlife.dto.response.AuthResponse;
 import com.secondlife.secondlife.dto.response.TokenResponse;
 import com.secondlife.secondlife.dto.response.UserSummaryResponse;

@@ -1,5 +1,6 @@
 package com.secondlife.secondlife.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.secondlife.secondlife.enums.AccountStatus;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -27,7 +28,7 @@ public class User {
     @Column(nullable = false, unique = true, length = 255)
     private String email;
 
-    @com.fasterxml.jackson.annotation.JsonIgnore
+    @JsonIgnore
     @Column(name = "password_hash", nullable = false, length = 255)
     private String passwordHash;
 

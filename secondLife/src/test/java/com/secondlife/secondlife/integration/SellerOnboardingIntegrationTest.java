@@ -1,7 +1,7 @@
 package com.secondlife.secondlife.integration;
 
-import com.secondlife.secondlife.dto.ekyc.EkycResult;
-import com.secondlife.secondlife.dto.ekyc.vnpt.VnptResults;
+import com.secondlife.secondlife.dto.response.EkycResult;
+import com.secondlife.secondlife.dto.response.VnptResults;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.AccountStatus;
 import com.secondlife.secondlife.enums.ReasonCode;
@@ -9,9 +9,9 @@ import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
 import com.secondlife.secondlife.service.EkycService;
 import com.secondlife.secondlife.service.NotificationService;
-import com.secondlife.secondlife.service.ekyc.vnpt.VnptEkycOrchestrator;
-import com.secondlife.secondlife.service.shipping.ShippingQuoteService;
-import com.secondlife.secondlife.service.shipping.ShippingProvider;
+import com.secondlife.secondlife.integration.ekyc.vnpt.VnptEkycOrchestrator;
+import com.secondlife.secondlife.service.ShippingQuoteService;
+import com.secondlife.secondlife.integration.shipping.ShippingProvider;
 import com.secondlife.secondlife.exception.ShippingProviderException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterAll;
@@ -74,13 +74,13 @@ class SellerOnboardingIntegrationTest {
     @MockitoBean NotificationService notifications;
     @MockitoBean EkycService ekyc;
     @MockitoBean VnptEkycOrchestrator directEkyc;
-    @MockitoBean com.secondlife.secondlife.service.shipping.ReverseGeocodingService geocoding;
+    @MockitoBean com.secondlife.secondlife.service.ReverseGeocodingService geocoding;
 
     @BeforeEach void lalamoveCarrier() {
         when(carrier.code()).thenReturn("LALAMOVE");
         when(geocoding.shipping(any())).thenAnswer(invocation -> {
-            com.secondlife.secondlife.dto.shipping.ShippingAddressRequest request=invocation.getArgument(0);
-            return new com.secondlife.secondlife.dto.shipping.ShippingAddress(request.name(),request.phone(),
+            com.secondlife.secondlife.dto.request.ShippingAddressRequest request=invocation.getArgument(0);
+            return new com.secondlife.secondlife.dto.request.ShippingAddress(request.name(),request.phone(),
                     "123 Nguyễn Huệ, Thành phố Hồ Chí Minh",request.latitude(),request.longitude());
         });
     }
@@ -112,7 +112,7 @@ class SellerOnboardingIntegrationTest {
                 .andExpect(status().isUnauthorized());
         User buyer=buyer();
         when(geocoding.reverse(new java.math.BigDecimal("21.0333"),new java.math.BigDecimal("105.7937")))
-                .thenReturn(new com.secondlife.secondlife.dto.shipping.GeocodedAddressResponse("123 Cầu Giấy, Hà Nội, Việt Nam",
+                .thenReturn(new com.secondlife.secondlife.dto.response.GeocodedAddressResponse("123 Cầu Giấy, Hà Nội, Việt Nam",
                         new java.math.BigDecimal("21.0333"),new java.math.BigDecimal("105.7937"),
                         com.secondlife.secondlife.config.ShippingCatalogProperties.City.HANOI,"VN","place-test"));
         mvc.perform(post("/api/v1/shipping/reverse-geocode").header("Authorization",bearer(buyer))

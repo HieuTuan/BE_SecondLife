@@ -1,11 +1,12 @@
 package com.secondlife.secondlife.notification.channel;
 
+import com.secondlife.secondlife.integration.notification.EmailNotificationChannel;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.entity.UserProfile;
 import com.secondlife.secondlife.enums.AccountStatus;
-import com.secondlife.secondlife.notification.NotificationChannelType;
-import com.secondlife.secondlife.notification.NotificationMessage;
-import com.secondlife.secondlife.service.impl.EmailTemplateBuilder;
+import com.secondlife.secondlife.enums.NotificationChannelType;
+import com.secondlife.secondlife.integration.notification.NotificationMessage;
+import com.secondlife.secondlife.integration.mail.EmailTemplateBuilder;
 import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.BeforeEach;

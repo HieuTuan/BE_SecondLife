@@ -1,7 +1,6 @@
 package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.PageResponse;
-import com.secondlife.secondlife.controller.admin.AdminSellerVerificationController;
 import com.secondlife.secondlife.dto.request.SellerVerificationReviewRequest;
 import com.secondlife.secondlife.dto.response.AdminSellerVerificationDetailResponse;
 import com.secondlife.secondlife.dto.response.SellerVerificationResponse;
@@ -146,7 +145,7 @@ class AdminSellerVerificationControllerTest {
 
     @Test
     void approveSellerVerification_WhenNeedsReview_ShouldReturn200() throws Exception {
-        when(currentUserProvider.resolveAdminId(any())).thenReturn(adminId);
+        when(currentUserProvider.resolveUserId(any())).thenReturn(adminId);
 
         SellerVerificationResponse response = new SellerVerificationResponse(
                 verificationId, UUID.randomUUID(), "seller@example.com", "Jane Doe",
@@ -169,7 +168,7 @@ class AdminSellerVerificationControllerTest {
 
     @Test
     void approveSellerVerification_WhenNotNeedsReview_ShouldReturn409Conflict() throws Exception {
-        when(currentUserProvider.resolveAdminId(any())).thenReturn(adminId);
+        when(currentUserProvider.resolveUserId(any())).thenReturn(adminId);
 
         when(sellerVerificationService.approveVerification(adminId, verificationId))
                 .thenThrow(new ConflictException("Chỉ hồ sơ ở trạng thái NEEDS_REVIEW mới có thể phê duyệt"));
@@ -181,7 +180,7 @@ class AdminSellerVerificationControllerTest {
 
     @Test
     void rejectSellerVerification_WhenNeedsReview_ShouldReturn200() throws Exception {
-        when(currentUserProvider.resolveAdminId(any())).thenReturn(adminId);
+        when(currentUserProvider.resolveUserId(any())).thenReturn(adminId);
 
         SellerVerificationResponse response = new SellerVerificationResponse(
                 verificationId, UUID.randomUUID(), "seller@example.com", "Jane Doe",
@@ -212,7 +211,7 @@ class AdminSellerVerificationControllerTest {
 
     @Test
     void rejectSellerVerification_WhenNotNeedsReview_ShouldReturn409Conflict() throws Exception {
-        when(currentUserProvider.resolveAdminId(any())).thenReturn(adminId);
+        when(currentUserProvider.resolveUserId(any())).thenReturn(adminId);
 
         when(sellerVerificationService.rejectVerification(eq(adminId), eq(verificationId), any(SellerVerificationReviewRequest.class)))
                 .thenThrow(new ConflictException("Chỉ hồ sơ ở trạng thái NEEDS_REVIEW mới có thể từ chối"));

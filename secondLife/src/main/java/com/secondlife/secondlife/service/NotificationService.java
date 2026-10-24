@@ -5,7 +5,8 @@ import com.secondlife.secondlife.dto.response.NotificationResponseDTO;
 import com.secondlife.secondlife.dto.response.UnreadCountResponseDTO;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.AccountStatus;
-import com.secondlife.secondlife.notification.NotificationMessage;
+import com.secondlife.secondlife.enums.NotificationType;
+import com.secondlife.secondlife.integration.notification.NotificationMessage;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -18,7 +19,7 @@ public interface NotificationService {
      */
     NotificationResponseDTO notify(UUID userId, String title, String message, String type, UUID referenceId, String referenceType, String actionUrl);
 
-    default NotificationResponseDTO notify(UUID userId, String title, String message, com.secondlife.secondlife.notification.NotificationType type, UUID referenceId, String referenceType, String actionUrl) {
+    default NotificationResponseDTO notify(UUID userId, String title, String message, NotificationType type, UUID referenceId, String referenceType, String actionUrl) {
         return notify(userId, title, message, type != null ? type.name() : "SYSTEM", referenceId, referenceType, actionUrl);
     }
 
@@ -27,7 +28,7 @@ public interface NotificationService {
      */
     NotificationResponseDTO notifyInApp(UUID userId, String title, String message, String type, UUID referenceId, String referenceType, String actionUrl);
 
-    default NotificationResponseDTO notifyInApp(UUID userId, String title, String message, com.secondlife.secondlife.notification.NotificationType type, UUID referenceId, String referenceType, String actionUrl) {
+    default NotificationResponseDTO notifyInApp(UUID userId, String title, String message, NotificationType type, UUID referenceId, String referenceType, String actionUrl) {
         return notifyInApp(userId, title, message, type != null ? type.name() : "SYSTEM", referenceId, referenceType, actionUrl);
     }
 
@@ -38,7 +39,7 @@ public interface NotificationService {
 
     NotificationResponseDTO notifyWithEmail(UUID userId, String title, String message, String type, UUID referenceId, String referenceType, String actionUrl);
 
-    default NotificationResponseDTO notifyWithEmail(UUID userId, String title, String message, com.secondlife.secondlife.notification.NotificationType type, UUID referenceId, String referenceType, String actionUrl) {
+    default NotificationResponseDTO notifyWithEmail(UUID userId, String title, String message, NotificationType type, UUID referenceId, String referenceType, String actionUrl) {
         return notifyWithEmail(userId, title, message, type != null ? type.name() : "SYSTEM", referenceId, referenceType, actionUrl);
     }
 

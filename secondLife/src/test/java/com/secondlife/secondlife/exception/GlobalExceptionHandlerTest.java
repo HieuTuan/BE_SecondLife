@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.exception;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,6 +18,13 @@ class GlobalExceptionHandlerTest {
             .setControllerAdvice(new GlobalExceptionHandler())
             .build();
 
+    @Test
+    void carrierRateLimitReturns429InsteadOfBadGateway() throws Exception {
+        mockMvc.perform(get("/test/rate-limit"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Lalamove request failed (HTTP 429, ERR_RATE_LIMIT_EXCEEDED)"));
+    }
     @Test
     void notFoundReturnsStandardErrorEnvelope() throws Exception {
         mockMvc.perform(get("/test/not-found"))
@@ -36,9 +44,22 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.message").value("An unexpected internal error occurred. Please try again later."));
     }
 
+    @Test
+    void queryTimeoutReturnsServiceUnavailable() throws Exception {
+        mockMvc.perform(get("/test/timeout"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Database operation timed out or lock conflict occurred. Please retry."))
+                .andExpect(jsonPath("$.path").value("/test/timeout"));
+    }
+
     @RestController
     @RequestMapping("/test")
     static class FailingController {
+        @GetMapping("/rate-limit")
+        void rateLimit() {
+            throw new LalamoveRequestException(429,"ERR_RATE_LIMIT_EXCEEDED",null);
+        }
         @GetMapping("/not-found")
         void notFound() {
             throw new NotFoundException("Missing item");
@@ -47,6 +68,11 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/unexpected")
         void unexpected() {
             throw new IllegalStateException("internal details");
+        }
+
+        @GetMapping("/timeout")
+        void timeout() {
+            throw new QueryTimeoutException("canceling statement due to statement timeout");
         }
     }
 }

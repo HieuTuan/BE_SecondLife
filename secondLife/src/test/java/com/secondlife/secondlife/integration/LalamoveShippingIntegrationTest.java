@@ -10,11 +10,11 @@ import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.repository.UserWalletRepository;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
-import com.secondlife.secondlife.service.AiPriceProvider;
+import com.secondlife.secondlife.integration.ai.AiPriceProvider;
 import com.secondlife.secondlife.service.CloudinaryService;
-import com.secondlife.secondlife.service.shipping.LalamoveSignatures;
-import com.secondlife.secondlife.service.shipping.LalamoveWebhookVerifier;
-import com.secondlife.secondlife.service.shipping.ShippingProvider;
+import com.secondlife.secondlife.integration.shipping.LalamoveSignatures;
+import com.secondlife.secondlife.integration.shipping.LalamoveWebhookVerifier;
+import com.secondlife.secondlife.integration.shipping.ShippingProvider;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -89,7 +89,7 @@ class LalamoveShippingIntegrationTest {
     @Autowired UserWalletRepository wallets;
     @Autowired JdbcTemplate jdbc;
     @Autowired JwtTokenProvider jwt;
-    @Autowired com.secondlife.secondlife.service.impl.OrderAutoReleaseService autoRelease;
+    @Autowired com.secondlife.secondlife.service.OrderAutoReleaseService autoRelease;
     @Autowired com.secondlife.secondlife.service.OrderService orderService;
     @Autowired com.secondlife.secondlife.repository.OrderRepository orderRepository;
     @MockitoBean(name = "orderReleaseClock") Clock releaseClock;
@@ -98,15 +98,15 @@ class LalamoveShippingIntegrationTest {
     @MockitoBean CloudinaryService cloudinary;
     @MockitoBean(name = "ollamaChatModel") ChatModel ollama;
     @MockitoBean(name = "googleGenAiChatModel") ChatModel google;
-    @MockitoBean com.secondlife.secondlife.service.shipping.ReverseGeocodingService geocoding;
+    @MockitoBean com.secondlife.secondlife.service.ReverseGeocodingService geocoding;
     @MockitoBean org.springframework.mail.javamail.JavaMailSender mail;
     @MockitoBean org.springframework.messaging.simp.SimpMessagingTemplate messages;
 
     @BeforeEach void carrierReplies() {
         when(releaseClock.instant()).thenReturn(Instant.now());
         when(geocoding.shipping(any())).thenAnswer(invocation -> {
-            com.secondlife.secondlife.dto.shipping.ShippingAddressRequest request=invocation.getArgument(0);
-            return new com.secondlife.secondlife.dto.shipping.ShippingAddress(request.name(),request.phone(),
+            com.secondlife.secondlife.dto.request.ShippingAddressRequest request=invocation.getArgument(0);
+            return new com.secondlife.secondlife.dto.request.ShippingAddress(request.name(),request.phone(),
                     "123 Nguyễn Huệ, Thành phố Hồ Chí Minh",request.latitude(),request.longitude());
         });
         jdbc.update("UPDATE commission_rules SET active = false WHERE active");
@@ -282,7 +282,7 @@ class LalamoveShippingIntegrationTest {
             var buyer = executor.submit(() -> { start.await(); return orderService.confirmDelivery(f.buyer().getId(), id); });
             start.countDown();
             automatic.get(30, TimeUnit.SECONDS);
-            assertEquals(com.secondlife.secondlife.enums.OrderStatus.COMPLETED, buyer.get(30, TimeUnit.SECONDS).getStatus());
+            assertEquals(com.secondlife.secondlife.enums.OrderStatus.COMPLETED, buyer.get(30, TimeUnit.SECONDS).status());
             assertOrder(id, "COMPLETED", "RELEASED");
             assertMoney(new BigDecimal("950000"), balance(f.seller()));
             assertEquals(1, transactions(id, "EARNING"));
@@ -322,13 +322,24 @@ class LalamoveShippingIntegrationTest {
         assertMoney(new BigDecimal("950000"), balance(f.seller()));
     }
 
-    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"SELLER","BUYER","CARRIER","NONE"})
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"SELLER","BUYER","CARRIER"})
     void approvedReturnFreezesEscrowAndRefundsProductWithoutPayingSellerOrCommission(String responsibleParty) throws Exception {
         Fixture f = fixture(); User admin = user("ADMIN", BigDecimal.ZERO);
         JsonNode before = systemWallet(admin); UUID id = deliveredOrder(f);
+        JsonNode report = tree(mvc.perform(post("/api/v1/reports").header("Authorization", bearer(f.buyer()))
+                .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("requestId", UUID.randomUUID(), "orderId", id,
+                        "reasonCode", "MISLEADING_DESCRIPTION", "description", "Delivered product differs from its listing", "evidenceUrls", List.of()))))
+                .andExpect(status().isCreated()).andReturn()).path("data");
+        UUID reportId = UUID.fromString(report.path("id").asText());
+        mvc.perform(post("/api/v1/staff/reports/" + reportId + "/start-review").header("Authorization", bearer(admin)))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/v1/staff/reports/" + reportId + "/resolve").header("Authorization", bearer(admin))
+                .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("decision", "CONFIRMED", "responsibleParty", responsibleParty,
+                        "reason", "Staff approved the product return", "resolutionAction", "RETURN_AND_REFUND"))))
+                .andExpect(status().isOk());
         JsonNode returned = tree(mvc.perform(post("/api/v1/orders/" + id + "/shipments")
                 .header("Authorization", bearer(admin)).contentType(MediaType.APPLICATION_JSON)
-                .content(body(Map.of("requestId", UUID.randomUUID(), "leg", "BUYER_TO_SELLER", "reason", "Approved product return"))))
+                .content(body(Map.of("requestId", UUID.randomUUID(), "leg", "BUYER_TO_SELLER", "reason", "Approved product return", "reportId", reportId))))
                 .andExpect(status().isOk()).andReturn()).path("data");
         assertOrder(id, "DELIVERED", "FROZEN");
         deliveredAt(id, Instant.now().minus(Duration.ofHours(49)));

@@ -4,9 +4,12 @@ import com.secondlife.secondlife.dto.request.SePayWebhookDTO;
 import com.secondlife.secondlife.service.DepositService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Map;
 
 @RestController
@@ -17,7 +20,7 @@ public class SePayWebhookController {
 
     private final DepositService depositService;
 
-    @org.springframework.beans.factory.annotation.Value("${app.sepay.api-token}")
+    @Value("${app.sepay.api-token}")
     private String sepayApiToken;
 
     @PostMapping
@@ -40,12 +43,12 @@ public class SePayWebhookController {
                                             .replace("Apikey", "")
                                             .trim();
         
-        if (expectedToken.isBlank() || !java.security.MessageDigest.isEqual(receivedToken.getBytes(java.nio.charset.StandardCharsets.UTF_8), expectedToken.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+        if (expectedToken.isBlank() || !MessageDigest.isEqual(receivedToken.getBytes(StandardCharsets.UTF_8), expectedToken.getBytes(StandardCharsets.UTF_8))) {
             log.warn("Invalid SePay webhook authorization");
             return ResponseEntity.status(401).body(Map.of("success", false));
         }
             
-        log.info("Received SePay webhook for transaction ID: {}", webhookDTO.getId());
+        log.info("Received SePay webhook for transaction ID: {}", webhookDTO.id());
         
         try {
             depositService.processSepayWebhook(webhookDTO);

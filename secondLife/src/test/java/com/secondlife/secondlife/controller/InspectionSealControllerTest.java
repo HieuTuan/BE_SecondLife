@@ -100,16 +100,19 @@ class InspectionSealControllerTest {
         UUID actorId = UUID.randomUUID();
         when(currentUserProvider.resolveUserId(any())).thenReturn(actorId);
 
-        InspectionSealScanRequest request = new InspectionSealScanRequest();
-        request.setTamperSealId("SL-SEAL-20261014-9988");
-        request.setScanStage("CARRIER_HANDOVER");
-        request.setSealCondition("INTACT");
-        request.setLocationText("Hub Cầu Giấy");
-        request.setNote("Tem nguyên vẹn, shipper nhận hàng");
+        InspectionSealScanRequest request = new InspectionSealScanRequest(
+                "SL-SEAL-20261014-9988",
+                "CARRIER_HANDOVER",
+                "INTACT",
+                "Hub Cầu Giấy",
+                null,
+                null,
+                "Tem nguyên vẹn, shipper nhận hàng"
+        );
 
         InspectionSealLogResponse mockLog = InspectionSealLogResponse.builder()
                 .id(UUID.randomUUID())
-                .tamperSealId(request.getTamperSealId())
+                .tamperSealId(request.tamperSealId())
                 .scannedBy(actorId)
                 .scannedByName("Shipper B")
                 .scanStage("CARRIER_HANDOVER")

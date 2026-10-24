@@ -1,12 +1,21 @@
 package com.secondlife.secondlife.integration;
 
+import com.secondlife.secondlife.integration.ai.AiPriceProvider;
+
 import com.secondlife.secondlife.dto.request.*;
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.exception.*;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
-import com.secondlife.secondlife.service.*;
+import com.secondlife.secondlife.service.AiValuationService;
+import com.secondlife.secondlife.service.CloudinaryService;
+import com.secondlife.secondlife.service.InspectionService;
+import com.secondlife.secondlife.service.ListingDraftService;
+import com.secondlife.secondlife.service.ListingFingerprint;
+import com.secondlife.secondlife.service.ListingImageSimilarity;
+import com.secondlife.secondlife.service.ListingReviewService;
+import com.secondlife.secondlife.service.PostService;
 import org.junit.jupiter.api.*;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.*;
@@ -53,7 +62,6 @@ class MainFlow1IntegrationTest {
     @Autowired PostRepository posts;
     @Autowired AiPriceEstimateRepository estimates;
     @Autowired CreditBalanceRepository balances;
-    @Autowired CreditBalanceGrantRepository grants;
     @Autowired CreditLedgerRepository ledger;
     @Autowired InspectionOrderRepository inspections;
     @Autowired AiChatSessionRepository sessions;
@@ -64,6 +72,7 @@ class MainFlow1IntegrationTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired ListingReviewService reviews;
     @Autowired ListingImageSimilarity imageSimilarity;
+    @Autowired ListingFingerprint listingFingerprint;
     @Autowired InspectionService inspectionService;
     @MockitoBean AiPriceProvider priceProvider;
     @MockitoBean CloudinaryService cloudinary;
@@ -113,8 +122,8 @@ class MainFlow1IntegrationTest {
         mvc.perform(post("/api/v1/posts/" + postId + "/accept-description").header("Authorization", bearer(seller))
                         .contentType(MediaType.APPLICATION_JSON).content("{\"description\":\"Đã dùng 2 năm, còn tốt\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.descriptionAccepted").value(true));
-        grants.grant(seller.getId(), CreditType.VALUATION, 1);
-        grants.grant(seller.getId(), CreditType.LISTING, 1);
+        balances.grant(seller.getId(), CreditType.VALUATION, 1);
+        balances.grant(seller.getId(), CreditType.LISTING, 1);
         UUID request = UUID.randomUUID();
         for (int i = 0; i < 2; i++) mvc.perform(post("/api/v1/posts/" + postId + "/ai-price-estimation")
                         .header("Authorization", bearer(seller)).contentType(MediaType.APPLICATION_JSON)
@@ -216,7 +225,7 @@ class MainFlow1IntegrationTest {
 
     @Test void failedValuationRollsBackDebitLedgerAndResultAndCanRetry() {
         var seller = user("SELLER", true); var draft = draft(seller);
-        grants.grant(seller.getId(), CreditType.VALUATION, 1);
+        balances.grant(seller.getId(), CreditType.VALUATION, 1);
         UUID request = UUID.randomUUID();
         when(priceProvider.estimate(anyString(), anyList())).thenThrow(new AiProviderException("provider failed"));
         assertThrows(AiProviderException.class, () -> valuations.create(seller.getId(), draft.getId(), request));
@@ -249,7 +258,7 @@ class MainFlow1IntegrationTest {
         assertThrows(ForbiddenException.class, () -> valuations.create(other.getId(), draft.getId(), UUID.randomUUID()));
         assertThrows(ConflictException.class, () -> valuations.create(seller.getId(), draft.getId(), UUID.randomUUID()));
         verifyNoInteractions(priceProvider);
-        grants.grant(seller.getId(), CreditType.VALUATION, 2);
+        balances.grant(seller.getId(), CreditType.VALUATION, 2);
         UUID request = UUID.randomUUID(); valuations.create(seller.getId(), draft.getId(), request);
         drafts.update(seller.getId(), draft.getId(), new ListingDraftRequest("Updated product", "Changed condition", "USED", null));
         assertThrows(ConflictException.class, () -> valuations.create(seller.getId(), draft.getId(), request));
@@ -262,7 +271,7 @@ class MainFlow1IntegrationTest {
 
     @Test void twoDifferentValuationsCannotOverdrawLastCredit() throws Exception {
         var seller = user("SELLER", true); var draft = draft(seller);
-        grants.grant(seller.getId(), CreditType.VALUATION, 1);
+        balances.grant(seller.getId(), CreditType.VALUATION, 1);
         var outcomes = parallel(() -> {
             try { valuations.create(seller.getId(), draft.getId(), UUID.randomUUID()); return "OK"; }
             catch (ConflictException ex) { return "NO_CREDIT"; }
@@ -275,8 +284,8 @@ class MainFlow1IntegrationTest {
 
     @Test void simultaneousRetryReturnsSameValuationAndOnlyChargesOnce() throws Exception {
         var seller = user("SELLER", true); var draft = draft(seller);
-        grants.grant(seller.getId(), CreditType.VALUATION, 2); UUID request = UUID.randomUUID();
-        var results = parallel(() -> valuations.create(seller.getId(), draft.getId(), request).getEstimateId());
+        balances.grant(seller.getId(), CreditType.VALUATION, 2); UUID request = UUID.randomUUID();
+        var results = parallel(() -> valuations.create(seller.getId(), draft.getId(), request).estimateId());
         assertEquals(results.get(0), results.get(1));
         assertEquals(1, balance(seller, CreditType.VALUATION)); assertEquals(1, consumes(seller));
         verify(priceProvider, times(1)).estimate(anyString(), anyList());
@@ -284,16 +293,16 @@ class MainFlow1IntegrationTest {
 
     @Test void moderationRejectionAndDuplicateDoNotConsumeListingCredit() {
         var seller = user("SELLER", true); var draft = draft(seller);
-        grants.grant(seller.getId(), CreditType.LISTING, 2);
+        balances.grant(seller.getId(), CreditType.LISTING, 2);
         when(google.call(any(Prompt.class))).thenReturn(reply("REJECTED:Nội dung không phù hợp"));
-        assertEquals("REJECTED", postService.submitPost(seller.getId(), draft.getId(), submit(draft, "1000000")).getStatus());
+        assertEquals("REJECTED", postService.submitPost(seller.getId(), draft.getId(), submit(draft, "1000000")).status());
         assertEquals("REJECTED", posts.findById(draft.getId()).orElseThrow().getStatus());
         assertEquals(2, balance(seller, CreditType.LISTING)); assertEquals(0, consumes(seller));
         when(google.call(any(Prompt.class))).thenReturn(reply("APPROVED"));
-        assertEquals("ACTIVE", postService.submitPost(seller.getId(), draft.getId(), submit(draft, "1000000")).getStatus());
+        assertEquals("ACTIVE", postService.submitPost(seller.getId(), draft.getId(), submit(draft, "1000000")).status());
         var duplicate = draft(seller); duplicate.setTitle(draft.getTitle()); duplicate.setDescription(draft.getDescription());
         duplicate.setCategoryId(draft.getCategoryId()); posts.saveAndFlush(duplicate);
-        assertEquals("PENDING", postService.submitPost(seller.getId(), duplicate.getId(), submit(duplicate, "1000000")).getStatus());
+        assertEquals("PENDING", postService.submitPost(seller.getId(), duplicate.getId(), submit(duplicate, "1000000")).status());
         assertEquals(1, balance(seller, CreditType.LISTING)); assertEquals(1, consumes(seller));
         assertThrows(ConflictException.class, () -> drafts.update(seller.getId(), draft.getId(),
                 new ListingDraftRequest("New", "New", null, null)));
@@ -306,9 +315,9 @@ class MainFlow1IntegrationTest {
         assertEquals("DRAFT", posts.findById(draft.getId()).orElseThrow().getStatus());
         when(google.call(any(Prompt.class))).thenReturn(reply("APPROVED"));
         assertThrows(ConflictException.class, () -> postService.submitPost(seller.getId(), draft.getId(), submit(draft, "1000000")));
-        grants.grant(seller.getId(), CreditType.LISTING, 1);
+        balances.grant(seller.getId(), CreditType.LISTING, 1);
         long before = inspections.count();
-        assertEquals("PENDING_INSPECTION", postService.submitPost(seller.getId(), draft.getId(), submit(draft, "6000000")).getStatus());
+        assertEquals("PENDING_INSPECTION", postService.submitPost(seller.getId(), draft.getId(), submit(draft, "6000000")).status());
         assertEquals(1, balance(seller, CreditType.LISTING)); assertEquals(before + 1, inspections.count());
         postService.submitPost(seller.getId(), draft.getId(), submit(draft, "6000000"));
         assertEquals(before + 1, inspections.count()); assertEquals(0, consumes(seller));
@@ -316,12 +325,12 @@ class MainFlow1IntegrationTest {
 
     @Test void concurrentPublishRetryConsumesOneCreditAndUnapprovedSellerCannotPublish() throws Exception {
         var unapproved = user("SELLER", false); var blocked = draft(unapproved);
-        grants.grant(unapproved.getId(), CreditType.LISTING, 1);
+        balances.grant(unapproved.getId(), CreditType.LISTING, 1);
         assertThrows(ConflictException.class, () -> postService.submitPost(unapproved.getId(), blocked.getId(), submit(blocked, "1000000")));
         assertEquals(1, balance(unapproved, CreditType.LISTING));
         var seller = user("SELLER", true); var draft = draft(seller);
-        grants.grant(seller.getId(), CreditType.LISTING, 1);
-        var results = parallel(() -> postService.submitPost(seller.getId(), draft.getId(), submit(draft, "1000000")).getStatus());
+        balances.grant(seller.getId(), CreditType.LISTING, 1);
+        var results = parallel(() -> postService.submitPost(seller.getId(), draft.getId(), submit(draft, "1000000")).status());
         assertEquals(List.of("ACTIVE", "ACTIVE"), results);
         assertEquals(0, balance(seller, CreditType.LISTING)); assertEquals(1, consumes(seller));
         verify(google, times(1)).call(any(Prompt.class));
@@ -347,10 +356,10 @@ class MainFlow1IntegrationTest {
 
     @Test void identicalImageAndPublishRateAreBlockedWithoutAnotherCharge() {
         var seller = user("SELLER", true); var first = draft(seller); first.setImageFingerprint("abc"); posts.saveAndFlush(first);
-        grants.grant(seller.getId(), CreditType.LISTING, 2);
+        balances.grant(seller.getId(), CreditType.LISTING, 2);
         postService.submitPost(seller.getId(), first.getId(), submit(first, "1000000"));
         var reused = draft(seller); reused.setImageFingerprint("abc"); posts.saveAndFlush(reused);
-        assertEquals("PENDING", postService.submitPost(seller.getId(), reused.getId(), submit(reused, "1000000")).getStatus());
+        assertEquals("PENDING", postService.submitPost(seller.getId(), reused.getId(), submit(reused, "1000000")).status());
         for (int i = 0; i < 4; i++) {
             var accepted = draft(seller); accepted.setStatus("ACTIVE"); accepted.setListingCreditCharged(true);
             accepted.setPublishedAt(java.time.Instant.now()); posts.saveAndFlush(accepted);
@@ -364,7 +373,7 @@ class MainFlow1IntegrationTest {
     @Test void acceptingDescriptionEnforcesOwnershipAndNewEditsRequireConfirmation() throws Exception {
         var seller = user("SELLER", true); var other = user("SELLER", true); var p = draft(seller);
         p.setDescriptionAccepted(false); p.setAiDescription("Mô tả từ ảnh"); posts.saveAndFlush(p);
-        grants.grant(seller.getId(), CreditType.VALUATION, 1);
+        balances.grant(seller.getId(), CreditType.VALUATION, 1);
         assertThrows(ConflictException.class, () -> valuations.create(seller.getId(), p.getId(), UUID.randomUUID()));
         assertThrows(ConflictException.class, () -> postService.submitPost(seller.getId(), p.getId(), submit(p, "1000000")));
         String url = "/api/v1/posts/" + p.getId() + "/accept-description";
@@ -387,13 +396,13 @@ class MainFlow1IntegrationTest {
     @Test void crossSellerDuplicateQueuesForStaffAndConcurrentApprovalChargesOnce() throws Exception {
         var originalSeller = user("SELLER", true); var original = draft(originalSeller);
         String hash = UUID.randomUUID().toString(); original.setImageFingerprint(hash); posts.saveAndFlush(original);
-        grants.grant(originalSeller.getId(), CreditType.LISTING, 1);
+        balances.grant(originalSeller.getId(), CreditType.LISTING, 1);
         postService.submitPost(originalSeller.getId(), original.getId(), submit(original, "1000000"));
         var seller = user("SELLER", true); var duplicate = draft(seller);
         duplicate.setImageFingerprint(hash); posts.saveAndFlush(duplicate);
-        grants.grant(seller.getId(), CreditType.LISTING, 1);
+        balances.grant(seller.getId(), CreditType.LISTING, 1);
         when(google.call(any(Prompt.class))).thenThrow(new RuntimeException("Moderation offline"));
-        assertEquals("PENDING", postService.submitPost(seller.getId(), duplicate.getId(), submit(duplicate, "1000000")).getStatus());
+        assertEquals("PENDING", postService.submitPost(seller.getId(), duplicate.getId(), submit(duplicate, "1000000")).status());
         assertEquals(1, balance(seller, CreditType.LISTING)); assertEquals(0, consumes(seller));
         var staff = user("STAFF", false); String url = "/api/v1/staff/listings/" + duplicate.getId();
         mvc.perform(get("/api/v1/staff/listings").header("Authorization", bearer(staff))).andExpect(status().isOk());
@@ -433,14 +442,14 @@ class MainFlow1IntegrationTest {
         javax.imageio.ImageIO.write(image, "png", full);
         javax.imageio.ImageIO.write(image.getSubimage(40, 30, 320, 240), "jpeg", cropped);
         var firstSeller = user("SELLER", true); var first = draft(firstSeller);
-        first.getImages().add(new PostImage(first.getImageUrl(), ListingFingerprint.sha256(full.toByteArray()),
+        first.getImages().add(new PostImage(first.getImageUrl(), listingFingerprint.sha256(full.toByteArray()),
                 imageSimilarity.fingerprint(full.toByteArray()))); posts.saveAndFlush(first);
-        grants.grant(firstSeller.getId(), CreditType.LISTING, 1);
+        balances.grant(firstSeller.getId(), CreditType.LISTING, 1);
         postService.submitPost(firstSeller.getId(), first.getId(), submit(first, "1000000"));
         var secondSeller = user("SELLER", true); var second = draft(secondSeller);
-        second.getImages().add(new PostImage(second.getImageUrl(), ListingFingerprint.sha256(cropped.toByteArray()),
+        second.getImages().add(new PostImage(second.getImageUrl(), listingFingerprint.sha256(cropped.toByteArray()),
                 imageSimilarity.fingerprint(cropped.toByteArray()))); posts.saveAndFlush(second);
-        assertEquals("PENDING", postService.submitPost(secondSeller.getId(), second.getId(), submit(second, "1000000")).getStatus());
+        assertEquals("PENDING", postService.submitPost(secondSeller.getId(), second.getId(), submit(second, "1000000")).status());
         assertTrue(reviews.detail(second.getId()).duplicateMatches().contains(first.getId()));
         assertEquals(0, consumes(secondSeller));
     }
@@ -448,12 +457,24 @@ class MainFlow1IntegrationTest {
     @Test void inspectionChargesOnlyWhenPassedAndNeverWhenFailed() {
         var inspector = user("INSPECTOR", false);
         for (String result : List.of("PASSED", "FAILED")) {
-            var seller = user("SELLER", true); var p = draft(seller); grants.grant(seller.getId(), CreditType.LISTING, 1);
+            var seller = user("SELLER", true); var p = draft(seller); balances.grant(seller.getId(), CreditType.LISTING, 1);
             postService.submitPost(seller.getId(), p.getId(), submit(p, "6000000"));
             UUID orderId = jdbc.queryForObject("SELECT id FROM inspection_orders WHERE post_id = ?", UUID.class, p.getId());
             inspectionService.assignInspector(orderId, inspector.getId());
             assertEquals(1, balance(seller, CreditType.LISTING));
-            var request = new InspectionResultRequest(); request.setStatus(result); request.setNote("Kiểm tra thực tế");
+            var request = new InspectionResultRequest(
+                    result,
+                    "Kiểm tra thực tế",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+            );
             inspectionService.submitResult(orderId, inspector.getId(), request);
             assertEquals("PASSED".equals(result) ? "ACTIVE" : "REJECTED", posts.findById(p.getId()).orElseThrow().getStatus());
             assertEquals("PASSED".equals(result) ? 0 : 1, balance(seller, CreditType.LISTING));
@@ -480,8 +501,15 @@ class MainFlow1IntegrationTest {
         p.setImageUrl("https://example.test/" + UUID.randomUUID() + ".jpg"); return posts.saveAndFlush(p);
     }
     private PostSubmitRequest submit(Post p, String price) {
-        var request = new PostSubmitRequest(); request.setTitle(p.getTitle()); request.setDescription(p.getDescription());
-        request.setPrice(new BigDecimal(price)); return request;
+        var request = new PostSubmitRequest(
+                p.getTitle(),
+                p.getDescription(),
+                new BigDecimal(price),
+                null,
+                null,
+                null,
+                null
+        ); return request;
     }
     private long balance(User user, CreditType type) {
         return balances.findByUserId(user.getId()).stream().filter(b -> b.getCreditType() == type).mapToLong(CreditBalance::getQuantity).sum();

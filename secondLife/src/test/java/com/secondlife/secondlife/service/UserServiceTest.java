@@ -54,6 +54,9 @@ class UserServiceTest {
     @Mock
     private NotificationService notificationService;
 
+    @Mock
+    private SellerReputationService sellerReputationService;
+
     @InjectMocks
     private UserServiceImpl userService;
 
@@ -85,15 +88,16 @@ class UserServiceTest {
     void updateProfile_WhenValid_ShouldUpdateAndReturn() {
         UpdateProfileRequest request = new UpdateProfileRequest("New Name", "0987654321", "http://avatar.jpg", null, null, null, null, null, null);
 
-        when(userRepository.findByIdWithAuthorities(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdWithProfileDetails(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(any(User.class))).thenReturn(user);
 
         UserProfileResponse expected = new UserProfileResponse(
                 userId, user.getEmail(), "New Name", "0987654321", "http://avatar.jpg",
                 AccountStatus.ACTIVE, false, null, null, null, null, null,
+                null, null, null, null, null, null,
                 null, null, null, null, null, null
         );
-        when(userMapper.toProfileResponse(user)).thenReturn(expected);
+        when(userMapper.toProfileResponse(user, null)).thenReturn(expected);
 
         UserProfileResponse result = userService.updateProfile(userId, request);
 
