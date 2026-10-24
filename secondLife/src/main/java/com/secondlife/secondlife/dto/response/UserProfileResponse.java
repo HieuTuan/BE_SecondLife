@@ -31,12 +31,10 @@ public record UserProfileResponse(
     Gender gender,
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @Schema(description = "Current seller reputation; omitted for users without the SELLER role")
-    ReputationResponse sellerReputation
+    ReputationResponse sellerReputation,
+    String badgeCode,
+    UUID stationHubId,
+    String stationHubName,
+    String certificationTitle
 ) {
-    public UserProfileResponse(UUID id,String email,String fullName,String phone,String avatarUrl,AccountStatus accountStatus,
-            boolean emailVerified,Set<String> roles,Set<String> permissions,Instant createdAt,Instant updatedAt,Instant lastLoginAt,
-            String province,String district,String ward,String streetAddress,Double latitude,Double longitude) {
-        this(id,email,fullName,phone,avatarUrl,accountStatus,emailVerified,roles,permissions,createdAt,updatedAt,lastLoginAt,
-                province,district,ward,streetAddress,latitude,longitude,null,null);
-    }
 }

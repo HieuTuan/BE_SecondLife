@@ -13,6 +13,7 @@ import com.secondlife.secondlife.service.CloudinaryService;
 import com.secondlife.secondlife.service.SellerReputationService;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIf;
+import org.hibernate.Hibernate;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -68,6 +69,31 @@ class SellerReputationIntegrationTest {
             return new ReportEvidenceStorage.StoredImage("report-evidence/"+UUID.randomUUID(),"image/png",file.getSize());
         });
         org.mockito.Mockito.when(evidenceStorage.read(org.mockito.ArgumentMatchers.anyString())).thenReturn(new byte[]{1,2,3});
+    }
+
+    @Test void inspectorProfileKeepsHubDetailsAndSellerReputationAfterMapperMerge() throws Exception {
+        User manager = user("INSPECTION_CENTER");
+        manager.setProfile(new UserProfile(manager, "Inspection Center 01", "0901234567", null));
+        manager = users.saveAndFlush(manager);
+        User inspector = user("INSPECTOR");
+        inspector.addRole(roles.findByCodeWithPermissions("SELLER").orElseThrow());
+        inspector.setManager(manager);
+        inspector.setProfile(new UserProfile(inspector, "Inspector One", "0901234568", null));
+        inspector = users.saveAndFlush(inspector);
+
+        User loaded = users.findByIdWithProfileDetails(inspector.getId()).orElseThrow();
+        assertTrue(Hibernate.isInitialized(loaded.getManager()));
+        assertTrue(Hibernate.isInitialized(loaded.getManager().getProfile()));
+        String rawId = inspector.getId().toString().replace("-", "");
+        String badge = "SL-TECH-" + rawId.substring(rawId.length() - 4).toUpperCase(Locale.ROOT);
+        mvc.perform(get("/api/v1/users/me").header("Authorization", bearer(inspector)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.fullName").value("Inspector One"))
+            .andExpect(jsonPath("$.data.badgeCode").value(badge))
+            .andExpect(jsonPath("$.data.stationHubId").value(manager.getId().toString()))
+            .andExpect(jsonPath("$.data.stationHubName").value("Inspection Center 01"))
+            .andExpect(jsonPath("$.data.certificationTitle").value("Kỹ thuật viên Thẩm định Thiết bị Bậc 3"))
+            .andExpect(jsonPath("$.data.sellerReputation.sellerId").value(inspector.getId().toString()));
     }
 
     @Test void ownProfileIncludesReputationForSellerWithoutTransactions() throws Exception {

@@ -23,7 +23,7 @@ class ProfileGenderServiceTest {
     private UserServiceImpl service;
     @BeforeEach void setup() {
         user.setId(UUID.randomUUID()); user.setProfile(new UserProfile(user,"Nguyễn Test",null,null)); user.getProfile().setGender(Gender.MALE);
-        when(users.findByIdWithAuthorities(user.getId())).thenReturn(Optional.of(user)); when(users.save(user)).thenReturn(user);
+        when(users.findByIdWithProfileDetails(user.getId())).thenReturn(Optional.of(user)); when(users.save(user)).thenReturn(user);
         service=new UserServiceImpl(users,mock(RoleRepository.class),mock(PasswordEncoder.class),mock(TokenService.class),mapper,mock(NotificationService.class),mock(SellerReputationService.class));
     }
     @Test void chosenGenderCanBeUpdatedAndReadFromProfileAndAuthSummary() {

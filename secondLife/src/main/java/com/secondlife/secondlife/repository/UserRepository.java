@@ -45,6 +45,10 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
            "WHERE u.id = :id")
     Optional<User> findByIdWithAuthorities(@Param("id") UUID id);
 
+    @EntityGraph(attributePaths = {"profile", "userRoles.role.rolePermissions.permission", "manager.profile"})
+    @Query("select distinct u from User u where u.id = :id")
+    Optional<User> findByIdWithProfileDetails(@Param("id") UUID id);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT u FROM User u WHERE u.id = :id")
     Optional<User> findByIdForRoleUpdate(@Param("id") UUID id);

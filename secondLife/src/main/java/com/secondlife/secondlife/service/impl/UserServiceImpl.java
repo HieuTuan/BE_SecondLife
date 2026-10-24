@@ -59,7 +59,7 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional(readOnly = true)
     public UserProfileResponse getProfile(UUID userId) {
-        User user = userRepository.findByIdWithAuthorities(userId)
+        User user = userRepository.findByIdWithProfileDetails(userId)
                 .orElseThrow(() -> new NotFoundException("User not found with id: " + userId));
         return profileResponse(user);
     }
@@ -67,7 +67,7 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public UserProfileResponse updateProfile(UUID userId, UpdateProfileRequest request) {
-        User user = userRepository.findByIdWithAuthorities(userId)
+        User user = userRepository.findByIdWithProfileDetails(userId)
                 .orElseThrow(() -> new NotFoundException("User not found with id: " + userId));
 
         UserProfile profile = user.getProfile();
