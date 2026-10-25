@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.entity.InspectionOrder;
+import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
@@ -93,7 +94,8 @@ class InspectionEscrowServiceTest {
         assertNotNull(updated.getBuyerPaidAt());
         assertNull(updated.getSellerPaidAt());
         assertEquals(InspectionOrderStatus.WAITING_FEE_PAYMENT.name(), updated.getStatus());
-        verify(walletService, times(1)).processPayment(buyerId, BigDecimal.valueOf(100000), orderId);
+        verify(walletService, times(1)).processPayment(buyerId, BigDecimal.valueOf(100000), orderId,
+                WalletTransactionReferenceType.INSPECTION_ORDER);
     }
 
     @Test
@@ -108,7 +110,8 @@ class InspectionEscrowServiceTest {
         assertNotNull(updated.getBuyerPaidAt());
         assertNotNull(updated.getSellerPaidAt());
         assertEquals(InspectionOrderStatus.CONFIRMED_PENDING_DISPATCH.name(), updated.getStatus());
-        verify(walletService, times(1)).processPayment(sellerId, BigDecimal.valueOf(100000), orderId);
+        verify(walletService, times(1)).processPayment(sellerId, BigDecimal.valueOf(100000), orderId,
+                WalletTransactionReferenceType.INSPECTION_ORDER);
     }
 
     @Test
@@ -120,7 +123,8 @@ class InspectionEscrowServiceTest {
 
         assertThrows(ConflictException.class, () -> escrowService.payInspectionFee(sellerId, orderId));
 
-        verify(walletService, times(1)).processRefund(buyerId, BigDecimal.valueOf(100000), orderId);
+        verify(walletService, times(1)).processRefund(buyerId, BigDecimal.valueOf(100000), orderId,
+                WalletTransactionReferenceType.INSPECTION_ORDER);
         assertEquals(InspectionOrderStatus.PAYMENT_EXPIRED.name(), order.getStatus());
     }
 
@@ -137,8 +141,9 @@ class InspectionEscrowServiceTest {
 
         escrowService.refundExpiredOrder(order);
 
-        verify(walletService, times(1)).processRefund(buyerId, BigDecimal.valueOf(100000), orderId);
-        verify(walletService, never()).processRefund(eq(sellerId), any(), any());
+        verify(walletService, times(1)).processRefund(buyerId, BigDecimal.valueOf(100000), orderId,
+                WalletTransactionReferenceType.INSPECTION_ORDER);
+        verify(walletService, never()).processRefund(eq(sellerId), any(), any(), any());
         assertEquals(InspectionOrderStatus.PAYMENT_EXPIRED.name(), order.getStatus());
         assertEquals("ACTIVE", post.getStatus());
         verify(postRepository, times(1)).save(post);

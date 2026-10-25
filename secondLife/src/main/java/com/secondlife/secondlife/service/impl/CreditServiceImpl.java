@@ -2,6 +2,7 @@ package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.dto.response.CreditBalanceResponse;
 import com.secondlife.secondlife.entity.CreditLedgerEntry;
+import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
 import com.secondlife.secondlife.entity.TopupPackage;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.CreditType;
@@ -64,7 +65,8 @@ public class CreditServiceImpl implements CreditService {
                 .orElseThrow(() -> new RuntimeException("Topup package not found"));
 
         // Deduct from wallet (throws exception if insufficient balance)
-        walletService.processPayment(userId, topupPackage.getPrice(), packageId);
+        walletService.processPayment(userId, topupPackage.getPrice(), packageId,
+                WalletTransactionReferenceType.TOPUP_PACKAGE);
 
         // Generate a unique purchase ID to group these grants and ensure idempotency keys are unique per purchase
         UUID purchaseTraceId = UUID.randomUUID();

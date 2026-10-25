@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.entity.InspectionOrder;
+import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
@@ -85,7 +86,8 @@ class InspectionEscrowExpirySchedulerTest {
 
         assertEquals("CANCELLED", order.getStatus());
         assertEquals("ACTIVE", post.getStatus());
-        verify(walletService, times(1)).processEarning(eq(sellerId), eq(new BigDecimal("150000")), eq(order.getId()));
+        verify(walletService, times(1)).processEarning(eq(sellerId), eq(new BigDecimal("150000")), eq(order.getId()),
+                eq(WalletTransactionReferenceType.INSPECTION_ORDER));
         verify(inspectionOrderRepository, times(1)).save(order);
         verify(postRepository, times(1)).save(post);
     }

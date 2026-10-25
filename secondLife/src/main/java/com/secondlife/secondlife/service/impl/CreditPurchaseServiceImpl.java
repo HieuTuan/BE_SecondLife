@@ -7,6 +7,7 @@ import com.secondlife.secondlife.dto.response.CreditPurchaseResponse;
 import com.secondlife.secondlife.dto.response.CreditQuoteResponse;
 import com.secondlife.secondlife.entity.CreditLedgerEntry;
 import com.secondlife.secondlife.entity.CreditPurchase;
+import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
 import com.secondlife.secondlife.entity.PaymentIntent;
 import com.secondlife.secondlife.enums.CreditPurchaseStatus;
 import com.secondlife.secondlife.enums.CreditType;
@@ -81,7 +82,8 @@ public class CreditPurchaseServiceImpl implements CreditPurchaseService {
         purchaseRepository.saveAndFlush(purchase);
 
         // Deduct from wallet directly
-        walletService.processPayment(sellerId, quote.finalFee(), purchase.getId());
+        walletService.processPayment(sellerId, quote.finalFee(), purchase.getId(),
+                WalletTransactionReferenceType.CREDIT_PURCHASE);
 
         // Grant credits directly since payment is completed
         grant(purchase, CreditType.LISTING, purchase.getListingQuantity());

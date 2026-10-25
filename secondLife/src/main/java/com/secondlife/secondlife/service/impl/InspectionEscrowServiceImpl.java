@@ -2,6 +2,7 @@ package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.entity.InspectionOrder;
+import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.enums.NotificationType;
 import com.secondlife.secondlife.exception.ConflictException;
@@ -82,7 +83,7 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
             }
             BigDecimal amount = order.getBuyerFeeShare() != null ? order.getBuyerFeeShare() : BigDecimal.ZERO;
             if (amount.compareTo(BigDecimal.ZERO) > 0) {
-                walletService.processPayment(userId, amount, order.getId());
+                walletService.processPayment(userId, amount, order.getId(), WalletTransactionReferenceType.INSPECTION_ORDER);
             }
             order.setBuyerPaidAt(Instant.now());
         }
@@ -93,7 +94,7 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
             }
             BigDecimal amount = order.getSellerFeeShare() != null ? order.getSellerFeeShare() : BigDecimal.ZERO;
             if (amount.compareTo(BigDecimal.ZERO) > 0) {
-                walletService.processPayment(userId, amount, order.getId());
+                walletService.processPayment(userId, amount, order.getId(), WalletTransactionReferenceType.INSPECTION_ORDER);
             }
             order.setSellerPaidAt(Instant.now());
         }
@@ -135,7 +136,8 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
         if (order.getBuyerPaidAt() != null && order.getBuyer() != null && order.getBuyerFeeShare() != null
                 && order.getBuyerFeeShare().compareTo(BigDecimal.ZERO) > 0) {
             try {
-                walletService.processRefund(order.getBuyer().getId(), order.getBuyerFeeShare(), order.getId());
+                walletService.processRefund(order.getBuyer().getId(), order.getBuyerFeeShare(), order.getId(),
+                        WalletTransactionReferenceType.INSPECTION_ORDER);
                 log.info("Refunded {} VND to buyer {}", order.getBuyerFeeShare(), order.getBuyer().getId());
             } catch (Exception ex) {
                 log.error("Failed to refund buyer {}: {}", order.getBuyer().getId(), ex.getMessage());
@@ -145,7 +147,8 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
         if (order.getSellerPaidAt() != null && order.getSeller() != null && order.getSellerFeeShare() != null
                 && order.getSellerFeeShare().compareTo(BigDecimal.ZERO) > 0) {
             try {
-                walletService.processRefund(order.getSeller().getId(), order.getSellerFeeShare(), order.getId());
+                walletService.processRefund(order.getSeller().getId(), order.getSellerFeeShare(), order.getId(),
+                        WalletTransactionReferenceType.INSPECTION_ORDER);
                 log.info("Refunded {} VND to seller {}", order.getSellerFeeShare(), order.getSeller().getId());
             } catch (Exception ex) {
                 log.error("Failed to refund seller {}: {}", order.getSeller().getId(), ex.getMessage());

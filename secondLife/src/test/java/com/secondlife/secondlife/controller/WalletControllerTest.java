@@ -33,6 +33,7 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -109,7 +110,7 @@ class WalletControllerTest {
                 .createdAt(Instant.parse("2026-01-01T00:00:00Z"))
                 .build();
         when(currentUserProvider.resolveUserId(any())).thenReturn(userId);
-        when(walletQueryService.getTransactions(eq(userId), any(Pageable.class)))
+        when(walletQueryService.getTransactions(eq(userId), isNull(), isNull(), isNull(), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(response), PageRequest.of(1, 10), 35));
 
         mockMvc.perform(get("/api/v1/wallets/me/transactions").param("page", "1").param("size", "10"))

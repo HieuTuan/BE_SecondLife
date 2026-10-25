@@ -200,7 +200,7 @@ class ReturnShippingFeeMigrationTest {
     }
 
     private Flyway latest(String jdbcUrl) {
-        return Flyway.configure().dataSource(jdbcUrl, database.getUsername(), database.getPassword()).load();
+        return Flyway.configure().dataSource(jdbcUrl, database.getUsername(), database.getPassword()).target("59").load();
     }
 
     private UUID user(JdbcTemplate jdbc) {

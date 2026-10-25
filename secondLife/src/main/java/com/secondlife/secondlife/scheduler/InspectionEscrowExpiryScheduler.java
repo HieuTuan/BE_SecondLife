@@ -6,6 +6,7 @@ import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.WalletService;
 
 import com.secondlife.secondlife.entity.InspectionOrder;
+import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.enums.NotificationType;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
@@ -87,7 +88,8 @@ public class InspectionEscrowExpiryScheduler {
         if (order.getBuyerPaidAt() != null && order.getBuyer() != null && order.getSeller() != null
                 && order.getBuyerFeeShare() != null && order.getBuyerFeeShare().compareTo(BigDecimal.ZERO) > 0) {
             try {
-                walletService.processEarning(order.getSeller().getId(), order.getBuyerFeeShare(), order.getId());
+                walletService.processEarning(order.getSeller().getId(), order.getBuyerFeeShare(), order.getId(),
+                        WalletTransactionReferenceType.INSPECTION_ORDER);
                 log.info("Compensated buyer deposit fee share of {} to seller {} for cancelled inspection order {}",
                         order.getBuyerFeeShare(), order.getSeller().getId(), order.getId());
 

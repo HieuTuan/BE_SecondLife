@@ -8,6 +8,7 @@ import com.secondlife.secondlife.dto.response.DepositResponseDTO;
 import com.secondlife.secondlife.dto.response.WalletResponseDTO;
 import com.secondlife.secondlife.dto.response.WalletTransactionResponseDTO;
 import com.secondlife.secondlife.dto.response.WalletWithdrawalResponse;
+import com.secondlife.secondlife.enums.WalletTransactionType;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.DepositService;
@@ -17,11 +18,19 @@ import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
 import java.util.UUID;
 
 @RestController
@@ -62,13 +71,28 @@ public class WalletController {
 
     @GetMapping("/me/transactions")
     @PreAuthorize("isAuthenticated()")
-    @Operation(summary = "Get wallet transaction history")
+    @Operation(summary = "Get own wallet transaction history",
+            description = "Filter by type and UTC instants: from is inclusive, to is exclusive. Default sort: createdAt DESC, id DESC.")
     public ResponseEntity<PageResponse<WalletTransactionResponseDTO>> getMyTransactions(
             @AuthenticationPrincipal CustomUserDetails userDetails,
+            @RequestParam(required = false) WalletTransactionType type,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
             @ParameterObject Pageable pageable) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(PageResponse.from(
-                walletQueryService.getTransactions(userId, pageable)));
+                walletQueryService.getTransactions(userId, type, from, to, pageable)));
+    }
+
+    @GetMapping("/me/transactions/{transactionId}")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Get details of one own wallet transaction",
+            description = "Unknown and foreign-owned transaction IDs both return 404. Legacy balances can be null.")
+    public ResponseEntity<WalletTransactionResponseDTO> getMyTransaction(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID transactionId) {
+        UUID userId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(walletQueryService.getTransaction(userId, transactionId));
     }
 
     @PostMapping("/withdrawals")

@@ -23,6 +23,7 @@ import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionOrderStatus;
 import com.secondlife.secondlife.enums.InspectionOrderType;
 import com.secondlife.secondlife.enums.NotificationType;
+import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
 import com.secondlife.secondlife.exception.AiProviderException;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
@@ -519,7 +520,8 @@ public class InspectionServiceImpl implements InspectionService {
         BigDecimal totalPayment = itemPrice.add(finalShipping);
 
         if (totalPayment.compareTo(BigDecimal.ZERO) > 0) {
-            walletService.processPayment(buyerId, totalPayment, order.getId());
+            walletService.processPayment(buyerId, totalPayment, order.getId(),
+                    WalletTransactionReferenceType.INSPECTION_ORDER);
         }
 
         order.setFinalPaymentPaidAt(Instant.now());
@@ -593,7 +595,8 @@ public class InspectionServiceImpl implements InspectionService {
         // Bồi hoàn tiền cọc kiểm định của người mua cho người bán theo cam kết
         if (order.getSeller() != null && buyerDeposit.compareTo(BigDecimal.ZERO) > 0) {
             try {
-                walletService.processEarning(order.getSeller().getId(), buyerDeposit, order.getId());
+                walletService.processEarning(order.getSeller().getId(), buyerDeposit, order.getId(),
+                        WalletTransactionReferenceType.INSPECTION_ORDER);
                 log.info("Compensated buyer deposit fee share of {} to seller {} for rejected purchase on inspection order {}",
                         buyerDeposit, order.getSeller().getId(), order.getId());
             } catch (Exception ex) {
