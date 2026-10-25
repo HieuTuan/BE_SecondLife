@@ -4,6 +4,10 @@ Hướng dẫn triển khai màn hình STAFF, request/response và ma trận nú
 
 Áp dụng cho tranh chấp sau khi hãng vận chuyển xác nhận giao hàng. Các endpoint bên dưới dùng Bearer access token và wrapper `ApiResponse`; dữ liệu thành công nằm trong `data`. Báo cáo vi phạm bài đăng vẫn dùng luồng listing hiện có.
 
+Upload video chunk trực tiếp và phản hồi bằng chứng buyer/seller: [FE_CHUNKED_VIDEO_EVIDENCE_GUIDE.md](FE_CHUNKED_VIDEO_EVIDENCE_GUIDE.md).
+
+Quy trình test Swagger từng tài khoản, JSON và bằng chứng ảnh/video: [SWAGGER_STAFF_RETURN_REFUND_TEST.md](SWAGGER_STAFF_RETURN_REFUND_TEST.md).
+
 ## 1. Điều kiện và trạng thái
 
 Chỉ buyer của đơn được tạo báo cáo có `orderId`. Đơn phải có `status=DELIVERED`, `shippingDeliveredAt` hợp lệ và escrow còn `HELD` hoặc `FROZEN`. Thời điểm nhận yêu cầu phải **nhỏ hơn** `shippingDeliveredAt + 48 giờ`; tại đúng hạn cũng bị từ chối. Cửa sổ khiếu nại cố định là 48 giờ, dùng đồng hồ server `orderReleaseClock`; không mở rộng hạn khiếu nại khi thay đổi cấu hình tác vụ tự giải ngân. Tác vụ tự giải ngân hiện mặc định 48 giờ; BE là nguồn quyết định hạn.
@@ -109,8 +113,7 @@ Việc carrier nhận booking chưa đồng nghĩa hàng đã được hoàn v�
 
 ```json
 {
-  "reason": "Hãng vận chuyển đã xác nhận giao lại hàng cho seller.",
-  "responsibleParty": "SELLER"
+  "reason": "Hãng vận chuyển đã xác nhận giao lại hàng cho seller."
 }
 ```
 
@@ -118,9 +121,31 @@ Việc carrier nhận booking chưa đồng nghĩa hàng đã được hoàn v�
 
 Số tiền do BE tính bằng toàn bộ `finalPrice` của sản phẩm. API không nhận số tiền hoàn một phần; phí vận chuyển đã phát sinh không nằm trong khoản hoàn sản phẩm này. Transaction bao gồm trừ số dư tiền giữ của hệ thống, cộng ví buyer, ledger, trạng thái đơn và audit báo cáo. Seller không nhận payout và hệ thống không ghi commission settlement cho giao dịch hoàn tiền.
 
-Retry cùng vận đơn/quyết định trả kết quả đã hoàn, không cộng tiền hoặc ghi ledger/audit lần hai. Khi lỗi giữa chừng, toàn bộ thay đổi tiền và audit rollback để có thể retry. Bản ghi seller fault của quyết định hoàn hàng được hoàn tất theo kết quả hoàn tiền.
+Retry cùng vận đơn/quyết định không cộng tiền buyer hoặc ghi lại audit hoàn tiền; chỉ khoản phí `PENDING_FEE` đã tồn tại mới có thể được đánh giá sau khi carrier bổ sung `actualFee` (phần 5.1). Khi lỗi giữa chừng ở lần refund đầu, toàn bộ hoàn buyer, thu ví seller/nợ, ledger và audit cùng rollback để có thể retry. Bản ghi seller fault của quyết định hoàn hàng được hoàn tất theo kết quả hoàn tiền.
 
 Luồng cũ vẫn hỗ trợ vận đơn outbound đã `RETURNED` vật lý và tiền đang `FROZEN`; không dùng luồng này để bỏ qua phê duyệt cho vận đơn `BUYER_TO_SELLER`.
+
+### 5.1. Phí hoàn hàng khi lỗi seller
+
+Khi STAFF hoàn tiền thành công cho đúng vận đơn `BUYER_TO_SELLER` đã `DELIVERED`, report phải là `CONFIRMED/RETURN_AND_REFUND` với `responsibleParty=SELLER` để áp dụng khoản phí này. Duyệt report hoặc tạo booking chưa thu phí. BE chỉ dùng `actualFee` của chuyến hoàn (`0` hợp lệ), không dùng `quotedFee` hoặc số tiền FE gửi.
+
+BE thu `min(số dư seller không âm, actualFee)`, giữ ví seller không âm và ghi phần thiếu thành nợ theo khoản đánh giá phí. Buyer vẫn được hoàn toàn bộ `finalPrice`; không trừ phí hoàn vào tiền buyer và không cộng phí outbound đã phát sinh vào khoản hoàn sản phẩm. Khi có tiền thực thu, wallet ledger dùng `RETURN_SHIPPING_FEE`, số tiền âm và `referenceId=returnShipmentId`; system ledger cùng type tham chiếu order, chỉ cộng tiền đã thu vào `shippingBalance`, không cộng nợ.
+
+| Trạng thái phí | Ý nghĩa |
+| --- | --- |
+| `PENDING_FEE` | Chưa có `actualFee`; buyer đã được hoàn, chưa chốt thu ví/nợ |
+| `PAID` | Đã chốt phí, `debtAmount=0`, gồm cả phí thực tế bằng `0` |
+| `OUTSTANDING` | Đã chốt phí, phần thiếu `debtAmount>0` được ghi nợ seller |
+
+Thiếu `actualFee` không chặn refund buyer. Sau sync carrier có phí, STAFF gửi lại endpoint refund hiện có để đánh giá khoản `PENDING_FEE` đã lưu. Sync/callback không tự thu phí; replay không hoàn buyer lần hai. Khoản đã `PAID/OUTSTANDING` giữ nguyên snapshot ngay cả khi carrier thay đổi phí sau đó. Đơn đã hoàn tiền trước tính năng, không có assessment, không bị thu hồi tố. Không có endpoint collect/thanh toán nợ và không tự khấu trừ nợ khi seller nạp tiền/nhận doanh thu.
+
+API riêng tư, trả dữ liệu trong `data`:
+
+- `GET /api/v1/shipments/{shipmentId}/return-shipping-fee`: seller sở hữu khoản phí hoặc STAFF có `STAFF_DISPUTE_REVIEW`/ADMIN có `ADMIN_RBAC_MANAGE`. Buyer không được đọc (`403`). Trả `shipmentId, orderId, reportId, sellerId, status, feeAmount, collectedAmount, debtAmount, createdAt, assessedAt, assessedBy`.
+- `GET /api/v1/seller/return-shipping-fees?page=0&size=20&outstandingOnly=true`: danh sách của chính seller, tại `data.items`; bỏ filter/`false` để xem cả khoản không còn nợ.
+- `GET /api/v1/seller/return-shipping-fees/debt`: tổng nợ của chính seller, `data={sellerId,outstandingDebt}`. Không đưa nợ vào response report/shipment dùng chung với buyer.
+
+Các bước Swagger và ví dụ đủ/thiếu/không có số dư: [SWAGGER_SELLER_RETURN_SHIPPING_FEE_TEST.md](SWAGGER_SELLER_RETURN_SHIPPING_FEE_TEST.md). Thanh toán/đối soát carrier thực tế nằm ngoài tính năng; tiền thu vào `shippingBalance` là ghi sổ nội bộ, không có API mới tạo khoản thu bên carrier.
 
 ## 6. Field bổ sung và lỗi API
 

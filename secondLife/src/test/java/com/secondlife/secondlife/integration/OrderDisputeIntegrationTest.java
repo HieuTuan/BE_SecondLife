@@ -34,7 +34,9 @@ import com.secondlife.secondlife.service.CloudinaryService;
 import com.secondlife.secondlife.service.CommissionService;
 import com.secondlife.secondlife.service.OrderAutoReleaseService;
 import com.secondlife.secondlife.service.OrderService;
+import com.secondlife.secondlife.service.OrderDisputeService;
 import com.secondlife.secondlife.service.ReportEvidenceService;
+import com.secondlife.secondlife.service.ReturnShippingFeeService;
 import com.secondlife.secondlife.service.ShipmentService;
 import com.secondlife.secondlife.service.SystemWalletService;
 import com.secondlife.secondlife.service.UserReportService;
@@ -97,12 +99,14 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -150,6 +154,8 @@ class OrderDisputeIntegrationTest {
     @Autowired PlatformTransactionManager transactions;
     @MockitoSpyBean WalletService wallets;
     @MockitoSpyBean ReportEvidenceService evidence;
+    @MockitoSpyBean OrderDisputeService disputes;
+    @MockitoSpyBean ReturnShippingFeeService returnFees;
     @MockitoBean(name = "orderReleaseClock") Clock releaseClock;
     @MockitoBean ShippingProvider carrier;
     @MockitoBean AiPriceProvider priceProvider;
@@ -381,6 +387,222 @@ class OrderDisputeIntegrationTest {
         assertEquals(0, systemLedger(fixture, "SETTLEMENT"));
     }
 
+    @Test void sellerFaultCollectsReturnShippingWithoutReducingBuyerProductRefund() throws Exception {
+        Fixture fixture = deliveredOrder(NOW.minusSeconds(60));
+        BigDecimal sellerFunds = new BigDecimal("50000.00");
+        jdbc.update("UPDATE user_wallets SET balance=? WHERE user_id=?", sellerFunds, fixture.seller().getId());
+        ReportResponse approved = approve(createReport(fixture, ReportRequests.ReasonCode.OTHER));
+        UUID shipmentId = bookReturn(fixture, returnRequest(approved.id()));
+        carrierDelivered(shipmentId);
+        BigDecimal buyerBefore = balance(fixture.buyer());
+        refund(shipmentId);
+        money(sellerFunds.subtract(FEE), balance(fixture.seller()));
+        money(buyerBefore.add(PRICE), balance(fixture.buyer()));
+        refund(shipmentId);
+        money(sellerFunds.subtract(FEE), balance(fixture.seller()));
+        assertFee(shipmentId, "PAID", FEE, FEE, BigDecimal.ZERO);
+        assertEquals(1, feeLedger(shipmentId));
+        assertEquals(1, systemLedger(fixture, "RETURN_SHIPPING_FEE"));
+    }
+
+    @ParameterizedTest @CsvSource({"10000,10000,17000", "0,0,27000", "27000,27000,0"})
+    void sellerPaysAvailableBalanceAndOnlyShortfallBecomesDebt(String funds, String collected, String debt) throws Exception {
+        Fixture fixture = deliveredOrder(NOW.minusSeconds(60));
+        jdbc.update("UPDATE user_wallets SET balance=? WHERE user_id=?", new BigDecimal(funds), fixture.seller().getId());
+        ReportResponse approved = approve(createReport(fixture, ReportRequests.ReasonCode.OTHER));
+        UUID shipmentId = bookReturn(fixture, returnRequest(approved.id()));
+        carrierDelivered(shipmentId);
+        BigDecimal buyerBefore = balance(fixture.buyer());
+        BigDecimal shippingBefore = systemWallet.getWallet().shippingBalance();
+        refund(shipmentId);
+        BigDecimal paid = new BigDecimal(collected);
+        BigDecimal outstanding = new BigDecimal(debt);
+        money(new BigDecimal(funds).subtract(paid), balance(fixture.seller()));
+        money(buyerBefore.add(PRICE), balance(fixture.buyer()));
+        money(shippingBefore.add(paid), systemWallet.getWallet().shippingBalance());
+        assertFee(shipmentId, outstanding.signum() == 0 ? "PAID" : "OUTSTANDING", FEE, paid, outstanding);
+        assertEquals(paid.signum() == 0 ? 0 : 1, feeLedger(shipmentId));
+        assertEquals(paid.signum() == 0 ? 0 : 1, systemLedger(fixture, "RETURN_SHIPPING_FEE"));
+        refund(shipmentId);
+        money(new BigDecimal(funds).subtract(paid), balance(fixture.seller()));
+        assertFee(shipmentId, outstanding.signum() == 0 ? "PAID" : "OUTSTANDING", FEE, paid, outstanding);
+    }
+
+    @Test void actualFeeIsSnapshottedOnceAndLaterCarrierChangesDoNotRepriceTheDebt() throws Exception {
+        Fixture fixture = deliveredOrder(NOW.minusSeconds(60));
+        jdbc.update("UPDATE user_wallets SET balance=50000 WHERE user_id=?", fixture.seller().getId());
+        UUID shipmentId = bookReturn(fixture, returnRequest(approve(createReport(fixture, ReportRequests.ReasonCode.OTHER)).id()));
+        carrierDelivered(shipmentId);
+        BigDecimal actual = new BigDecimal("31000.00");
+        jdbc.update("UPDATE shipments SET actual_fee=? WHERE id=?", actual, shipmentId);
+        refund(shipmentId);
+        assertFee(shipmentId, "PAID", actual, actual, BigDecimal.ZERO);
+        Shipment returned = shipmentRows.findById(shipmentId).orElseThrow();
+        shipments.receiveLalamove(json.valueToTree(Map.of("order_code", returned.getOrderCode(),
+                "event_id", UUID.randomUUID().toString(), "event_type", "ORDER_AMOUNT_CHANGED",
+                "status", "COMPLETED", "occurred_at", NOW.plusSeconds(1).toString(), "fee", new BigDecimal("45000"))));
+        refund(shipmentId);
+        assertFee(shipmentId, "PAID", actual, actual, BigDecimal.ZERO);
+        money(new BigDecimal("19000"), balance(fixture.seller()));
+        assertEquals(1, feeLedger(shipmentId));
+    }
+
+    @Test void zeroActualFeeIsValidAndNeverFallsBackToTheQuotation() throws Exception {
+        Fixture fixture = deliveredOrder(NOW.minusSeconds(60));
+        UUID shipmentId = bookReturn(fixture, returnRequest(approve(createReport(fixture, ReportRequests.ReasonCode.OTHER)).id()));
+        carrierDelivered(shipmentId);
+        jdbc.update("UPDATE shipments SET actual_fee=0 WHERE id=?", shipmentId);
+        refund(shipmentId);
+        assertFee(shipmentId, "PAID", BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
+        assertEquals(0, feeLedger(shipmentId));
+        assertEquals(0, systemLedger(fixture, "RETURN_SHIPPING_FEE"));
+    }
+
+    @Test void missingActualFeeDoesNotBlockBuyerRefundAndRetryAssessesOnlyThePendingFee() throws Exception {
+        Fixture fixture = deliveredOrder(NOW.minusSeconds(60));
+        jdbc.update("UPDATE user_wallets SET balance=10000 WHERE user_id=?", fixture.seller().getId());
+        ReportResponse approved = approve(createReport(fixture, ReportRequests.ReasonCode.OTHER));
+        UUID shipmentId = bookReturn(fixture, returnRequest(approved.id()));
+        carrierDelivered(shipmentId);
+        jdbc.update("UPDATE shipments SET actual_fee=NULL WHERE id=?", shipmentId);
+        BigDecimal buyerBefore = balance(fixture.buyer());
+        refund(shipmentId);
+        assertFee(shipmentId, "PENDING_FEE", null, BigDecimal.ZERO, BigDecimal.ZERO);
+        money(buyerBefore.add(PRICE), balance(fixture.buyer()));
+        money(new BigDecimal("10000"), balance(fixture.seller()));
+        refund(shipmentId);
+        assertFee(shipmentId, "PENDING_FEE", null, BigDecimal.ZERO, BigDecimal.ZERO);
+        Shipment returned = shipmentRows.findById(shipmentId).orElseThrow();
+        when(carrier.detail(returned.getOrderCode())).thenReturn(json.valueToTree(Map.of(
+                "order_code", returned.getOrderCode(), "status", "COMPLETED", "total_fee", FEE)));
+        shipments.sync(reviewer.getId(), true, shipmentId);
+        refund(shipmentId);
+        assertFee(shipmentId, "OUTSTANDING", FEE, new BigDecimal("10000"), new BigDecimal("17000"));
+        money(buyerBefore.add(PRICE), balance(fixture.buyer()));
+        assertEquals(1, ledger(fixture, "REFUND"));
+        assertEquals(1, feeLedger(shipmentId));
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"BUYER", "CARRIER"})
+    void nonSellerFaultDoesNotCreateSellerShippingFeeOrDebt(String party) throws Exception {
+        Fixture fixture = deliveredOrder(NOW.minusSeconds(60));
+        jdbc.update("UPDATE user_wallets SET balance=50000 WHERE user_id=?", fixture.seller().getId());
+        ReportResponse report = createReport(fixture, ReportRequests.ReasonCode.OTHER);
+        reports.startReview(reviewer.getId(), report.id());
+        reports.resolve(reviewer.getId(), report.id(), new ReportRequests.Resolve(ReportRequests.Decision.CONFIRMED,
+                ReportRequests.ResponsibleParty.valueOf(party), REVIEW_REASON, ReportRequests.ResolutionAction.RETURN_AND_REFUND));
+        UUID shipmentId = bookReturn(fixture, returnRequest(report.id()));
+        carrierDelivered(shipmentId);
+        shipments.refundReturned(reviewer.getId(), true, shipmentId, REFUND_REASON, null);
+        money(new BigDecimal("50000"), balance(fixture.seller()));
+        assertEquals(0, feeCount(shipmentId));
+        assertEquals(0, feeLedger(shipmentId));
+        assertEquals(0, systemLedger(fixture, "RETURN_SHIPPING_FEE"));
+        money(FUNDS.subtract(FEE), balance(fixture.buyer()));
+    }
+
+    @Test void feeReadApisExposeOwnDebtButDenyBuyerAndUnprivilegedStaff() throws Exception {
+        Fixture fixture = deliveredOrder(NOW.minusSeconds(60));
+        UUID shipmentId = bookReturn(fixture, returnRequest(approve(createReport(fixture, ReportRequests.ReasonCode.OTHER)).id()));
+        carrierDelivered(shipmentId);
+        String detail = "/api/v1/shipments/" + shipmentId + "/return-shipping-fee";
+        mvc.perform(get(detail).header("Authorization", bearer(fixture.buyer()))).andExpect(status().isForbidden());
+        refund(shipmentId);
+        mvc.perform(get(detail).header("Authorization", bearer(fixture.seller())))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.debtAmount").value(27000));
+        mvc.perform(get(detail).header("Authorization", bearer(reviewer))).andExpect(status().isOk());
+        mvc.perform(get(detail).with(fraudOnlyReviewer())).andExpect(status().isForbidden());
+        mvc.perform(get(detail).header("Authorization", bearer(fixture.buyer()))).andExpect(status().isForbidden());
+        mvc.perform(get(detail).header("Authorization", bearer(account("SELLER")))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/seller/return-shipping-fees/debt").header("Authorization", bearer(fixture.seller())))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.outstandingDebt").value(27000));
+        mvc.perform(get("/api/v1/seller/return-shipping-fees?outstandingOnly=true&page=0&size=20")
+                        .header("Authorization", bearer(fixture.seller())))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.items.length()").value(1))
+                .andExpect(jsonPath("$.data.items[0].shipmentId").value(shipmentId.toString()));
+    }
+
+    @Test void refundFailureAfterSellerChargeRollsBackCashDebtAndBuyerRefund() throws Exception {
+        Fixture fixture = deliveredOrder(NOW.minusSeconds(60));
+        jdbc.update("UPDATE user_wallets SET balance=10000 WHERE user_id=?", fixture.seller().getId());
+        ReportResponse approved = approve(createReport(fixture, ReportRequests.ReasonCode.OTHER));
+        UUID shipmentId = bookReturn(fixture, returnRequest(approved.id()));
+        carrierDelivered(shipmentId);
+        BigDecimal buyerBefore = balance(fixture.buyer());
+        BigDecimal shippingBefore = systemWallet.getWallet().shippingBalance();
+        OrderDisputeService target = AopTestUtils.getUltimateTargetObject(disputes);
+        doThrow(new ConflictException("Simulated report audit failure after seller charge"))
+                .when(target).recordRefund(any(), eq(reviewer.getId()), eq(PRICE));
+        assertThrows(ConflictException.class, () -> refund(shipmentId));
+        assertOrder(fixture, "DELIVERED", "FROZEN");
+        money(new BigDecimal("10000"), balance(fixture.seller()));
+        money(buyerBefore, balance(fixture.buyer()));
+        money(shippingBefore, systemWallet.getWallet().shippingBalance());
+        assertEquals(0, feeCount(shipmentId));
+        assertEquals(0, feeLedger(shipmentId));
+        assertEquals(0, systemLedger(fixture, "RETURN_SHIPPING_FEE"));
+        assertEquals(0, ledger(fixture, "REFUND"));
+        doCallRealMethod().when(target).recordRefund(any(), eq(reviewer.getId()), eq(PRICE));
+        refund(shipmentId);
+        assertFee(shipmentId, "OUTSTANDING", FEE, new BigDecimal("10000"), new BigDecimal("17000"));
+    }
+
+    @Test void historicalRefundReplayNeverBackfillsASellerCharge() throws Exception {
+        Fixture fixture = deliveredOrder(NOW.minusSeconds(60));
+        jdbc.update("UPDATE user_wallets SET balance=50000 WHERE user_id=?", fixture.seller().getId());
+        UUID shipmentId = bookReturn(fixture, returnRequest(approve(createReport(fixture, ReportRequests.ReasonCode.OTHER)).id()));
+        carrierDelivered(shipmentId);
+        ReturnShippingFeeService target = AopTestUtils.getUltimateTargetObject(returnFees);
+        doNothing().when(target).recordForRefund(any(), any(), any(), any());
+        refund(shipmentId);
+        doCallRealMethod().when(target).recordForRefund(any(), any(), any(), any());
+        refund(shipmentId);
+        assertEquals(0, feeCount(shipmentId));
+        money(new BigDecimal("50000"), balance(fixture.seller()));
+    }
+
+    @Test void firstSellerWalletIsCreatedEmptyAndDebtRemainsVisibleAcrossMultipleReturns() throws Exception {
+        Fixture first = deliveredOrder(NOW.minusSeconds(60));
+        jdbc.update("DELETE FROM user_wallets WHERE user_id=?", first.seller().getId());
+        UUID firstReturn = bookReturn(first, returnRequest(approve(createReport(first, ReportRequests.ReasonCode.OTHER)).id()));
+        carrierDelivered(firstReturn);
+        refund(firstReturn);
+        assertFee(firstReturn, "OUTSTANDING", FEE, BigDecimal.ZERO, FEE);
+        money(BigDecimal.ZERO, balance(first.seller()));
+
+        wallets.deposit(first.seller().getId(), new BigDecimal("10000"), UUID.randomUUID());
+        Fixture second = deliveredOrder(NOW.minusSeconds(60), first.seller());
+        UUID secondReturn = bookReturn(second, returnRequest(approve(createReport(second, ReportRequests.ReasonCode.OTHER)).id()));
+        carrierDelivered(secondReturn);
+        refund(secondReturn);
+        assertFee(firstReturn, "OUTSTANDING", FEE, BigDecimal.ZERO, FEE);
+        assertFee(secondReturn, "OUTSTANDING", FEE, new BigDecimal("10000"), new BigDecimal("17000"));
+        mvc.perform(get("/api/v1/seller/return-shipping-fees/debt").header("Authorization", bearer(first.seller())))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.outstandingDebt").value(44000));
+    }
+
+    @Test void concurrentReturnsForOneSellerCannotSpendTheSameBalanceTwice() throws Exception {
+        Fixture first = deliveredOrder(NOW.minusSeconds(60));
+        Fixture second = deliveredOrder(NOW.minusSeconds(60), first.seller());
+        jdbc.update("UPDATE user_wallets SET balance=40000 WHERE user_id=?", first.seller().getId());
+        UUID firstReturn = bookReturn(first, returnRequest(approve(createReport(first, ReportRequests.ReasonCode.OTHER)).id()));
+        UUID secondReturn = bookReturn(second, returnRequest(approve(createReport(second, ReportRequests.ReasonCode.OTHER)).id()));
+        carrierDelivered(firstReturn); carrierDelivered(secondReturn);
+        CountDownLatch start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var a = executor.submit(() -> { start.await(); return refund(firstReturn); });
+            var b = executor.submit(() -> { start.await(); return refund(secondReturn); });
+            start.countDown(); a.get(20, TimeUnit.SECONDS); b.get(20, TimeUnit.SECONDS);
+        }
+        money(BigDecimal.ZERO, balance(first.seller()));
+        money(new BigDecimal("40000"), jdbc.queryForObject(
+                "SELECT SUM(collected_amount) FROM return_shipping_fees WHERE seller_id=?", BigDecimal.class, first.seller().getId()));
+        money(new BigDecimal("14000"), jdbc.queryForObject(
+                "SELECT SUM(debt_amount) FROM return_shipping_fees WHERE seller_id=?", BigDecimal.class, first.seller().getId()));
+        money(FUNDS.subtract(FEE), balance(first.buyer()));
+        money(FUNDS.subtract(FEE), balance(second.buyer()));
+    }
+
     @Test void deliveredUnlinkedAndUnselectedReturnsCannotRefundAnApprovedReport() {
         Fixture fixture = deliveredOrder(NOW.minusSeconds(60));
         ReportResponse approved = approve(createReport(fixture, ReportRequests.ReasonCode.OTHER));
@@ -419,6 +641,7 @@ class OrderDisputeIntegrationTest {
 
     @Test void concurrentRefundRequestsCreditExactlyOnce() throws Exception {
         Fixture fixture = deliveredOrder(NOW.minusSeconds(60));
+        jdbc.update("UPDATE user_wallets SET balance=10000 WHERE user_id=?", fixture.seller().getId());
         ReportResponse approved = approve(createReport(fixture, ReportRequests.ReasonCode.OTHER));
         UUID shipmentId = bookReturn(fixture, returnRequest(approved.id()));
         carrierDelivered(shipmentId);
@@ -432,6 +655,10 @@ class OrderDisputeIntegrationTest {
         money(FUNDS.subtract(FEE), balance(fixture.buyer()));
         assertEquals(1, ledger(fixture, "REFUND"));
         assertEquals(1, systemLedger(fixture, "REFUND"));
+        assertFee(shipmentId, "OUTSTANDING", FEE, new BigDecimal("10000"), new BigDecimal("17000"));
+        money(BigDecimal.ZERO, balance(fixture.seller()));
+        assertEquals(1, feeLedger(shipmentId));
+        assertEquals(1, systemLedger(fixture, "RETURN_SHIPPING_FEE"));
         assertNotNull(reports.get(fixture.buyer().getId(), false, approved.id()).refundedAt());
     }
 
@@ -483,7 +710,10 @@ class OrderDisputeIntegrationTest {
         money(FUNDS.subtract(FEE), balance(fixture.buyer()));
     }
     private Fixture deliveredOrder(Instant deliveredAt) {
-        User seller = account("SELLER"); User buyer = account("BUYER");
+        return deliveredOrder(deliveredAt, account("SELLER"));
+    }
+    private Fixture deliveredOrder(Instant deliveredAt, User seller) {
+        User buyer = account("BUYER");
         Post listing = new Post();
         listing.setUser(seller); listing.setTitle("Disputed product " + UUID.randomUUID());
         listing.setStatus("SOLD"); listing.setPrice(PRICE); listing = posts.saveAndFlush(listing);
@@ -577,6 +807,21 @@ class OrderDisputeIntegrationTest {
         return jdbc.queryForObject("SELECT COUNT(*) FROM system_wallet_transactions WHERE order_id=? AND type=?", Integer.class, fixture.order().getId(), type);
     }
     private BigDecimal balance(User user) { return walletRows.findByUserId(user.getId()).orElseThrow().getBalance(); }
+    private int feeCount(UUID shipmentId) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM return_shipping_fees WHERE id=?", Integer.class, shipmentId);
+    }
+    private int feeLedger(UUID shipmentId) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM wallet_transactions WHERE reference_id=? AND type='RETURN_SHIPPING_FEE'",
+                Integer.class, shipmentId);
+    }
+    private void assertFee(UUID shipmentId, String state, BigDecimal fee, BigDecimal collected, BigDecimal debt) {
+        var row = jdbc.queryForMap("SELECT status,fee_amount,collected_amount,debt_amount FROM return_shipping_fees WHERE id=?", shipmentId);
+        assertEquals(state, row.get("status"));
+        if (fee == null) assertNull(row.get("fee_amount"));
+        else money(fee, (BigDecimal) row.get("fee_amount"));
+        money(collected, (BigDecimal) row.get("collected_amount"));
+        money(debt, (BigDecimal) row.get("debt_amount"));
+    }
     private RequestPostProcessor fraudOnlyReviewer() {
         return authentication(UsernamePasswordAuthenticationToken.authenticated(new CustomUserDetails(reviewer), null,
                 List.of(new SimpleGrantedAuthority("ROLE_STAFF"), new SimpleGrantedAuthority("STAFF_FRAUD_REVIEW"))));

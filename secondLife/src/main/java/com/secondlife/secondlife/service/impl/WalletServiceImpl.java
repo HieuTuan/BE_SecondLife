@@ -10,6 +10,7 @@ import com.secondlife.secondlife.entity.WalletWithdrawal;
 import com.secondlife.secondlife.enums.NotificationType;
 import com.secondlife.secondlife.enums.WalletTransactionType;
 import com.secondlife.secondlife.exception.BadRequestException;
+import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.WalletMapper;
 import com.secondlife.secondlife.repository.UserRepository;
@@ -22,9 +23,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -185,6 +188,28 @@ public class WalletServiceImpl implements WalletService {
                 "/wallet"
             );
         }
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public BigDecimal collectReturnShippingFee(UUID sellerId, BigDecimal fee, UUID shipmentId) {
+        if (fee == null || fee.signum() < 0 || fee.compareTo(new BigDecimal("1000000000")) > 0) {
+            throw new ConflictException("Invalid return shipping fee");
+        }
+        BigDecimal amount = fee.setScale(2, RoundingMode.UNNECESSARY);
+        if (amount.signum() == 0) return amount;
+
+        // A seller may never have received an earning. Create the empty wallet safely under concurrent first use.
+        userWalletRepository.ensureWalletExists(UUID.randomUUID(), sellerId);
+        UserWallet wallet = userWalletRepository.findByUserIdWithLock(sellerId).orElseThrow();
+        if (wallet.getBalance().signum() < 0) throw new ConflictException("Seller wallet balance is inconsistent");
+        BigDecimal collected = wallet.getBalance().min(amount);
+        if (collected.signum() > 0) {
+            wallet.setBalance(wallet.getBalance().subtract(collected));
+            userWalletRepository.save(wallet);
+            createTransaction(wallet, collected.negate(), WalletTransactionType.RETURN_SHIPPING_FEE, shipmentId);
+        }
+        return collected;
     }
 
     private UserWallet getWalletWithLock(UUID userId) {

@@ -1,20 +1,34 @@
 package com.secondlife.secondlife.service.impl;
 
-import com.secondlife.secondlife.dto.response.*;
-import com.secondlife.secondlife.entity.*;
-import com.secondlife.secondlife.enums.*;
+import com.secondlife.secondlife.dto.response.SystemWalletResponse;
+import com.secondlife.secondlife.dto.response.SystemWalletTransactionResponse;
+import com.secondlife.secondlife.entity.Order;
+import com.secondlife.secondlife.entity.SystemOrderFunds;
+import com.secondlife.secondlife.entity.SystemWallet;
+import com.secondlife.secondlife.entity.SystemWalletTransaction;
+import com.secondlife.secondlife.enums.EscrowStatus;
+import com.secondlife.secondlife.enums.OrderStatus;
+import com.secondlife.secondlife.enums.SystemWalletTransactionType;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.mapper.SystemWalletMapper;
-import com.secondlife.secondlife.repository.*;
+import com.secondlife.secondlife.repository.SystemOrderFundsRepository;
+import com.secondlife.secondlife.repository.SystemWalletRepository;
+import com.secondlife.secondlife.repository.SystemWalletTransactionRepository;
 import com.secondlife.secondlife.service.SystemWalletService;
+import com.secondlife.secondlife.service.WalletService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.*;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.*;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -24,6 +38,7 @@ public class SystemWalletServiceImpl implements SystemWalletService {
     private final SystemOrderFundsRepository funds;
     private final SystemWalletTransactionRepository transactions;
     private final SystemWalletMapper systemWalletMapper;
+    private final WalletService userWallets;
 
     // Callers lock the order first, then this wallet, then the user's wallet, in one transaction.
     @Override @Transactional(propagation = Propagation.MANDATORY)
@@ -70,6 +85,20 @@ public class SystemWalletServiceImpl implements SystemWalletService {
         allocation.setProductHeld(BigDecimal.ZERO);
         allocation.setShippingHeld(allocation.getShippingHeld().subtract(shipping)); funds.save(allocation);
         record(wallet, order, SystemWalletTransactionType.REFUND, product.negate(), shipping.negate(), BigDecimal.ZERO);
+    }
+
+    @Override @Transactional(propagation = Propagation.MANDATORY)
+    public BigDecimal collectReturnShippingFee(Order order, BigDecimal fee, UUID shipmentId) {
+        if (order.getStatus() != OrderStatus.CANCELLED || order.getEscrowStatus() != EscrowStatus.REFUNDED)
+            throw new ConflictException("Return shipping collection requires a refunded order");
+        var amount = money(fee);
+        // Acquire MAIN before touching the seller wallet, including when assessing a pending fee on retry.
+        var wallet = lock();
+        BigDecimal collected = userWallets.collectReturnShippingFee(order.getSeller().getId(), amount, shipmentId);
+        if (collected.signum() > 0)
+            record(wallet, order, SystemWalletTransactionType.RETURN_SHIPPING_FEE,
+                    BigDecimal.ZERO, collected, BigDecimal.ZERO);
+        return collected;
     }
 
     @Override @Transactional(readOnly = true)

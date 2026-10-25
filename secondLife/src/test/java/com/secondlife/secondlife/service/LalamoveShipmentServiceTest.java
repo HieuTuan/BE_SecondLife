@@ -10,6 +10,8 @@ import com.secondlife.secondlife.integration.shipping.ShippingProvider;
 import com.secondlife.secondlife.mapper.ShipmentMapper;
 import com.secondlife.secondlife.mapper.ShippingPayloads;
 import com.secondlife.secondlife.repository.*;
+import com.secondlife.secondlife.service.impl.ListingFingerprintImpl;
+import com.secondlife.secondlife.service.impl.ShipmentServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import com.secondlife.secondlife.mapper.MapperTestSupport;
@@ -65,7 +67,10 @@ class LalamoveShipmentServiceTest {
             "provider_quote",Map.of("quotationId","Q-FRESH","serviceType","MOTORCYCLE",
                 "scheduleAt",Instant.now().toString(),"expiresAt",Instant.now().plusSeconds(300).toString()))));
         when(lala.create(anyMap())).thenReturn(mapper.valueToTree(Map.of("order_code","1234567890123456789","status","ASSIGNING_DRIVER","total_fee",27000,"share_link","https://web.lalamove.com/track/example")));
-        service=new com.secondlife.secondlife.service.impl.ShipmentServiceImpl(shipments,events,orders,inspections,quotes,quoteService,mock(com.secondlife.secondlife.service.ReverseGeocodingService.class),router,mapper,wallets,transactions,mock(SystemWalletService.class),mock(com.secondlife.secondlife.service.SellerReputationService.class),new com.secondlife.secondlife.service.impl.ListingFingerprintImpl(), MapperTestSupport.mapper(ShipmentMapper.class), mock(OrderDisputeService.class));
+        service = new ShipmentServiceImpl(shipments, events, orders, inspections, quotes, quoteService,
+                mock(ReverseGeocodingService.class), router, mapper, wallets, transactions,
+                mock(SystemWalletService.class), mock(SellerReputationService.class), new ListingFingerprintImpl(),
+                MapperTestSupport.mapper(ShipmentMapper.class), mock(OrderDisputeService.class), mock(ReturnShippingFeeService.class));
     }
     private CreateShipmentRequest request(UUID id) { return new CreateShipmentRequest(id,"SELLER_TO_BUYER",null,null,null); }
     private Shipment booked() { service.createForOrder(seller,false,order.getId(),request(UUID.randomUUID())); return rows.values().iterator().next(); }

@@ -2,6 +2,8 @@ package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.service.ReportEvidenceService;
 import com.secondlife.secondlife.dto.response.ReportEvidenceContent;
+import com.secondlife.secondlife.dto.response.ReportEvidenceMetadataResponse;
+import com.secondlife.secondlife.mapper.VideoUploadMapper;
 import com.secondlife.secondlife.dto.response.ReportEvidenceUploadResponse;
 import com.secondlife.secondlife.exception.*;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,8 +22,9 @@ public class ReportEvidenceServiceImpl implements ReportEvidenceService {
     private final ReportEvidenceRepository evidence;
     private final ReportEvidenceStorage storage;
     private final long maxBytes;
-    public ReportEvidenceServiceImpl(ReportEvidenceRepository evidence,ReportEvidenceStorage storage,@Value("${app.media.max-file-size-bytes}") long maxBytes) {
-        this.evidence=evidence; this.storage=storage; this.maxBytes=maxBytes;
+    private final VideoUploadMapper videoMapper;
+    public ReportEvidenceServiceImpl(ReportEvidenceRepository evidence,ReportEvidenceStorage storage,@Value("${app.media.max-file-size-bytes}") long maxBytes, VideoUploadMapper videoMapper) {
+        this.evidence=evidence; this.storage=storage; this.maxBytes=maxBytes; this.videoMapper=videoMapper;
     }
     @Transactional
     public ReportEvidenceUploadResponse upload(UUID ownerId,MultipartFile file) {
@@ -49,13 +52,22 @@ public class ReportEvidenceServiceImpl implements ReportEvidenceService {
         }
     }
     @Transactional(readOnly=true)
-    public ReportEvidenceContent read(UUID actorId,boolean reviewer,UUID evidenceId) {
+    public void requireReadable(UUID actorId,boolean reviewer,UUID evidenceId) {
         var upload=evidence.findUploadById(evidenceId).orElseThrow(() -> new NotFoundException("Report evidence not found"));
-        UUID owner=upload.ownerId(); UUID report=upload.reportId();
-        if(!actorId.equals(owner)) {
-            if(!reviewer || report==null) throw new ForbiddenException("You cannot read this report evidence");
-            // Review authority is checked by the controller; never expose evidence of an unsubmitted report.
-        }
+        if(!actorId.equals(upload.ownerId()) && (!reviewer || upload.reportId()==null))
+            throw new ForbiddenException("You cannot read this report evidence");
+    }
+    @Transactional(readOnly=true)
+    public ReportEvidenceMetadataResponse metadata(UUID actorId,boolean reviewer,UUID evidenceId) {
+        requireReadable(actorId,reviewer,evidenceId);
+        return videoMapper.evidence(evidence.findById(evidenceId).orElseThrow(() -> new NotFoundException("Report evidence not found")));
+    }
+    @Transactional(readOnly=true)
+    public ReportEvidenceContent read(UUID actorId,boolean reviewer,UUID evidenceId) {
+        requireReadable(actorId,reviewer,evidenceId);
+        var upload=evidence.findUploadById(evidenceId).orElseThrow(() -> new NotFoundException("Report evidence not found"));
+        if(upload.contentType().startsWith("video/"))
+            throw new BadRequestException("Use the evidence metadata and video playback endpoints to stream video directly from Cloudinary");
         try { return new ReportEvidenceContent(upload.contentType(),storage.read(upload.storageId())); }
         catch(IOException ex) { throw new BadRequestException("Report evidence is temporarily unavailable"); }
     }

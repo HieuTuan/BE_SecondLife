@@ -25,7 +25,9 @@ import org.springframework.test.context.*;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
+import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -147,6 +149,43 @@ class ListingReportIntegrationTest {
             org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("staff").roles("STAFF")))
             .andExpect(status().isForbidden());
     }
+    @Test void reportListSwaggerExposesPaginationWithoutUnusedSort() throws Exception {
+        var result=mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn();
+        var paths=mapper.readTree(result.getResponse().getContentAsString()).path("paths");
+        for(String path:List.of("/api/v1/reports/me","/api/v1/staff/reports")) {
+            var names=new HashSet<String>();
+            paths.path(path).path("get").path("parameters").forEach(parameter -> names.add(parameter.path("name").asText()));
+            assertTrue(names.containsAll(Set.of("page","size")),path+": "+names);
+            assertFalse(names.contains("sort"),path+" should document fixed chronological ordering");
+            assertFalse(names.contains("pageable"),path+" should expose explicit pagination fields");
+        }
+    }
+
+    @Test void personalAndStaffReportsAreNewestFirstWithStablePaginationDespiteLegacySort() throws Exception {
+        var reporter=user("BUYER"); var seller=user("SELLER"); var staff=user("STAFF");
+        var ids=new ArrayList<UUID>();
+        Instant latest=Instant.now().plusSeconds(7200).truncatedTo(ChronoUnit.MICROS);
+        for(int index=0;index<3;index++) {
+            var created=listingReport(reporter,listing(seller).getId(),body("OTHER")).andExpect(status().isCreated()).andReturn();
+            UUID id=UUID.fromString(mapper.readTree(created.getResponse().getContentAsString()).path("data").path("id").asText());
+            ids.add(id);
+            Instant at=index==0?latest.minusSeconds(3600):latest;
+            jdbc.update("update user_reports set created_at=?,updated_at=? where id=?",Timestamp.from(at),Timestamp.from(at),id);
+        }
+        var newest=ids.subList(1,3).stream().map(UUID::toString).sorted(Comparator.reverseOrder()).toList();
+        for(String endpoint:List.of("/api/v1/reports/me","/api/v1/staff/reports")) {
+            String token=endpoint.contains("/staff/")?bearer(staff):bearer(reporter);
+            mvc.perform(get(endpoint).param("targetType","LISTING").param("page","0").param("size","2")
+                    .param("sort","[\"string\"]").header("Authorization",token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].id").value(newest.get(0)))
+                .andExpect(jsonPath("$.data.items[1].id").value(newest.get(1)));
+            mvc.perform(get(endpoint).param("targetType","LISTING").param("page","1").param("size","2")
+                    .header("Authorization",token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.items[0].id").value(ids.get(0).toString()));
+        }
+    }
+
     @Test void listingQueueFilterDoesNotIncludeOrderDisputesAndIsPrivate() throws Exception {
         var staff=user("STAFF");var seller=user("SELLER");var reporter=user("BUYER");var p=listing(seller);
         listingReport(reporter,p.getId(),body("OTHER")).andExpect(status().isCreated());

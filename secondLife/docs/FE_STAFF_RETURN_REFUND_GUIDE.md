@@ -9,6 +9,7 @@ Tài liệu đối chiếu controller, DTO và service BE hiện tại. Phạm v
 - Report hợp lệ làm escrow `FROZEN`. `CONFIRMED` chỉ nói kết luận khiếu nại; phải có `resolutionAction=RETURN_AND_REFUND` mới được tạo chuyến hoàn.
 - Carrier xác nhận vận đơn hoàn `DELIVERED` chưa đồng nghĩa đã hoàn tiền. Chỉ hiển thị hoàn tiền thành công khi tải lại report thấy `refundedAt`.
 - BE tính số tiền hoàn bằng `Order.finalPrice`; phí vận chuyển không được cộng vào khoản hoàn tiền hàng này. Không gửi `amount`, phí, địa chỉ hoặc loại xe tự nhập trong thao tác hoàn của màn hình này.
+- Với lỗi seller đã duyệt, phí chuyến hoàn được thu từ ví seller khi refund; phần thiếu ghi nợ, không trừ vào tiền hoàn buyer. Thiếu `actualFee` vẫn hoàn buyer và theo dõi `PENDING_FEE` riêng (phần 5.7).
 - Các điều kiện nút là kiểm tra sớm cho UX. BE luôn kiểm tra lại trạng thái, quyền, tiền giữ, liên kết và request đồng thời.
 
 ## 2. Phân quyền và dữ liệu người đang đăng nhập
@@ -19,7 +20,7 @@ FE cần UUID người dùng hiện tại cùng role/authority từ cơ chế au
 | --- | --- | --- |
 | Xem queue/chi tiết report/ảnh bằng chứng, nhận xử lý, kết luận thông thường | `ROLE_STAFF` + `STAFF_FRAUD_REVIEW` | `ROLE_ADMIN` + `ADMIN_RBAC_MANAGE` |
 | Duyệt `RETURN_AND_REFUND` | Cả `STAFF_FRAUD_REVIEW` và `STAFF_DISPUTE_REVIEW` | `ADMIN_RBAC_MANAGE` |
-| Tạo chuyến hoàn, hoàn tiền | `ROLE_STAFF` + `STAFF_DISPUTE_REVIEW` | `ROLE_ADMIN` + `ADMIN_RBAC_MANAGE` |
+| Tạo chuyến hoàn, hoàn tiền; đọc phí hoàn hàng riêng tư | `ROLE_STAFF` + `STAFF_DISPUTE_REVIEW` | `ROLE_ADMIN` + `ADMIN_RBAC_MANAGE` |
 | Đọc thông tin xác nhận đơn qua `/confirmation` | `ROLE_STAFF` + `STAFF_DISPUTE_REVIEW` | `ADMIN_RBAC_MANAGE` |
 | Đọc commission snapshot để xem tiền hàng trước refund (tùy chọn) | `ROLE_STAFF` + `STAFF_PAYOUT_REVIEW` | `ROLE_ADMIN` + `ADMIN_COMMISSION_MANAGE` |
 
@@ -275,7 +276,7 @@ Reviewer tự nhận lại hồ sơ đang được giao cho mình là retry hợ
 }
 ```
 
-`responsibleParty` chọn một trong `SELLER`, `BUYER`, `CARRIER`. Chọn trách nhiệm không tự quyết định người trả phí vận chuyển. `reason` bắt buộc, không chỉ khoảng trắng, tối đa 2000 ký tự.
+`responsibleParty` chọn một trong `SELLER`, `BUYER`, `CARRIER`. Với `SELLER` và action `RETURN_AND_REFUND`, phí chuyến hoàn được đánh giá khi STAFF refund thành công; duyệt report chưa thu phí (phần 5.7). `reason` bắt buộc, không chỉ khoảng trắng, tối đa 2000 ký tự.
 
 Response là report đầy đủ, các field thay đổi chính:
 
@@ -383,6 +384,30 @@ Sau HTTP 200, tải lại report. Khi thành công, các field trong `data` repo
 
 Đây là đoạn trích report. Hiển thị “Đã hoàn 1.000.000 ₫ vào ví buyer” từ audit này. BE đồng thời đưa Order về `CANCELLED`, escrow `REFUNDED`. Nếu request refund thành công nhưng GET report sau đó lỗi, hiển thị “Yêu cầu đã được BE xử lý; đang tải xác nhận” và khóa thao tác trong lúc tải lại, không diễn giải lỗi GET là refund thất bại rồi cho tạo hành động khác.
 
+### 5.7. Phí chuyến hoàn do lỗi seller
+
+Với report `CONFIRMED/RETURN_AND_REFUND`, `responsibleParty=SELLER`, BE đánh giá phí một lần khi STAFF refund đúng selected return đã `DELIVERED`. Duyệt report/tạo chuyến chưa trừ ví. Nguồn phí duy nhất là `actualFee` của chuyến hoàn; `0` hợp lệ. BE thu tối đa số dư seller không âm và ghi phần thiếu thành nợ; buyer vẫn nhận đủ `finalPrice`. FE chỉ gửi body `reason` như 5.6, không nhập số tiền hoặc trừ phí vào số tiền hoàn.
+
+Sau refund, STAFF có `STAFF_DISPUTE_REVIEW` hoặc ADMIN có `ADMIN_RBAC_MANAGE` đọc riêng:
+
+```http
+GET /api/v1/shipments/{returnShipmentId}/return-shipping-fee
+```
+
+`data` gồm `shipmentId, orderId, reportId, sellerId, status, feeAmount, collectedAmount, debtAmount, createdAt, assessedAt, assessedBy`. Seller sở hữu khoản phí cũng được đọc; buyer và seller khác bị `403`. Không gọi API này từ màn hình buyer hoặc đưa nợ seller vào DTO report/shipment dùng chung.
+
+| `status` | Hiển thị / hành động |
+| --- | --- |
+| `PENDING_FEE` | “Đã hoàn tiền buyer; chờ phí thực tế”. Cho STAFF sync chuyến và gửi lại endpoint refund để chốt phí khi `actualFee` đã có |
+| `PAID` | Hiển thị phí, tiền đã thu và nợ `0`; gồm trường hợp phí bằng `0` |
+| `OUTSTANDING` | Hiển thị phí, tiền đã thu và khoản nợ; không hiển thị nút thanh toán/thu hồi nợ |
+
+`PENDING_FEE` không phải refund thất bại hoặc phí miễn phí. Các field chưa chốt có thể `null`/bị lược bỏ. Sync/callback riêng lẻ không tự thu; STAFF retry `POST /api/v1/shipments/{returnShipmentId}/refund` với body reason hiện có chỉ để đánh giá pending, không hoàn buyer lần hai. Chỉ cho thao tác này khi API trả đúng pending; không mở lại refund thông thường cho đơn đã hoàn. Khoản đã chốt giữ nguyên dù phí carrier đổi sau đó; đơn đã hoàn trước tính năng không có assessment không bị thu hồi tố.
+
+Màn hình seller dùng `GET /api/v1/seller/return-shipping-fees?page=0&size=20&outstandingOnly=true` (`data.items`) và `GET /api/v1/seller/return-shipping-fees/debt` (`data.sellerId, data.outstandingDebt`). Hai API chỉ đọc tài khoản hiện tại; bỏ filter/`false` để xem cả khoản không còn nợ. Không tự giảm nợ khi seller nạp tiền/nhận doanh thu: tính năng chưa có thu hồi tự động hoặc API trả nợ.
+
+Ví dụ và kịch bản Swagger: [SWAGGER_SELLER_RETURN_SHIPPING_FEE_TEST.md](SWAGGER_SELLER_RETURN_SHIPPING_FEE_TEST.md). Thanh toán/đối soát carrier thực tế nằm ngoài tính năng; khoản thu vào `shippingBalance` là ghi sổ nội bộ, không có API mới tạo khoản thu bên carrier.
+
 ## 6. Điều kiện hiển thị và khóa nút
 
 Quy ước: `canReview` và `canOperateReturn` theo phần 2; `mine = reviewerId === currentUser.id`; `selfCase = currentUser.id === reporterId || currentUser.id === sellerId`; `approved = status === CONFIRMED && resolutionAction === RETURN_AND_REFUND && returnApprovedAt != null`; `refunded = refundedAt != null`; `selectedReturn` theo 4.3.
@@ -398,12 +423,13 @@ Mọi nút ghi dữ liệu bị disable khi dữ liệu chưa tải xong, đang 
 | Duyệt hoàn hàng | `canReview && canOperateReturn`, `IN_REVIEW`, `mine`, `!selfCase`, report thuộc ORDER | Nếu có order status mới nhất là COMPLETED/CANCELLED thì khóa; BE còn kiểm tra FROZEN, thời điểm tạo report và quyết định khác cùng đơn |
 | Tạo chuyến hoàn | `canOperateReturn`, `approved`, `!refunded`, chưa có `returnShipmentId`; không có buyer-return đang hoạt động/không rõ kết quả trong shipments | Không tạo khi link bị lệch hoặc chưa tải xong danh sách |
 | Tạo chuyến thay thế | Như tạo chuyến, nhưng selectedReturn đã `CANCELLED`; không có buyer-return khác đang hoạt động | RequestId mới chỉ sau hủy xác nhận và sửa nguyên nhân |
-| Đồng bộ trạng thái | Có shipment, `orderCode != null`; tài khoản được vận hành, chưa refund | Khóa khi thiếu mã; hiển thị đối soát cho trạng thái tạo chưa rõ |
+| Đồng bộ trạng thái | Có shipment, `orderCode != null`; tài khoản được vận hành, chưa refund hoặc khoản phí đang `PENDING_FEE` | Khóa khi thiếu mã; pending dùng sync lấy phí thực tế trước replay refund |
 | Đối soát chuyến | `canOperateReturn`, provider LALAMOVE, status CREATING/CREATION_UNCERTAIN, chưa refund | Không tạo chuyến thứ hai để thay việc đối soát |
 | Theo dõi / xem timeline | Có selectedReturn; tracking nên có orderCode | Cho xem timeline trước khi có vị trí tài xế; không coi thiếu tọa độ là lỗi chuyến |
 | Hủy chuyến hoàn | `canOperateReturn`, LALAMOVE, có orderCode, providerStatus ASSIGNING_DRIVER/ON_GOING, chưa refund và status chưa terminal | Khi PICKED/DELIVERED/FAILED hoặc chưa rõ booking thì không có thao tác ép hủy |
 | Hoàn tiền | `canOperateReturn`, `approved`, `!refunded`, selectedReturn đúng order/leg/id và `status=DELIVERED` | Nếu biết order status COMPLETED/CANCELLED hoặc escrow khác FROZEN thì khóa; BE là nguồn kiểm tra cuối cho escrow hiện tại |
 | Xem biên nhận hoàn tiền | `refunded` | Đọc amount, time, actor từ report; không cho sửa |
+| Chốt phí đang chờ | `canOperateReturn`, `refunded`, API phí trả `PENDING_FEE`, đúng selected return và có `actualFee` sau sync | Gọi lại endpoint refund với reason; tải lại phí, không hoàn buyer thêm |
 
 Hai điểm cần giữ đúng:
 
@@ -442,13 +468,13 @@ Sau từng mutation:
 | --- | --- |
 | start-review / resolve | Report detail và trang queue hiện tại; shipments nếu chuẩn bị bước hoàn |
 | create / cancel / reconcile / sync | Report + shipments; events của shipment hiện được chọn |
-| refund | Bắt buộc GET report để lấy audit; refresh shipments và queue; order confirmation nếu đang hiển thị |
+| refund / replay phí pending | Bắt buộc GET report để lấy audit; refresh shipments, phí riêng tư theo quyền và queue; order confirmation nếu đang hiển thị |
 
 Quy tắc retry:
 
 - Resolve timeout: đọc lại report. Nếu đã kết luận cùng nội dung thì hiển thị kết quả; nếu còn IN_REVIEW có thể gửi lại cùng body. Không đổi kết luận ở lần retry.
 - Booking timeout: tải lại report + shipments, giữ UUID requestId/body gốc. Có CREATION_UNCERTAIN thì đối soát, không tạo requestId mới. Nếu biết chắc lỗi xảy ra trước bước tạo booking và không có shipment mới thì vẫn có thể retry key gốc.
-- Refund timeout: khóa nút, GET report. Có refundedAt thì kết thúc; chưa có audit sau khi refresh thì cho retry cùng shipment và body có kiểm soát. BE chống hoàn lặp.
+- Refund timeout: khóa nút, GET report. Có refundedAt thì tiền buyer đã hoàn; tải phí riêng tư theo quyền và chỉ cho replay nếu khoản phí đang PENDING_FEE như phần 5.7. Chưa có audit sau refresh thì cho retry cùng shipment/body có kiểm soát. BE chống hoàn lặp.
 - Request đồng thời nhận xử lý/hoàn tiền ở hai tab: tin trạng thái trả mới từ BE, hủy state/modal cũ và refresh. Không tự optimistic cập nhật số dư ví, audit hoặc trạng thái đóng đơn.
 
 ## 9. Lỗi API và trải nghiệm người dùng
@@ -519,6 +545,8 @@ Vì vậy, bản FE hiện làm được luồng report + shipment + audit hoàn
 - Hủy chỉ khi carrier còn cho phép; thay chuyến dùng UUID mới sau CANCELLED.
 - Hoàn tiền200 xong tải report, hiển thị đúng refundedAt/refundAmount/refundedBy; không chờ report REFUNDED.
 - Retry refund không cộng tiền UI lần nữa; refresh trang vẫn giữ trạng thái hoàn tiền từ server.
+- Phí SELLER đủ/một phần/không có số dư hiển thị đúng PAID/OUTSTANDING; PENDING_FEE không chặn biên nhận buyer và chỉ cho STAFF sync/replay chốt phí.
+- Buyer/seller khác không đọc được phí riêng tư; snapshot đã chốt không đổi theo callback phí đến sau.
 - Bác report không hiển thị đã giải ngân vì có thể còn report/POD/shipping hold khác.
 - Evidence fetch có Bearer, blob URL được thu hồi; token không nằm trong URL/log.
 - Lỗi403/409/429/5xx có trạng thái giữ form, tải lại và retry đúng từng thao tác.

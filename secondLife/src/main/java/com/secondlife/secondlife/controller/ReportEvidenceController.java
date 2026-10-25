@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.controller;
 import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.dto.response.ReportEvidenceUploadResponse;
+import com.secondlife.secondlife.dto.response.ReportEvidenceMetadataResponse;
 import com.secondlife.secondlife.security.*;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.ReportEvidenceService;
@@ -27,6 +28,12 @@ public class ReportEvidenceController {
     @Operation(summary="Upload private evidence; use returned evidenceUrl in POST /reports evidenceUrls")
     public ApiResponse<ReportEvidenceUploadResponse> upload(@AuthenticationPrincipal CustomUserDetails user,@RequestParam MultipartFile file) {
         return ApiResponse.success(evidence.upload(currentUser.resolveUserId(user),file));
+    }
+    @GetMapping("/{id}/metadata")
+    public ResponseEntity<ApiResponse<ReportEvidenceMetadataResponse>> metadata(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID id) {
+        Set<String> a=user.getAuthorities().stream().map(x->x.getAuthority()).collect(Collectors.toSet());
+        boolean reviewer=(a.contains("ROLE_STAFF") && a.contains("STAFF_FRAUD_REVIEW")) || (a.contains("ROLE_ADMIN") && a.contains("ADMIN_RBAC_MANAGE"));
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(ApiResponse.success(evidence.metadata(currentUser.resolveUserId(user),reviewer,id)));
     }
     @GetMapping("/{id}")
     @Operation(summary="Private image bytes; FE fetches with bearer token then creates an object URL for display")

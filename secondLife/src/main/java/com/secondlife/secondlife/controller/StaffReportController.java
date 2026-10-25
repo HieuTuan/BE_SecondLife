@@ -9,6 +9,10 @@ import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.UserReportService;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.Parameters;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -32,8 +36,13 @@ public class StaffReportController {
     private final UserReportService reports;
     private final CurrentUserProvider currentUser;
     @GetMapping
+    @Operation(summary="List reports newest first", description="Fixed order: createdAt DESC, id DESC. No sort parameter is needed or applied.")
+    @Parameters({
+        @Parameter(name="page",in=ParameterIn.QUERY,description="Zero-based page; defaults to app.pagination.default-page",example="0",schema=@Schema(type="integer",minimum="0")),
+        @Parameter(name="size",in=ParameterIn.QUERY,description="Page size; default and maximum follow app.pagination configuration",example="20",schema=@Schema(type="integer",minimum="1"))
+    })
     public ApiResponse<PageResponse<ReportResponse>> queue(@RequestParam(required=false) ReportRequests.Status status,
-            @RequestParam(required=false) ReportRequests.TargetType targetType,Pageable pageable) {
+            @RequestParam(required=false) ReportRequests.TargetType targetType,@Parameter(hidden=true) Pageable pageable) {
         return ApiResponse.success(reports.queue(status,targetType,pageable));
     }
     @PostMapping("/{id}/start-review")

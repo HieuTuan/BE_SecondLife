@@ -26,6 +26,11 @@ import java.util.List;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler(VideoUploadException.class)
+    public ResponseEntity<ErrorResponse> handleVideoUpload(VideoUploadException ex, HttpServletRequest request) {
+        return ResponseEntity.status(ex.getStatus()).body(ErrorResponse.of(ex.getMessage(), request.getRequestURI()));
+    }
+
     @ExceptionHandler(EmailDeliveryException.class)
     public ResponseEntity<ErrorResponse> handleEmailDelivery(EmailDeliveryException ex, HttpServletRequest request) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(ex.getMessage(), request.getRequestURI()));

@@ -32,6 +32,7 @@ import com.secondlife.secondlife.service.ListingFingerprint;
 import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.OrderDisputeService;
 import com.secondlife.secondlife.service.ReverseGeocodingService;
+import com.secondlife.secondlife.service.ReturnShippingFeeService;
 import com.secondlife.secondlife.service.SellerReputationService;
 import com.secondlife.secondlife.service.ShipmentService;
 import com.secondlife.secondlife.service.ShippingQuoteService;
@@ -64,6 +65,7 @@ import java.util.UUID;
 public class ShipmentServiceImpl implements ShipmentService {
     private final ShipmentMapper shipmentMapper;
     private final OrderDisputeService disputes;
+    private final ReturnShippingFeeService returnShippingFees;
 
     private final ShipmentRepository shipments;
     private final ShipmentEventRepository events;
@@ -86,8 +88,8 @@ public class ShipmentServiceImpl implements ShipmentService {
                            InspectionOrderRepository inspections, ShippingQuoteRepository quotes, ShippingQuoteService quoteService,
                            ReverseGeocodingService geocoding, ShippingProvider provider, ObjectMapper mapper,
                            WalletService wallets, PlatformTransactionManager transactions,
-                           SystemWalletService systemWallet, SellerReputationService reputation, ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes) {
-        this(shipments, events, orders, inspections, quotes, quoteService, geocoding, provider, mapper, wallets, transactions, systemWallet, reputation, null, null, listingFingerprint, shipmentMapper, disputes);
+                           SystemWalletService systemWallet, SellerReputationService reputation, ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes, ReturnShippingFeeService returnShippingFees) {
+        this(shipments, events, orders, inspections, quotes, quoteService, geocoding, provider, mapper, wallets, transactions, systemWallet, reputation, null, null, listingFingerprint, shipmentMapper, disputes, returnShippingFees);
     }
 
     @Autowired
@@ -98,9 +100,10 @@ public class ShipmentServiceImpl implements ShipmentService {
                            SystemWalletService systemWallet, SellerReputationService reputation,
                            @Autowired(required = false) NotificationService notificationService,
                            @Autowired(required = false) InspectionSealLogRepository sealLogs,
-                           ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes) {
+                           ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes, ReturnShippingFeeService returnShippingFees) {
         this.shipmentMapper = shipmentMapper;
         this.disputes = Objects.requireNonNull(disputes, "OrderDisputeService is required");
+        this.returnShippingFees = Objects.requireNonNull(returnShippingFees, "ReturnShippingFeeService is required");
 
         this.shipments = shipments;
         this.events = events;
@@ -326,12 +329,14 @@ public class ShipmentServiceImpl implements ShipmentService {
         if(order.getEscrowStatus()==EscrowStatus.REFUNDED) {
             if(order.getReturnResponsibleParty()!=null && !order.getReturnResponsibleParty().equals(party))
                 throw new ConflictException("Refund responsibility was already finalized; use the report review flow for a later finding");
+            if (returnDecision!=null) returnShippingFees.collectPendingForRefund(order,shipment,returnDecision,actor);
             return shipmentMapper.toResponse(shipment);
         }
         if (order.getEscrowStatus()!=EscrowStatus.FROZEN) throw new ConflictException("Return refund requires frozen funds");
         systemWallet.refund(order, order.getFinalPrice());
         wallets.processRefund(order.getBuyer().getId(),order.getFinalPrice(),order.getId());
         order.setStatus(OrderStatus.CANCELLED); order.setEscrowStatus(EscrowStatus.REFUNDED); order.setReturnResponsibleParty(party); orders.saveAndFlush(order);
+        if (returnDecision!=null) returnShippingFees.recordForRefund(order,shipment,returnDecision,actor);
         reputation.recordClosedOrder(order,actor,reason,returnDecision==null && "SELLER".equals(party));
         if (returnDecision!=null) disputes.recordRefund(returnDecision,actor,order.getFinalPrice());
         shipment.setReason(reason); shipment.setRequestedBy(actor); shipments.save(shipment);

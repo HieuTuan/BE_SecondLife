@@ -18,6 +18,7 @@ public interface WalletService {
     void processPayment(UUID userId, BigDecimal amount, UUID orderId);
     void processEarning(UUID userId, BigDecimal amount, UUID orderId);
     void processRefund(UUID userId, BigDecimal amount, UUID orderId);
+    BigDecimal collectReturnShippingFee(UUID sellerId, BigDecimal fee, UUID shipmentId);
     Page<WalletTransaction> getTransactions(UUID userId, Pageable pageable);
 
     WalletWithdrawalResponse requestWithdrawal(UUID userId, WalletWithdrawalRequest request);
