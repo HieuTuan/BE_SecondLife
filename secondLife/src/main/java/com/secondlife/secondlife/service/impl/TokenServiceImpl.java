@@ -50,6 +50,9 @@ public class TokenServiceImpl implements TokenService {
     @Value("${app.auth.password-reset-expiration-ms}")
     private long passwordResetExpirationMs;
 
+    @Value("${app.auth.token-cleanup.revoked-retention-hours:24}")
+    private long revokedRetentionHours;
+
     @Override
     public String hashToken(String rawToken) {
         try {
@@ -209,5 +212,23 @@ public class TokenServiceImpl implements TokenService {
         passwordResetTokenRepository.save(token);
 
         return user;
+    }
+
+    @Override
+    @Transactional
+    public int cleanupExpiredAndRevokedTokens() {
+        Instant now = Instant.now();
+        Instant revokedCutoff = now.minus(java.time.Duration.ofHours(Math.max(0, revokedRetentionHours)));
+
+        int deletedRefresh = refreshTokenRepository.deleteExpiredOrRevokedBefore(now, revokedCutoff);
+        int deletedEmail = emailVerificationTokenRepository.deleteExpiredOrUsedBefore(now, revokedCutoff);
+        int deletedPasswordReset = passwordResetTokenRepository.deleteExpiredOrUsedBefore(now, revokedCutoff);
+
+        int total = deletedRefresh + deletedEmail + deletedPasswordReset;
+        if (total > 0) {
+            log.info("Token cleanup completed: purged {} refresh token(s), {} email token(s), {} password reset token(s).",
+                    deletedRefresh, deletedEmail, deletedPasswordReset);
+        }
+        return total;
     }
 }

@@ -216,4 +216,21 @@ class TokenServiceTest {
         assertTrue(token.isUsed());
         verify(passwordResetTokenRepository).save(token);
     }
+
+    @Test
+    void cleanupExpiredAndRevokedTokens_ShouldCallRepositoriesAndReturnTotalCount() {
+        when(refreshTokenRepository.deleteExpiredOrRevokedBefore(any(Instant.class), any(Instant.class)))
+                .thenReturn(5);
+        when(emailVerificationTokenRepository.deleteExpiredOrUsedBefore(any(Instant.class), any(Instant.class)))
+                .thenReturn(2);
+        when(passwordResetTokenRepository.deleteExpiredOrUsedBefore(any(Instant.class), any(Instant.class)))
+                .thenReturn(1);
+
+        int totalDeleted = tokenService.cleanupExpiredAndRevokedTokens();
+
+        assertEquals(8, totalDeleted);
+        verify(refreshTokenRepository).deleteExpiredOrRevokedBefore(any(Instant.class), any(Instant.class));
+        verify(emailVerificationTokenRepository).deleteExpiredOrUsedBefore(any(Instant.class), any(Instant.class));
+        verify(passwordResetTokenRepository).deleteExpiredOrUsedBefore(any(Instant.class), any(Instant.class));
+    }
 }

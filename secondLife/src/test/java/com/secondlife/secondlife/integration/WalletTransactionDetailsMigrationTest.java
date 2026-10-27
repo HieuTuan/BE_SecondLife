@@ -41,7 +41,7 @@ class WalletTransactionDetailsMigrationTest {
                     jdbc.update("INSERT INTO user_wallets(id,user_id,balance,created_at,updated_at) VALUES (?,?,75,now(),now())", wallet, user);
                     jdbc.update("INSERT INTO wallet_transactions(id,wallet_id,type,amount,created_at) VALUES (?,?,'PAYMENT',-25,now())", old, wallet);
                     var before = jdbc.queryForMap("SELECT id,wallet_id,type,amount,created_at,reference_id FROM wallet_transactions WHERE id=?", old);
-                    Flyway migration = Flyway.configure().dataSource(url, database.getUsername(), database.getPassword()).load();
+                    Flyway migration = Flyway.configure().dataSource(url, database.getUsername(), database.getPassword()).target("60").load();
                     assertEquals(1, migration.migrate().migrationsExecuted);
                     assertEquals(before, jdbc.queryForMap("SELECT id,wallet_id,type,amount,created_at,reference_id FROM wallet_transactions WHERE id=?", old));
                     var legacy = jdbc.queryForMap("SELECT balance_before,balance_after,reference_type FROM wallet_transactions WHERE id=?", old);
