@@ -2,8 +2,10 @@ package com.secondlife.secondlife.security.authentication;
 
 import com.secondlife.secondlife.security.websocket.WebSocketAuthChannelInterceptor;
 import com.secondlife.secondlife.entity.Role;
+import com.secondlife.secondlife.entity.Permission;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.AccountStatus;
+import com.secondlife.secondlife.repository.UserSecurityState;
 import com.secondlife.secondlife.security.jwt.JwtAuthenticationFilter;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
@@ -22,6 +24,7 @@ import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -30,6 +33,7 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -43,6 +47,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.times;
 
 class AccessTokenAuthenticationTest {
 
@@ -82,6 +87,8 @@ class AccessTokenAuthenticationTest {
         assertNotNull(webSocketAuthentication);
         assertEquals(user.getId().toString(), webSocketAuthentication.getName());
         assertEquals(Set.copyOf(details.getAuthorities()), Set.copyOf(webSocketAuthentication.getAuthorities()));
+        verify(users, times(2)).loadSecurityState(user.getId());
+        verify(users, times(1)).loadUserById(user.getId());
     }
 
     @Test
@@ -93,6 +100,44 @@ class AccessTokenAuthenticationTest {
         assertNull(authenticateHttp(token));
         assertNull(authenticateWebSocket(token));
         assertPrivateSubscriptionDenied();
+    }
+
+    @Test
+    void lockingAnAccountInvalidatesAnAlreadyWarmPrincipalOnBothTransports() throws Exception {
+        String token = tokens.generateAccessToken(user);
+        currentDetails();
+        assertNotNull(authenticateHttp(token));
+
+        user.setAccountStatus(AccountStatus.LOCKED);
+        currentDetails();
+
+        assertNull(authenticateHttp(token));
+        assertNull(authenticateWebSocket(token));
+    }
+
+    @Test
+    void changingTokenVersionInvalidatesAnAlreadyWarmPrincipalOnBothTransports() throws Exception {
+        String token = tokens.generateAccessToken(user);
+        currentDetails();
+        assertNotNull(authenticateHttp(token));
+
+        user.bumpTokenVersion();
+        currentDetails();
+
+        assertNull(authenticateHttp(token));
+        assertNull(authenticateWebSocket(token));
+    }
+
+    @Test
+    void deletingAnAccountInvalidatesAnAlreadyWarmPrincipal() throws Exception {
+        String token = tokens.generateAccessToken(user);
+        currentDetails();
+        assertNotNull(authenticateHttp(token));
+        doThrow(new UsernameNotFoundException("User not found")).when(users).loadUserById(user.getId());
+        doThrow(new UsernameNotFoundException("User not found")).when(users).loadSecurityState(user.getId());
+
+        assertNull(authenticateHttp(token));
+        assertNull(authenticateWebSocket(token));
     }
 
     @ParameterizedTest
@@ -125,6 +170,7 @@ class AccessTokenAuthenticationTest {
     void deletedAccountCannotAuthenticateOnEitherTransport() throws Exception {
         String token = tokens.generateAccessToken(user);
         doThrow(new UsernameNotFoundException("User not found")).when(users).loadUserById(user.getId());
+        doThrow(new UsernameNotFoundException("User not found")).when(users).loadSecurityState(user.getId());
 
         assertNull(authenticateHttp(token));
         assertNull(authenticateWebSocket(token));
@@ -156,10 +202,67 @@ class AccessTokenAuthenticationTest {
         assertPrivateSubscriptionDenied();
     }
 
+    @Test
+    void permissionRevisionRefreshesWarmAuthoritiesWithoutChangingTheJwt() throws Exception {
+        Role role = user.getRoles().iterator().next();
+        Permission permission = new Permission("CACHE_ACCESS", "Cache access", null);
+        role.addPermission(permission);
+        String token = tokens.generateAccessToken(user);
+        currentDetails();
+        assertEquals(2, authenticateHttp(token).getAuthorities().size());
+
+        role.removePermission(permission);
+        currentDetails();
+
+        Authentication updated = authenticateHttp(token);
+        assertNotNull(updated);
+        assertEquals(Set.of("ROLE_BUYER"), updated.getAuthorities().stream()
+                .map(authority -> authority.getAuthority()).collect(Collectors.toSet()));
+        verify(users, times(2)).loadUserById(user.getId());
+    }
+
+    @Test
+    void aWarmCacheCannotBypassAnUnavailableSecurityStateSource() throws Exception {
+        String token = tokens.generateAccessToken(user);
+        currentDetails();
+        assertNotNull(authenticateHttp(token));
+        doThrow(new DataAccessResourceFailureException("Database unavailable"))
+                .when(users).loadSecurityState(user.getId());
+
+        assertNull(authenticateHttp(token));
+        assertNull(authenticateWebSocket(token));
+    }
+
+    @Test
+    void aPermissionChangeBetweenStateAndDetailsReadsRetriesAgainstTheCurrentRevision() {
+        String token = tokens.generateAccessToken(user);
+        CustomUserDetails before = new CustomUserDetails(user);
+        UserSecurityState beforeState = securityState(before);
+        user.getRoles().iterator().next().addPermission(new Permission("CACHE_ACCESS", "Cache access", null));
+        CustomUserDetails after = currentDetails();
+        doReturn(beforeState, securityState(after)).when(users).loadSecurityState(user.getId());
+
+        assertSame(after, authenticator.authenticate(token));
+        verify(users, times(2)).loadSecurityState(user.getId());
+        verify(users, times(2)).loadUserById(user.getId());
+    }
+
     private CustomUserDetails currentDetails() {
         CustomUserDetails details = new CustomUserDetails(user);
         doReturn(details).when(users).loadUserById(user.getId());
+        doReturn(securityState(details)).when(users).loadSecurityState(user.getId());
         return details;
+    }
+
+    private UserSecurityState securityState(CustomUserDetails details) {
+        UserSecurityState state = mock(UserSecurityState.class);
+        doReturn(details.getId()).when(state).getId();
+        doReturn(details.getEmail()).when(state).getEmail();
+        doReturn(details.getAccountStatus()).when(state).getAccountStatus();
+        doReturn(details.isEmailVerified()).when(state).getEmailVerified();
+        doReturn(details.getTokenVersion()).when(state).getTokenVersion();
+        doReturn(details.getPermissionsVersion()).when(state).getPermissionsVersion();
+        return state;
     }
 
     private Authentication authenticateHttp(String token) throws Exception {

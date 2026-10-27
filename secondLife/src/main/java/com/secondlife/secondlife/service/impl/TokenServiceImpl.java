@@ -14,6 +14,7 @@ import com.secondlife.secondlife.repository.PasswordResetTokenRepository;
 import com.secondlife.secondlife.repository.RefreshTokenRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
+import com.secondlife.secondlife.security.userdetails.UserPrincipalCache;
 import com.secondlife.secondlife.service.TokenService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,6 +40,7 @@ public class TokenServiceImpl implements TokenService {
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final UserRepository userRepository;
     private final JwtTokenProvider jwtTokenProvider;
+    private final UserPrincipalCache userPrincipalCache;
     private final SecureRandom secureRandom = new SecureRandom();
 
     @Value("${app.jwt.refresh-expiration-ms}")
@@ -128,6 +130,7 @@ public class TokenServiceImpl implements TokenService {
     @Transactional
     public void revokeAllUserRefreshTokens(UUID userId) {
         refreshTokenRepository.revokeAllActiveByUserId(userId);
+        userPrincipalCache.evictAfterCommit(userId);
     }
 
     @Override

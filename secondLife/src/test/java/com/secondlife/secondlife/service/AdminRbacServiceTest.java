@@ -13,6 +13,7 @@ import com.secondlife.secondlife.mapper.RbacMapper;
 import com.secondlife.secondlife.repository.PermissionRepository;
 import com.secondlife.secondlife.repository.RolePermissionAuditRepository;
 import com.secondlife.secondlife.repository.RoleRepository;
+import com.secondlife.secondlife.security.userdetails.UserPrincipalCache;
 import com.secondlife.secondlife.service.impl.AdminRbacServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,6 +42,7 @@ class AdminRbacServiceTest {
     @Mock private PermissionRepository permissionRepository;
     @Mock private RoleRepository roleRepository;
     @Mock private RolePermissionAuditRepository auditRepository;
+    @Mock private UserPrincipalCache userPrincipalCache;
     @InjectMocks private AdminRbacServiceImpl service;
 
     @Test
@@ -141,11 +143,14 @@ class AdminRbacServiceTest {
         var granted = service.replaceRolePermissions(admin, "STAFF",
                 new ReplaceRolePermissionsRequest(Set.of(), Set.of(permission.getCode())));
         assertEquals(Set.of("REPORT_EXPORT"), granted.permissionCodes());
+        assertEquals(1, role.getPermissionsVersion());
         assertThrows(ConflictException.class, () -> service.replaceRolePermissions(admin, "STAFF",
                 new ReplaceRolePermissionsRequest(Set.of(), Set.of(permission.getCode()))));
         var revoked = service.replaceRolePermissions(admin, "STAFF",
                 new ReplaceRolePermissionsRequest(Set.of(permission.getCode()), Set.of()));
         assertTrue(revoked.permissionCodes().isEmpty());
+        assertEquals(2, role.getPermissionsVersion());
+        verify(userPrincipalCache, times(2)).clearAfterCommit();
 
         ArgumentCaptor<RolePermissionAudit> audits = ArgumentCaptor.forClass(RolePermissionAudit.class);
         verify(auditRepository, times(2)).save(audits.capture());

@@ -19,6 +19,7 @@ import com.secondlife.secondlife.mapper.RbacMapper;
 import com.secondlife.secondlife.repository.PermissionRepository;
 import com.secondlife.secondlife.repository.RolePermissionAuditRepository;
 import com.secondlife.secondlife.repository.RoleRepository;
+import com.secondlife.secondlife.security.userdetails.UserPrincipalCache;
 import com.secondlife.secondlife.service.AdminRbacService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -46,6 +47,7 @@ public class AdminRbacServiceImpl implements AdminRbacService {
     private final RoleRepository roleRepository;
     private final RolePermissionAuditRepository auditRepository;
     private final RbacMapper rbacMapper;
+    private final UserPrincipalCache userPrincipalCache;
 
     @Override
     @Transactional(readOnly = true)
@@ -226,6 +228,9 @@ public class AdminRbacServiceImpl implements AdminRbacService {
             }
         }
         roleRepository.saveAndFlush(role);
+        if (!current.equals(desired)) {
+            userPrincipalCache.clearAfterCommit();
+        }
         return toRoleResponse(role);
     }
 

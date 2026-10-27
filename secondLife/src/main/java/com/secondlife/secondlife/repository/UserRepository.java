@@ -20,6 +20,16 @@ import java.util.UUID;
 @Repository
 public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificationExecutor<User> {
 
+    @Query("""
+            SELECT u.id AS id, u.email AS email, u.accountStatus AS accountStatus,
+                   u.emailVerified AS emailVerified, u.tokenVersion AS tokenVersion,
+                   COALESCE(SUM(r.permissionsVersion), 0L) AS permissionsVersion
+            FROM User u LEFT JOIN u.userRoles ur LEFT JOIN ur.role r
+            WHERE u.id = :id
+            GROUP BY u.id, u.email, u.accountStatus, u.emailVerified, u.tokenVersion
+            """)
+    Optional<UserSecurityState> findSecurityStateById(@Param("id") UUID id);
+
     Optional<User> findByEmailIgnoreCase(String email);
 
     boolean existsByEmailIgnoreCase(String email);

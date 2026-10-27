@@ -20,6 +20,7 @@ import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.security.userdetails.UserPrincipalCache;
 import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.SellerReputationService;
 import com.secondlife.secondlife.service.TokenService;
@@ -55,6 +56,7 @@ public class UserServiceImpl implements UserService {
     private final UserMapper userMapper;
     private final NotificationService notificationService;
     private final SellerReputationService sellerReputationService;
+    private final UserPrincipalCache userPrincipalCache;
 
     @Override
     @Transactional(readOnly = true)
@@ -213,6 +215,7 @@ public class UserServiceImpl implements UserService {
 
         targetUser.setAccountStatus(request.status());
         User savedUser = userRepository.save(targetUser);
+        userPrincipalCache.evictAfterCommit(savedUser.getId());
         log.info("Admin {} updated status of user {} to {}", currentAdminId, savedUser.getEmail(), request.status());
 
         notificationService.sendAccountStatusChanged(savedUser, request.status());

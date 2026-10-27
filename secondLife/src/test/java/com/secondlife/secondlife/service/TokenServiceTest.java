@@ -13,6 +13,7 @@ import com.secondlife.secondlife.repository.PasswordResetTokenRepository;
 import com.secondlife.secondlife.repository.RefreshTokenRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
+import com.secondlife.secondlife.security.userdetails.UserPrincipalCache;
 import com.secondlife.secondlife.service.impl.TokenServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,11 +50,22 @@ class TokenServiceTest {
     @Mock
     private JwtTokenProvider jwtTokenProvider;
 
+    @Mock
+    private UserPrincipalCache userPrincipalCache;
+
     @InjectMocks
     private TokenServiceImpl tokenService;
 
     private User user;
     private UUID userId;
+
+    @Test
+    void revokingAllRefreshTokensInvalidatesThePrincipalAfterCommit() {
+        UUID owner = UUID.randomUUID();
+        tokenService.revokeAllUserRefreshTokens(owner);
+        verify(refreshTokenRepository).revokeAllActiveByUserId(owner);
+        verify(userPrincipalCache).evictAfterCommit(owner);
+    }
 
     @BeforeEach
     void setUp() throws Exception {
