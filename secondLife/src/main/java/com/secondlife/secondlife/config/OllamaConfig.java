@@ -1,5 +1,6 @@
 package com.secondlife.secondlife.config;
 
+import io.netty.channel.ChannelOption;
 import org.springframework.ai.ollama.OllamaChatModel;
 import org.springframework.ai.ollama.api.OllamaApi;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
@@ -15,9 +16,10 @@ import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
-import io.netty.channel.ChannelOption;
 import reactor.netty.http.client.HttpClient;
 
+import java.net.ConnectException;
+import java.net.UnknownHostException;
 import java.time.Duration;
 
 @Configuration
@@ -65,10 +67,23 @@ public class OllamaConfig {
         return new RetryTemplate(RetryPolicy.builder()
                 .maxRetries(maxRetries)
                 .includes(TransientAiException.class, ResourceAccessException.class)
+                .predicate(throwable -> !hasUnreachableHostCause(throwable))
                 .delay(Duration.ofMillis(initialIntervalMs))
                 .multiplier(multiplier)
                 .maxDelay(Duration.ofMillis(maxIntervalMs))
                 .build());
+    }
+
+    private static boolean hasUnreachableHostCause(Throwable throwable) {
+        Throwable cursor = throwable;
+        int depth = 0;
+        while (cursor != null && depth++ < 16) {
+            if (cursor instanceof ConnectException || cursor instanceof UnknownHostException) {
+                return true;
+            }
+            cursor = cursor.getCause();
+        }
+        return false;
     }
 
     @Bean

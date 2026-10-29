@@ -35,7 +35,7 @@ DECLARE
     -- Review new migration tables here. Never grant on ALL TABLES or unknown/platform tables.
     app_tables constant text[] := ARRAY[
         'ai_chat_messages', 'ai_chat_sessions', 'ai_price_estimates',
-        'categories', 'category_question_templates', 'chat_messages', 'chat_rooms',
+        'categories', 'category_question_template_proposals', 'category_question_templates', 'chat_messages', 'chat_rooms',
         'commission_rule_audits', 'commission_rules', 'credit_balances', 'credit_discount_tiers',
         'credit_ledger', 'credit_pricing_rules', 'credit_purchases', 'credit_types',
         'deposit_requests', 'email_verification_tokens', 'fraud_flags', 'geocoded_locations_cache',

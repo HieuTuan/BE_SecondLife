@@ -10,4 +10,6 @@ import java.util.UUID;
 @Repository
 public interface CategoryQuestionTemplateRepository extends JpaRepository<CategoryQuestionTemplate, UUID> {
     Optional<CategoryQuestionTemplate> findByCategoryIdAndItemId(UUID categoryId, UUID itemId);
+
+    Optional<CategoryQuestionTemplate> findByCategoryIdAndItemIdIsNull(UUID categoryId);
 }

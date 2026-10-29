@@ -50,6 +50,9 @@ import java.util.UUID;
 @Service
 public class AiChatServiceImpl implements AiChatService {
 
+    private static final long OLLAMA_FAILURE_COOLDOWN_MS = 60_000L;
+    private static final String VISION_AUDIT_MARKER = "NHIỆM VỤ BẮT BUỘC (KIỂM TRA HÌNH ẢNH SẢN PHẨM)";
+
     private final AiChatGateway ollamaChatGateway;
     private final AiChatGateway googleChatGateway;
     private final AiChatSessionRepository sessionRepository;
@@ -63,6 +66,8 @@ public class AiChatServiceImpl implements AiChatService {
     private final int sessionMaxMessages;
     private final String ollamaModel;
     private final ListingCreditService listingCreditService;
+
+    private volatile long ollamaCooldownUntilEpochMs = 0L;
 
     public AiChatServiceImpl(
             @Qualifier("ollamaChatModel") ChatModel ollamaChatModel,
@@ -146,9 +151,8 @@ public class AiChatServiceImpl implements AiChatService {
         }
 
         // Phase 1: Validate + save user message in a COMMITTED transaction
-        // (so user message is persisted even if the AI call subsequently fails)
         UUID sessionId = saveUserMessageAndGetSessionId(request, currentUserId);
-        
+
         // Count message to use as idempotency key for credit deduction
         int currentMessageCount = sessionRepository.findById(sessionId).map(AiChatSession::getMessageCount).orElse(1);
 
@@ -160,20 +164,18 @@ public class AiChatServiceImpl implements AiChatService {
             if (!media.isEmpty()) {
                 aiReply = googleChatGateway.complete(new Prompt(aiMessages));
             } else {
-                try {
-                    aiReply = ollamaChatGateway.complete(
-                            new Prompt(aiMessages, OllamaChatOptions.builder().model(ollamaModel).build())
-                    );
-                } catch (Exception ollamaEx) {
-                    log.warn("Ollama chat failed, falling back to Google Gemini: {}", ollamaEx.getMessage());
-                    aiReply = googleChatGateway.complete(new Prompt(aiMessages));
-                }
+                Prompt ollamaPrompt = new Prompt(aiMessages, OllamaChatOptions.builder().model(ollamaModel).build());
+                aiReply = callTextGatewayWithCooldown(ollamaPrompt);
             }
         } catch (Exception ex) {
             refundAiChatCredit(currentUserId, sessionId, currentMessageCount);
+            if (ex instanceof AiProviderException aiEx) {
+                throw aiEx;
+            }
             throw new AiProviderException("AI chat unavailable; please retry", ex);
         }
 
+        aiReply = stripEmojis(aiReply);
         if (aiReply == null || aiReply.isBlank()) {
             refundAiChatCredit(currentUserId, sessionId, currentMessageCount);
             throw new AiProviderException("AI chat returned an empty response");
@@ -230,7 +232,7 @@ public class AiChatServiceImpl implements AiChatService {
 
         session.setMessageCount(session.getMessageCount() + 1);
         sessionRepository.save(session);
-        
+
         // Consume credit for this message (except the first automated image analysis message)
         if (session.getMessageCount() > 1) {
             String idempotencyKey = "AI_CHAT_MSG:" + session.getId() + ":" + session.getMessageCount();
@@ -239,9 +241,12 @@ public class AiChatServiceImpl implements AiChatService {
 
         return session.getId();
     }
-    
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void refundAiChatCredit(UUID userId, UUID sessionId, int messageCount) {
+        if (messageCount <= 1) {
+            return;
+        }
         String idempotencyKey = "AI_CHAT_MSG:" + sessionId + ":" + messageCount + "_REFUND";
         listingCreditService.refund(userId, CreditType.AI_CHAT, idempotencyKey);
     }
@@ -258,15 +263,16 @@ public class AiChatServiceImpl implements AiChatService {
                 2. Khi người dùng trò chuyện: Đóng vai trò chuyên viên tư vấn thu thập thông tin còn thiếu (thời gian đã sử dụng, tình trạng hoạt động thực tế, lỗi nếu có, phụ kiện kèm theo).
                 QUY TẮC BẮT BUỘC:
                 - Đi thẳng vào nội dung chính, KHÔNG bắt đầu câu trả lời bằng các câu dẫn dắt rườm rà như 'Dưới đây là...', 'Đây là...', 'Sau đây là...', 'Vâng, đây là...'.
-                - Ngôn ngữ: Tiếng Việt tự nhiên, súc tích, lịch sự.
+                - Ngôn ngữ: Tiếng Việt tự nhiên, súc tích, lịch sự. TUYỆT ĐỐI KHÔNG sử dụng emoji hay icon trang trí.
                 - Phạm vi: Chỉ phục vụ các mặt hàng đồ gia dụng cũ, thiết bị đời sống; từ chối lịch sự nếu người dùng hỏi về các chủ đề khác hoặc hàng cấm.
                 - KHÔNG BAO GIỜ đưa ra mức giá hoặc khoảng giá cụ thể trong cuộc trò chuyện. Khi người dùng muốn định giá, hãy hướng dẫn họ sử dụng chức năng 'Định giá AI' riêng trên bài đăng sau khi hoàn tất mô tả.
                 """;
         aiMessages.add(new SystemMessage(systemPromptText));
 
         List<AiChatMessage> history = messageRepository.findBySessionIdOrderBySentAtAsc(sessionId);
+        boolean hasMedia = media != null && !media.isEmpty();
         if (history.isEmpty()) {
-            if (media != null && !media.isEmpty()) {
+            if (hasMedia) {
                 aiMessages.add(UserMessage.builder().text(userMessage).media(media).build());
             } else {
                 aiMessages.add(new UserMessage(userMessage));
@@ -274,14 +280,21 @@ public class AiChatServiceImpl implements AiChatService {
         } else {
             for (int i = 0; i < history.size(); i++) {
                 AiChatMessage msg = history.get(i);
+                boolean isActiveVisionMessage = i == history.size() - 1 && hasMedia;
                 if ("USER".equals(msg.getRole())) {
-                    if (i == history.size() - 1 && media != null && !media.isEmpty()) {
+                    if (isActiveVisionMessage) {
                         aiMessages.add(UserMessage.builder().text(msg.getMessageContent()).media(media).build());
                     } else {
-                        aiMessages.add(new UserMessage(msg.getMessageContent()));
+                        String sanitized = sanitizePersistedMessageForContext("USER", msg.getMessageContent());
+                        if (!sanitized.isBlank()) {
+                            aiMessages.add(new UserMessage(sanitized));
+                        }
                     }
                 } else {
-                    aiMessages.add(new AssistantMessage(msg.getMessageContent()));
+                    String sanitized = sanitizePersistedMessageForContext("ASSISTANT", msg.getMessageContent());
+                    if (!sanitized.isBlank()) {
+                        aiMessages.add(new AssistantMessage(sanitized));
+                    }
                 }
             }
         }
@@ -301,15 +314,15 @@ public class AiChatServiceImpl implements AiChatService {
     }
 
     @Transactional(readOnly = true)
-    protected void validateFinalizeRequest(UUID sessionId, UUID currentUserId) {
+    protected List<AiChatMessage> loadValidatedHistoryForFinalize(UUID sessionId, UUID currentUserId) {
         userRepository.findById(currentUserId).orElseThrow(() -> new NotFoundException("User not found"));
         AiChatSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new NotFoundException("Session not found"));
         requireSessionOwner(session, currentUserId);
-        // Removed requirePostOwner since it's already checked in PostServiceImpl
         if (session.isCompleted()) {
             throw new ConflictException("Session is already completed");
         }
+        return messageRepository.findBySessionIdOrderBySentAtAsc(session.getId());
     }
 
     @Override
@@ -324,31 +337,32 @@ public class AiChatServiceImpl implements AiChatService {
         AiChatSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new NotFoundException("Session not found"));
         requireSessionOwner(session, currentUserId);
-        
+
         session.setCompleted(false);
         sessionRepository.save(session);
     }
 
     @Override
     public PostFinalizeResponse finalizeChat(UUID sessionId, UUID currentUserId) {
-        validateFinalizeRequest(sessionId, currentUserId);
-        
-        AiChatSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new NotFoundException("Session not found"));
+        List<AiChatMessage> history = loadValidatedHistoryForFinalize(sessionId, currentUserId);
 
         List<Message> aiMessages = new ArrayList<>();
         aiMessages.add(new SystemMessage("""
                 Bạn là chuyên gia biên tập mô tả sản phẩm cho sàn thương mại điện tử đồ gia dụng cũ SecondLife.
-                Nhiệm vụ của bạn là tổng hợp toàn bộ thông tin đã trao đổi thành một bài viết mô tả sản phẩm hoàn chỉnh, trung thực, chuyên nghiệp và hấp dẫn người mua.
+                Nhiệm vụ của bạn là tổng hợp toàn bộ thông tin đã trao đổi thành một bài viết mô tả sản phẩm hoàn chỉnh, trung thực, chuyên nghiệp và hấp dẫn người mua. TUYỆT ĐỐI KHÔNG sử dụng bất kỳ biểu tượng cảm xúc (emoji), ký hiệu trang trí hay icon nào trong bài viết.
                 """));
 
-        // Load history
-        List<AiChatMessage> history = messageRepository.findBySessionIdOrderBySentAtAsc(session.getId());
         for (AiChatMessage msg : history) {
             if ("USER".equals(msg.getRole())) {
-                aiMessages.add(new UserMessage(msg.getMessageContent()));
+                String sanitized = sanitizePersistedMessageForContext("USER", msg.getMessageContent());
+                if (!sanitized.isBlank()) {
+                    aiMessages.add(new UserMessage(sanitized));
+                }
             } else {
-                aiMessages.add(new AssistantMessage(msg.getMessageContent()));
+                String sanitized = sanitizePersistedMessageForContext("ASSISTANT", msg.getMessageContent());
+                if (!sanitized.isBlank()) {
+                    aiMessages.add(new AssistantMessage(sanitized));
+                }
             }
         }
 
@@ -364,21 +378,21 @@ public class AiChatServiceImpl implements AiChatService {
                      * 'Nồi Cơm Điện BlueStone 1.8L - Hàng Lướt Like New 99%'
                      * 'Bàn Ăn Hòa Phát Gỗ Tự Nhiên - Mới 99% Chắc Chắn Bền Đẹp'
                      * 'Máy Giặt Electrolux Inverter 8.5kg Cửa Ngang - Vắt Êm Chạy Tốt'
-                   - Tuyệt đối KHÔNG viết tiêu đề chung chung sơ sài như 'BlueStone Nồi cơm điện' hay 'Bàn ăn'.
+                   - Tuyệt đối KHÔNG viết tiêu đề chung chung sơ sài như 'BlueStone Nồi cơm điện' hay 'Bàn ăn', và KHÔNG chứa bất kỳ emoji/icon nào.
 
                 2. ĐOẠN VĂN MÔ TẢ (BẮT BUỘC đặt trong cặp thẻ <desc> và </desc>):
                    - Tóm tắt tình trạng chung, ngoại quan và điểm nổi bật của sản phẩm.
                    - Chi tiết thông số và hiện trạng thực tế (độ mới, trầy xước nếu có, phụ kiện đi kèm).
                    - Lý do thanh lý hoặc lưu ý sử dụng cho người mua.
                    - Diễn đạt bằng lời văn tự nhiên kết hợp các gạch đầu dòng rõ ràng, không sao chép dạng hỏi-đáp thô sơ.
-                   - Có thể dùng Markdown (in đậm, xuống dòng, gạch đầu dòng).
+                   - Có thể dùng Markdown (in đậm, xuống dòng, gạch đầu dòng), nhưng TUYỆT ĐỐI KHÔNG dùng bất kỳ emoji, biểu tượng cảm xúc hay icon trang trí nào (ví dụ: không dùng sao, bánh răng, bóng đèn, lửa, tích xanh...).
 
                 3. TUYỆT ĐỐI không viết gì thêm bên ngoài các cặp thẻ này.
                 """;
         aiMessages.add(new UserMessage(finalizePrompt));
 
         Prompt prompt = new Prompt(aiMessages, OllamaChatOptions.builder().model(ollamaModel).build());
-        String rawOutput = call(ollamaChatGateway, prompt);
+        String rawOutput = callTextGatewayWithCooldown(prompt);
         String finalTitle = null;
         String finalDescription = null;
 
@@ -388,7 +402,7 @@ public class AiChatServiceImpl implements AiChatService {
             int tStart = rawOutput.indexOf("<title>");
             int tEnd = rawOutput.lastIndexOf("</title>");
             if (tStart != -1 && tEnd != -1 && tEnd > tStart + 7) {
-                finalTitle = rawOutput.substring(tStart + 7, tEnd).trim();
+                finalTitle = stripEmojis(rawOutput.substring(tStart + 7, tEnd).trim());
             }
 
             int dStart = rawOutput.indexOf("<desc>");
@@ -406,16 +420,16 @@ public class AiChatServiceImpl implements AiChatService {
                         .replaceFirst("\\s*```$", "").trim();
             }
 
-            finalDescription = finalDescription.replaceAll(
-                    "(?i)^(Dưới đây là|Đây là|Sau đây là|Chắc chắn rồi|Vâng|Dạ|Tôi đã|Vâng, đây là)[\\s\\S]*?:\\s*", "").trim();
+            finalDescription = stripEmojis(finalDescription.replaceAll(
+                    "(?i)^(Dưới đây là|Đây là|Sau đây là|Chắc chắn rồi|Vâng|Dạ|Tôi đã|Vâng, đây là)[\\s\\S]*?:\\s*", "").trim());
         }
 
         if (finalDescription == null || finalDescription.isBlank() || finalDescription.length() > 10000)
             throw new AiProviderException("AI description is empty or too long");
-            
+
         return saveFinalizeResult(sessionId, finalTitle, finalDescription);
     }
-    
+
     @Transactional
     protected PostFinalizeResponse saveFinalizeResult(UUID sessionId, String finalTitle, String finalDescription) {
         AiChatSession session = sessionRepository.findById(sessionId)
@@ -425,33 +439,87 @@ public class AiChatServiceImpl implements AiChatService {
         return new PostFinalizeResponse(finalTitle, finalDescription, null);
     }
 
+    public static String stripEmojis(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        return text
+                .replaceAll("[\\x{1F000}-\\x{1FFFF}\\x{2600}-\\x{27BF}\\x{2300}-\\x{23FF}\\x{2B00}-\\x{2BFF}\\uFE0F\\u200D\\u20E3]", "")
+                .replaceAll("(?m)(^|\\s)\\*\\*[ \\t]+", "$1**")
+                .replaceAll("(?m)^([ \\t]*[-*+•]\\s+)[ \\t]+", "$1")
+                .replaceAll("(?m)^[ \\t]+(?![-*+•\\d])", "")
+                .replaceAll("[ \\t]{2,}", " ")
+                .trim();
+    }
+
+    static String sanitizePersistedMessageForContext(String role, String content) {
+        if (content == null) {
+            return "";
+        }
+        if ("USER".equals(role)) {
+            int auditIdx = content.indexOf(VISION_AUDIT_MARKER);
+            if (auditIdx > 0) {
+                return content.substring(0, auditIdx).trim();
+            }
+            return content.trim();
+        }
+        return content.replaceFirst("^\\[HỢP_LỆ\\]\\s*", "").trim();
+    }
+
+    private boolean isOllamaInCooldown() {
+        return System.currentTimeMillis() < ollamaCooldownUntilEpochMs;
+    }
+
+    private void markOllamaFailed() {
+        ollamaCooldownUntilEpochMs = System.currentTimeMillis() + OLLAMA_FAILURE_COOLDOWN_MS;
+    }
+
+    private String callTextGatewayWithCooldown(Prompt ollamaPrompt) {
+        Prompt googlePrompt = new Prompt(ollamaPrompt.getInstructions());
+
+        if (isOllamaInCooldown() && googleChatGateway != null) {
+            try {
+                return googleChatGateway.complete(googlePrompt);
+            } catch (Exception geminiEx) {
+                log.warn("Google Gemini failed while Ollama in cooldown; retrying Ollama once: {}", geminiEx.getMessage());
+                try {
+                    String ollamaReply = ollamaChatGateway.complete(ollamaPrompt);
+                    ollamaCooldownUntilEpochMs = 0L;
+                    return ollamaReply;
+                } catch (Exception ollamaEx) {
+                    markOllamaFailed();
+                    throw new AiProviderException("AI chat unavailable; please retry", geminiEx);
+                }
+            }
+        }
+
+        try {
+            String ollamaReply = ollamaChatGateway.complete(ollamaPrompt);
+            ollamaCooldownUntilEpochMs = 0L;
+            return ollamaReply;
+        } catch (Exception ex) {
+            markOllamaFailed();
+            if (googleChatGateway != null) {
+                try {
+                    log.warn("Ollama call failed, falling back to Google Gemini (cooldown 60s): {}", ex.getMessage());
+                    return googleChatGateway.complete(googlePrompt);
+                } catch (Exception geminiEx) {
+                    log.error("Google Gemini fallback also failed: {}", geminiEx.getMessage(), geminiEx);
+                }
+            }
+            throw new AiProviderException("AI chat unavailable; please retry", ex);
+        }
+    }
+
     private static void requirePositive(String property, long value) {
         if (value <= 0) {
             throw new IllegalArgumentException(property + " must be positive");
         }
-
     }
 
     private void requireSessionOwner(AiChatSession session, UUID userId) {
         if (session.getUser() == null || !userId.equals(session.getUser().getId())) {
             throw new ForbiddenException("This chat session belongs to another user");
-        }
-    }
-
-    private String call(AiChatGateway gateway, Prompt prompt) {
-        try { 
-            return gateway.complete(prompt);
-        } catch (Exception ex) { 
-            if (gateway != googleChatGateway && googleChatGateway != null) {
-                try {
-                    log.warn("Ollama call failed in finalizeChat, falling back to Google Gemini: {}", ex.getMessage());
-                    Prompt fallbackPrompt = new Prompt(prompt.getInstructions());
-                    return googleChatGateway.complete(fallbackPrompt);
-                } catch (Exception geminiEx) {
-                    log.error("Google Gemini fallback also failed: {}", geminiEx.getMessage(), geminiEx);
-                }
-            }
-            throw new AiProviderException("AI chat unavailable; please retry", ex); 
         }
     }
 

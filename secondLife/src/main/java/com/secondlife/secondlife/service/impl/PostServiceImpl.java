@@ -13,6 +13,7 @@ import com.secondlife.secondlife.dto.response.PostDto;
 import com.secondlife.secondlife.dto.response.PostFinalizeResponse;
 import com.secondlife.secondlife.dto.response.PostInitResponse;
 import com.secondlife.secondlife.dto.response.PostSubmitResponse;
+import com.secondlife.secondlife.dto.response.ResolvedQuestionTemplateResponse;
 import com.secondlife.secondlife.entity.AiChatMessage;
 import com.secondlife.secondlife.entity.AiChatSession;
 import com.secondlife.secondlife.entity.Category;
@@ -20,7 +21,6 @@ import com.secondlife.secondlife.entity.CategoryQuestionTemplate;
 import com.secondlife.secondlife.entity.Item;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.PostImage;
-import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.CreditType;
 import com.secondlife.secondlife.exception.AiProviderException;
 import com.secondlife.secondlife.exception.BadRequestException;
@@ -38,6 +38,7 @@ import com.secondlife.secondlife.repository.ItemRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.AiChatService;
+import com.secondlife.secondlife.service.CategoryTemplateService;
 import com.secondlife.secondlife.service.CloudinaryService;
 import com.secondlife.secondlife.service.ListingAccessService;
 import com.secondlife.secondlife.service.ListingCreditService;
@@ -70,6 +71,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -78,172 +80,102 @@ import java.util.stream.Collectors;
 @Service
 public class PostServiceImpl implements PostService {
     private final PostMapper postMapper;
-
     private final BigDecimal inspectionFee;
-
     private final BigDecimal shippingFee;
-
     private final int maxUnfinishedDrafts;
-
     private final long maxImageBytes;
-
     private final int minImages;
-
     private final int maxImages;
-
     private final ListingImageSimilarity imageSimilarity;
     private final ListingFingerprint listingFingerprint;
-
     private final PostRepository postRepository;
-
     private final UserRepository userRepository;
-
     private final ListingCreditService listingCredits;
-
     private final ListingAccessService listingAccess;
-
     private final AiChatService aiChatService;
-
+    private final CategoryTemplateService categoryTemplateService;
     private final CategoryQuestionTemplateRepository templateRepository;
-
     private final AiChatSessionRepository sessionRepository;
-
     private final CategoryRepository categoryRepository;
-
     private final ItemRepository itemRepository;
-
     private final AiChatGateway chatGateway;
-
     private final CloudinaryService cloudinaryService;
-
     private final InspectionOrderRepository inspectionOrderRepository;
-
     private final AiChatGateway googleChatGateway;
-
     private final AiChatMessageRepository chatMessageRepository;
-
     private final ListingPublicationService publication;
-
     private final ListingReviewService reviews;
     private final TransactionTemplate transactionTemplate;
 
-
     public PostServiceImpl(PostRepository postRepository,
-
                            UserRepository userRepository,
-
                            ListingCreditService listingCredits,
-
                            ListingAccessService listingAccess,
-
                            AiChatService aiChatService,
-
+                           CategoryTemplateService categoryTemplateService,
                            CategoryQuestionTemplateRepository templateRepository,
-
                            AiChatSessionRepository sessionRepository,
-
                            AiChatMessageRepository chatMessageRepository,
-
                            CategoryRepository categoryRepository,
-
                            ItemRepository itemRepository,
-
                            @Qualifier("defaultChatGateway") AiChatGateway chatGateway,
-
                            CloudinaryService cloudinaryService,
-
                            InspectionOrderRepository inspectionOrderRepository,
-
-                           @Qualifier("googleChatGateway")
-
-                           AiChatGateway googleChatGateway,
-
+                           @Qualifier("googleChatGateway") AiChatGateway googleChatGateway,
                            ListingPublicationService publication,
-
                            ListingReviewService reviews,
-
                            ListingImageSimilarity imageSimilarity,
                            ListingFingerprint listingFingerprint,
-
                            @Value("${app.inspection.inspection-fee}") BigDecimal inspectionFee,
-
                            @Value("${app.inspection.shipping-fee}") BigDecimal shippingFee,
-
                            @Value("${app.listing.max-unfinished-drafts}") int maxUnfinishedDrafts,
-
                            @Value("${app.listing.max-image-bytes}") long maxImageBytes,
-
                            @Value("${app.listing.min-images}") int minImages,
-
-                           @Value("${app.listing.max-images}") int maxImages, PostMapper postMapper,
+                           @Value("${app.listing.max-images}") int maxImages,
+                           PostMapper postMapper,
                            PlatformTransactionManager transactions) {
         this.transactionTemplate = transactions != null ? new TransactionTemplate(transactions) : null;
         this.postMapper = postMapper;
 
         if (inspectionFee.signum() < 0 || shippingFee.signum() < 0)
-
             throw new IllegalArgumentException("Inspection and shipping fees must be non-negative");
 
         if (maxUnfinishedDrafts <= 0 || maxImageBytes <= 0)
-
             throw new IllegalArgumentException("Listing draft and image byte limits must be positive");
 
         if (minImages <= 0 || maxImages < minImages)
-
             throw new IllegalArgumentException("Listing image bounds require a positive minimum and maximum at least the minimum");
 
         this.postRepository = postRepository;
-
         this.userRepository = userRepository;
-
         this.listingCredits = listingCredits;
-
         this.listingAccess = listingAccess;
-
         this.aiChatService = aiChatService;
-
+        this.categoryTemplateService = categoryTemplateService;
         this.templateRepository = templateRepository;
-
         this.sessionRepository = sessionRepository;
-
         this.categoryRepository = categoryRepository;
-
         this.itemRepository = itemRepository;
-
         this.chatGateway = chatGateway;
-
         this.cloudinaryService = cloudinaryService;
-
         this.inspectionOrderRepository = inspectionOrderRepository;
-
         this.googleChatGateway = googleChatGateway;
-
         this.chatMessageRepository = chatMessageRepository;
-
         this.publication = publication;
-
         this.reviews = reviews;
-
         this.imageSimilarity = imageSimilarity;
         this.listingFingerprint = listingFingerprint;
-
         this.inspectionFee = inspectionFee;
-
         this.shippingFee = shippingFee;
-
         this.maxUnfinishedDrafts = maxUnfinishedDrafts;
-
         this.maxImageBytes = maxImageBytes;
-
         this.minImages = minImages;
-
         this.maxImages = maxImages;
-
     }
 
     @Override
     public PostInitResponse initPost(UUID userId, PostInitRequest request) {
-        User user = userRepository.findById(userId)
+        userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
         if (request.categoryId() == null || !categoryRepository.existsById(request.categoryId()))
@@ -283,20 +215,7 @@ public class PostServiceImpl implements PostService {
             }
         }
 
-        Post post;
-        if (transactionTemplate != null) {
-            post = transactionTemplate.execute(tx -> {
-                Post p = new Post();
-                p.setUser(userRepository.getReferenceById(userId));
-                p.setCategoryId(request.categoryId());
-                p.setItemId(request.itemId());
-                p.setStatus("DRAFT");
-                p.getImages().addAll(postImages);
-                p.setImageUrl(postImages.getFirst().getImageUrl());
-                p.setImageFingerprint(postImages.getFirst().getImageFingerprint());
-                return postRepository.save(p);
-            });
-        } else {
+        Post post = executeInTransaction(() -> {
             Post p = new Post();
             p.setUser(userRepository.getReferenceById(userId));
             p.setCategoryId(request.categoryId());
@@ -305,16 +224,8 @@ public class PostServiceImpl implements PostService {
             p.getImages().addAll(postImages);
             p.setImageUrl(postImages.getFirst().getImageUrl());
             p.setImageFingerprint(postImages.getFirst().getImageFingerprint());
-            post = postRepository.save(p);
-        }
-
-        // Extract names early
-        final String categoryName = categoryRepository.findById(request.categoryId())
-                .map(Category::getName).orElse("Không xác định");
-        final String itemName = request.itemId() != null ?
-                itemRepository.findById(request.itemId())
-                    .map(Item::getName).orElse("Không xác định")
-                : "Không xác định";
+            return postRepository.save(p);
+        });
 
         boolean isAiMode = request.mode() == null || !"manual".equalsIgnoreCase(request.mode().trim());
 
@@ -324,8 +235,6 @@ public class PostServiceImpl implements PostService {
             listingCredits.consumeImmediately(userId, CreditType.AI_CHAT, chatCreditKey);
 
             // 3. Call AI to analyze image
-
-            // Prompt for AI Vision: Check match between images and selected category/item/brand
             String selectedCategoryName = categoryRepository.findById(request.categoryId()).orElseThrow().getName();
             String selectedItemName = request.itemId() == null ? "Không xác định" : itemRepository.findById(request.itemId()).orElseThrow().getName();
             String declaredBrand = request.brand() != null && !request.brand().isBlank() ? request.brand().trim() : null;
@@ -383,7 +292,20 @@ public class PostServiceImpl implements PostService {
             AiChatRequest aiRequest = new AiChatRequest(
                     null, post.getId(), visionCheckPrompt.toString(), request.images());
 
-            AiChatResponse aiResponse = aiChatService.processChat(aiRequest, userId);
+            AiChatResponse aiResponse;
+            try {
+                aiResponse = aiChatService.processChat(aiRequest, userId);
+            } catch (RuntimeException ex) {
+                log.warn("Post init AI vision scan failed for postId={}; refunding AI_CHAT credit and deleting orphan draft: {}",
+                        post.getId(), ex.getMessage());
+                final UUID failedPostId = post.getId();
+                final String refundKey = chatCreditKey + ":REFUND";
+                runInTransaction(() -> {
+                    listingCredits.refund(userId, CreditType.AI_CHAT, refundKey);
+                    postRepository.deleteById(failedPostId);
+                });
+                throw ex;
+            }
             String aiReply = aiResponse.reply() != null ? aiResponse.reply().trim() : "";
 
             // 1. Kiểm tra không khớp loại sản phẩm
@@ -416,11 +338,7 @@ public class PostServiceImpl implements PostService {
                         .trim();
                 log.warn("Post init blocked: Image does not match category/item. Selected: {} / {}, Reason: {}",
                         selectedCategoryName, selectedItemName, cleanReason);
-                if (transactionTemplate != null) {
-                    transactionTemplate.executeWithoutResult(tx -> postRepository.delete(post));
-                } else {
-                    postRepository.delete(post);
-                }
+                runInTransaction(() -> postRepository.delete(post));
                 throw new BadRequestException("HÌNH ẢNH KHÔNG KHỚP LOẠI SẢN PHẨM: " + cleanReason);
             }
 
@@ -436,11 +354,7 @@ public class PostServiceImpl implements PostService {
                         .trim();
                 log.warn("Post init blocked: Image does not match brand. Declared: {}, Detected: {}, Reason: {}",
                         declaredBrand, detectedBrand, cleanReason);
-                if (transactionTemplate != null) {
-                    transactionTemplate.executeWithoutResult(tx -> postRepository.delete(post));
-                } else {
-                    postRepository.delete(post);
-                }
+                runInTransaction(() -> postRepository.delete(post));
                 String brandPrefix = detectedBrand.isEmpty() ? "" : "[DETECTED_BRAND:" + detectedBrand + "] ";
                 throw new BadRequestException("HÌNH ẢNH KHÔNG KHỚP THƯƠNG HIỆU: " + brandPrefix + cleanReason);
             }
@@ -448,121 +362,30 @@ public class PostServiceImpl implements PostService {
             // Nếu hợp lệ: làm sạch tiền tố [HỢP_LỆ]
             String cleanDescription = aiReply.replaceFirst("^\\[HỢP_LỆ\\]\\s*", "").trim();
 
-            // 4. Fetch or Generate Template:
-            CategoryQuestionTemplate template = templateRepository
-                    .findByCategoryIdAndItemId(request.categoryId(), request.itemId())
-                    .orElse(null);
-
-            boolean isLegacyTemplate = template != null && template.getTemplateText() != null && (
-                    template.getTemplateText().toLowerCase().contains("thời gian bạn mua") ||
-                    template.getTemplateText().toLowerCase().contains("thời gian mua") ||
-                    template.getTemplateText().toLowerCase().contains("thời gian đã sử dụng") ||
-                    template.getTemplateText().toLowerCase().contains("thời gian sử dụng") ||
-                    template.getTemplateText().toLowerCase().contains("giá mua mới") ||
-                    template.getTemplateText().toLowerCase().contains("giá gốc") ||
-                    template.getTemplateText().toLowerCase().contains("năm bạn mua") ||
-                    template.getTemplateText().toLowerCase().contains("mua từ khi nào") ||
-                    !template.getTemplateText().contains("\n") ||
-                    template.getTemplateText().lines().count() <= 1
+            // 4. Resolve official template or generate temporary specialized AI template (+ submit Admin proposal):
+            ResolvedQuestionTemplateResponse resolvedTemplate = categoryTemplateService.resolveOrGenerateForListing(
+                    request.categoryId(),
+                    request.itemId(),
+                    userId
             );
+            String templateText = resolvedTemplate.templateText() != null ? resolvedTemplate.templateText() : "";
+            final UUID officialTemplateId = resolvedTemplate.officialTemplateId();
 
-            if (template == null || isLegacyTemplate) {
-                String promptText = String.format("""
-                        Bạn là chuyên gia thẩm định đồ gia dụng cũ hàng đầu tại thị trường Việt Nam.
-                        Hãy tạo một bộ câu hỏi khảo sát ngắn gọn gồm đúng 4 câu hỏi bằng tiếng Việt dành riêng cho loại sản phẩm '%s' (thuộc danh mục '%s').
-                        Bộ câu hỏi này phục vụ mục đích: Giúp người bán cung cấp đầy đủ thông tin thực tế để AI ĐỊNH GIÁ CHÍNH XÁC NHẤT và TỔNG HỢP MÔ TẢ ĐĂNG BÁN.
-
-                        LƯU Ý CỰC KỲ QUAN TRỌNG:
-                        Người bán ĐÃ CUNG CẤP CÁC THÔNG TIN sau ở bước trước:
-                        - Tên danh mục và Loại sản phẩm
-                        - Thương hiệu / Hãng sản xuất
-                        - Năm mua
-                        - Giá sản phẩm lúc mua (VNĐ)
-                        TUYỆT ĐỐI KHÔNG ĐƯỢC HỎI LẠI bất kỳ thông tin nào ở trên (không hỏi năm mua, không hỏi thời gian mua, không hỏi giá mua mới/giá gốc, không hỏi thương hiệu/hãng).
-
-                        CẤU TRÚC ĐÚNG 4 CÂU HỎI BẮT BUỘC:
-                        PHẦN 1: CÁC CÂU HỎI CỐT LÕI VỀ HIỆN TRẠNG SẢN PHẨM (PHỤC VỤ ĐỊNH GIÁ KHẤU HAO):
-                        1. Tần suất và mức độ sử dụng thực tế của bạn? (Phân biệt hàng lướt like-new mới dùng vài lần cất hộp với hàng dùng thường xuyên hằng ngày).
-                        2. Hiện trạng ngoại quan và phụ kiện đi kèm? (Độ mới 99%% hay có trầy xước, cấn móp; fullbox đủ phụ kiện hay thiếu phụ kiện gì).
-                        3. Tình trạng hoạt động kỹ thuật và bảo hành hãng? (Vận hành nguyên bản chạy êm chưa sửa chữa, có lỗi chức năng nào không, còn bảo hành chính hãng không).
-
-                        PHẦN 2: CÂU HỎI BỔ SUNG CHI TIẾT ĐẶC THÙ CHO RIÊNG LOẠI '%s':
-                        4. Thông số kỹ thuật, dung tích, công suất hoặc phiên bản đặc thù của '%s'? (Giúp định vị chính xác phân khúc máy).
-
-                        YÊU CẦU ĐẶC BIỆT VỀ CÂU TRẢ LỜI GỢI Ý (RẤT QUAN TRỌNG):
-                        - Mỗi câu hỏi BẮT BUỘC phải đi kèm phần gợi ý trả lời trong ngoặc đơn dạng: `(Ví dụ: gợi ý 1, gợi ý 2, gợi ý 3, gợi ý 4)`.
-                        - ĐẶC BIỆT đối với loại sản phẩm '%s', các gợi ý trả lời ở câu 3 (hoạt động/kỹ thuật) và câu 4 (thông số kỹ thuật) PHẢI ĐƯỢC THIẾT KẾ RIÊNG BIỆT, ĐÚNG BẢN CHẤT KỸ THUẬT VÀ PHÂN KHÚC THỰC TẾ của '%s' tại Việt Nam:
-                          * Ví dụ nếu là Máy giặt: gợi ý câu 4 về khối lượng giặt kg, cửa trước/cửa trên, Inverter (Ví dụ: 8.5kg cửa trước Inverter, 7kg cửa trên, 9kg cửa ngang, 10kg giặt sấy); gợi ý câu 3 về vắt êm không rung lắc, motor chạy êm.
-                          * Ví dụ nếu là Tủ lạnh: gợi ý câu 4 về dung tích lít, số cánh, Inverter (Ví dụ: mini 90L, 180-250L 2 cánh Inverter, trên 400L Side-by-side); gợi ý câu 3 về làm lạnh sâu làm đá nhanh, không đóng tuyết.
-                          * Ví dụ nếu là Nồi chiên không dầu: gợi ý câu 4 về dung tích lít, bảng điều khiển (Ví dụ: 5.5 lít cơ núm vặn, 8 lít cảm ứng có kính nhìn, 12 lít dạng lò nướng); gợi ý câu 3 về lòng nồi chống dính còn nguyên, thanh nhiệt nóng nhanh.
-                          * Ví dụ nếu là Bếp từ/bếp điện: gợi ý câu 4 về bếp đơn/đôi, công suất (Ví dụ: bếp đơn 2000W, bếp đôi âm 4000W, bếp hồng ngoại đơn); gợi ý câu 3 về mặt kính nguyên vẹn không nứt vỡ, quạt tản nhiệt êm.
-                          * Tương tự với mọi loại sản phẩm '%s' khác: Hãy tự suy luận thông số cốt lõi và gợi ý sát thực tế nhất cho thiết bị đó.
-
-                        ĐỊNH DẠNG ĐẦU RA BẮT BUỘC:
-                        - Mỗi câu hỏi nằm trên một dòng riêng biệt theo đúng cú pháp:
-                          **[Tên câu hỏi]?** (Ví dụ: gợi ý 1, gợi ý 2, gợi ý 3, gợi ý 4)
-                        - Bắt buộc phải có từ 'Ví dụ:' trong ngoặc đơn, các gợi ý cách nhau bằng dấu phẩy.
-                        - KHÔNG viết thêm bất kỳ lời chào, dẫn dắt hay kết luận nào. CHỈ trả về đúng 4 dòng câu hỏi.
-                        """,
-                        itemName, categoryName, itemName, itemName, itemName, itemName, itemName);
-
-                String generatedTemplate = chatGateway.complete(promptText);
-                final String genText = generatedTemplate;
-
-                if (transactionTemplate != null) {
-                    template = transactionTemplate.execute(tx -> {
-                        CategoryQuestionTemplate t = templateRepository
-                                .findByCategoryIdAndItemId(request.categoryId(), request.itemId())
-                                .orElse(null);
-                        if (t == null) {
-                            t = new CategoryQuestionTemplate();
-                            t.setCategoryId(request.categoryId());
-                            t.setItemId(request.itemId());
-                        }
-                        t.setTemplateText(genText);
-                        return templateRepository.save(t);
-                    });
-                } else {
-                    if (template == null) {
-                        template = new CategoryQuestionTemplate();
-                        template.setCategoryId(request.categoryId());
-                        template.setItemId(request.itemId());
-                    }
-                    template.setTemplateText(genText);
-                    template = templateRepository.save(template);
-                }
-            }
-
-            String templateText = template != null ? template.getTemplateText() : "";
-            if (templateText != null && !templateText.isBlank()) {
-                // Chuẩn hóa xuống dòng nếu các câu hỏi bị dính liền trên 1 dòng
-                templateText = templateText.replaceAll("\\)\\s+(?=[A-ZÀ-Ỹ0-9\\*\\#])", ")\n");
-                templateText = templateText.replaceAll("\\?\\s+(?=[A-ZÀ-Ỹ0-9\\*\\#])", "?\n");
-            }
-
-            // Update post with session and template
-            final CategoryQuestionTemplate finalTemplate = template;
+            // Update post with session and official template (temporary proposals keep post.template = null)
             final UUID finalPostId = post.getId();
-            if (transactionTemplate != null) {
-                transactionTemplate.executeWithoutResult(tx -> {
-                    Post managed = postRepository.findById(finalPostId).orElse(post);
-                    AiChatSession session = sessionRepository.findById(aiResponse.sessionId()).orElse(null);
-                    managed.setAiDescription(cleanDescription);
-                    managed.setDescription(null);
-                    managed.setDescriptionAccepted(false);
-                    managed.setAiChatSession(session);
-                    managed.setTemplate(finalTemplate);
-                    postRepository.save(managed);
-                });
-            } else {
+            runInTransaction(() -> {
+                Post managed = postRepository.findById(finalPostId).orElse(post);
                 AiChatSession session = sessionRepository.findById(aiResponse.sessionId()).orElse(null);
-                post.setAiDescription(cleanDescription);
-                post.setDescription(null);
-                post.setDescriptionAccepted(false);
-                post.setAiChatSession(session);
-                post.setTemplate(finalTemplate);
-                postRepository.save(post);
-            }
+                CategoryQuestionTemplate officialTemplate = officialTemplateId != null
+                        ? templateRepository.findById(officialTemplateId).orElse(null)
+                        : null;
+                managed.setAiDescription(cleanDescription);
+                managed.setDescription(null);
+                managed.setDescriptionAccepted(false);
+                managed.setAiChatSession(session);
+                managed.setTemplate(officialTemplate);
+                postRepository.save(managed);
+            });
 
             return new PostInitResponse(
                     post.getId(),
@@ -571,19 +394,12 @@ public class PostServiceImpl implements PostService {
                     cleanDescription);
         } else {
             // Manual mode: No AI visual scan, no credit deducted
-            if (transactionTemplate != null) {
-                transactionTemplate.executeWithoutResult(tx -> {
-                    post.setAiDescription(null);
-                    post.setDescription(null);
-                    post.setDescriptionAccepted(false);
-                    postRepository.save(post);
-                });
-            } else {
+            runInTransaction(() -> {
                 post.setAiDescription(null);
                 post.setDescription(null);
                 post.setDescriptionAccepted(false);
                 postRepository.save(post);
-            }
+            });
 
             return new PostInitResponse(
                     post.getId(),
@@ -594,186 +410,226 @@ public class PostServiceImpl implements PostService {
     }
 
     @Override
-    @Transactional
     public PostFinalizeResponse finalizeChatAndDescription(UUID userId, UUID sessionId) {
         return finalizeChatAndDescription(userId, sessionId, null);
     }
 
     @Override
-    @Transactional
     public PostFinalizeResponse finalizeChatAndDescription(UUID userId,
-                                                                                                  UUID sessionId,
-                                                                                                  String message) {
-        AiChatSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new NotFoundException("Session not found"));
-        if (session.getUser() == null || !userId.equals(session.getUser().getId())) {
-            throw new ForbiddenException("This chat session belongs to another user");
-        }
-
-        Post post = session.getPostId() == null ? null : listingAccess.owned(userId, session.getPostId(), true);
-        if (post != null) listingAccess.requireDraft(post);
-
-        // Deduct 1 AI_CHAT credit each time seller clicks finalize
-        String idempotencyKey = "AI_FINALIZE:" + sessionId + ":" + UUID.randomUUID();
-        listingCredits.consume(userId, CreditType.AI_CHAT, idempotencyKey);
-
-        if (message != null && !message.isBlank()) {
-            AiChatMessage userDbMsg = new AiChatMessage();
-            userDbMsg.setSession(session);
-            userDbMsg.setRole("USER");
-            userDbMsg.setMessageContent(message.trim());
-            chatMessageRepository.save(userDbMsg);
-            session.setMessageCount(session.getMessageCount() + 1);
-            sessionRepository.save(session);
-        }
-
-        var finalizeResponse = aiChatService.finalizeChat(sessionId, userId);
-
-        if (post != null) {
-            post.setAiDescription(finalizeResponse.description());
-            post.setDescription(finalizeResponse.description());
-            post.setDescriptionAccepted(false);
-            if (finalizeResponse.title() != null && !finalizeResponse.title().isBlank()) {
-                post.setTitle(finalizeResponse.title());
+                                                           UUID sessionId,
+                                                           String message) {
+        // Phase 1: Validate, append optional message, and deduct credit in a short TX
+        SessionPrecheck precheck = executeInTransaction(() -> {
+            AiChatSession session = sessionRepository.findById(sessionId)
+                    .orElseThrow(() -> new NotFoundException("Session not found"));
+            if (session.getUser() == null || !userId.equals(session.getUser().getId())) {
+                throw new ForbiddenException("This chat session belongs to another user");
             }
-            postRepository.save(post);
+            if (session.isCompleted()) {
+                throw new ConflictException("Session is already completed");
+            }
+
+            UUID postId = session.getPostId();
+            if (postId != null) {
+                Post post = listingAccess.owned(userId, postId, false);
+                listingAccess.requireDraft(post);
+            }
+
+            String idempotencyKey = "AI_FINALIZE:" + sessionId + ":" + UUID.randomUUID();
+            listingCredits.consume(userId, CreditType.AI_CHAT, idempotencyKey);
+
+            if (message != null && !message.isBlank()) {
+                AiChatMessage userDbMsg = new AiChatMessage();
+                userDbMsg.setSession(session);
+                userDbMsg.setRole("USER");
+                userDbMsg.setMessageContent(message.trim());
+                chatMessageRepository.save(userDbMsg);
+                session.setMessageCount(session.getMessageCount() + 1);
+                sessionRepository.save(session);
+            }
+
+            return new SessionPrecheck(postId, idempotencyKey);
+        });
+
+        // Phase 2: Call external AI provider OUTSIDE any DB transaction / row lock
+        PostFinalizeResponse finalizeResponse;
+        try {
+            finalizeResponse = aiChatService.finalizeChat(sessionId, userId);
+        } catch (RuntimeException ex) {
+            runInTransaction(() -> listingCredits.refund(
+                    userId, CreditType.AI_CHAT, precheck.creditKey() + ":REFUND"));
+            throw ex;
+        }
+
+        // Phase 3: Persist generated description and title in a short TX
+        if (precheck.postId() != null) {
+            runInTransaction(() -> {
+                Post post = listingAccess.owned(userId, precheck.postId(), true);
+                listingAccess.requireDraft(post);
+                post.setAiDescription(finalizeResponse.description());
+                post.setDescription(finalizeResponse.description());
+                post.setDescriptionAccepted(false);
+                if (finalizeResponse.title() != null && !finalizeResponse.title().isBlank()) {
+                    post.setTitle(finalizeResponse.title());
+                }
+                postRepository.save(post);
+            });
         }
 
         return finalizeResponse;
     }
 
     @Override
-    @Transactional
     public PostFinalizeResponse regenerateChatAndDescription(UUID userId, UUID sessionId) {
         return regenerateChatAndDescription(userId, sessionId, null);
     }
 
     @Override
-    @Transactional
     public PostFinalizeResponse regenerateChatAndDescription(UUID userId,
-                                                                                                    UUID sessionId,
-                                                                                                    String message) {
-        AiChatSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new NotFoundException("Session not found"));
-        if (session.getUser() == null || !userId.equals(session.getUser().getId())) {
-            throw new ForbiddenException("This chat session belongs to another user");
-        }
-
-        Post post = session.getPostId() == null ? null : listingAccess.owned(userId, session.getPostId(), true);
-        if (post != null) listingAccess.requireDraft(post);
-
-        // Deduct 1 AI_CHAT credit each time seller clicks regenerate
-        String idempotencyKey = "AI_REGENERATE:" + sessionId + ":" + UUID.randomUUID();
-        listingCredits.consume(userId, CreditType.AI_CHAT, idempotencyKey);
-
-        if (message != null && !message.isBlank()) {
-            AiChatMessage userDbMsg = new AiChatMessage();
-            userDbMsg.setSession(session);
-            userDbMsg.setRole("USER");
-            userDbMsg.setMessageContent(message.trim());
-            chatMessageRepository.save(userDbMsg);
-            session.setMessageCount(session.getMessageCount() + 1);
-            sessionRepository.save(session);
-        }
-
-        var finalizeResponse = aiChatService.regenerateDescription(sessionId, userId);
-        if (post != null) {
-            post.setAiDescription(finalizeResponse.description());
-            post.setDescription(finalizeResponse.description());
-            post.setDescriptionAccepted(false);
-            if (finalizeResponse.title() != null && !finalizeResponse.title().isBlank()) {
-                post.setTitle(finalizeResponse.title());
+                                                             UUID sessionId,
+                                                             String message) {
+        // Phase 1: Validate, append optional message, and deduct credit in a short TX
+        SessionPrecheck precheck = executeInTransaction(() -> {
+            AiChatSession session = sessionRepository.findById(sessionId)
+                    .orElseThrow(() -> new NotFoundException("Session not found"));
+            if (session.getUser() == null || !userId.equals(session.getUser().getId())) {
+                throw new ForbiddenException("This chat session belongs to another user");
             }
-            postRepository.save(post);
+
+            UUID postId = session.getPostId();
+            if (postId != null) {
+                Post post = listingAccess.owned(userId, postId, false);
+                listingAccess.requireDraft(post);
+            }
+
+            String idempotencyKey = "AI_REGENERATE:" + sessionId + ":" + UUID.randomUUID();
+            listingCredits.consume(userId, CreditType.AI_CHAT, idempotencyKey);
+
+            if (message != null && !message.isBlank()) {
+                AiChatMessage userDbMsg = new AiChatMessage();
+                userDbMsg.setSession(session);
+                userDbMsg.setRole("USER");
+                userDbMsg.setMessageContent(message.trim());
+                chatMessageRepository.save(userDbMsg);
+                session.setMessageCount(session.getMessageCount() + 1);
+                sessionRepository.save(session);
+            }
+
+            return new SessionPrecheck(postId, idempotencyKey);
+        });
+
+        // Phase 2: Call external AI provider OUTSIDE any DB transaction / row lock
+        PostFinalizeResponse finalizeResponse;
+        try {
+            finalizeResponse = aiChatService.regenerateDescription(sessionId, userId);
+        } catch (RuntimeException ex) {
+            runInTransaction(() -> listingCredits.refund(
+                    userId, CreditType.AI_CHAT, precheck.creditKey() + ":REFUND"));
+            throw ex;
+        }
+
+        // Phase 3: Persist regenerated description and title in a short TX
+        if (precheck.postId() != null) {
+            runInTransaction(() -> {
+                Post post = listingAccess.owned(userId, precheck.postId(), true);
+                listingAccess.requireDraft(post);
+                post.setAiDescription(finalizeResponse.description());
+                post.setDescription(finalizeResponse.description());
+                post.setDescriptionAccepted(false);
+                if (finalizeResponse.title() != null && !finalizeResponse.title().isBlank()) {
+                    post.setTitle(finalizeResponse.title());
+                }
+                postRepository.save(post);
+            });
         }
 
         return finalizeResponse;
     }
 
     @Override
-    @Transactional
     public String suggestTitle(UUID userId, UUID postId, String context) {
-        Post post = listingAccess.owned(userId, postId, true);
-        listingAccess.requireDraft(post);
+        TitlePromptContext promptContext = executeInTransaction(() -> {
+            Post post = listingAccess.owned(userId, postId, false);
+            listingAccess.requireDraft(post);
 
-        // Deduct 1 AI_CHAT credit each time seller generates title with AI
-        String idempotencyKey = "AI_TITLE:" + postId + ":" + UUID.randomUUID();
-        listingCredits.consume(userId, CreditType.AI_CHAT, idempotencyKey);
+            String idempotencyKey = "AI_TITLE:" + postId + ":" + UUID.randomUUID();
+            listingCredits.consume(userId, CreditType.AI_CHAT, idempotencyKey);
 
-        final String categoryName = post.getCategoryId() != null ?
-                categoryRepository.findById(post.getCategoryId()).map(Category::getName).orElse("Không xác định")
-                : "Không xác định";
-        final String itemName = post.getItemId() != null ?
-                itemRepository.findById(post.getItemId()).map(Item::getName).orElse("Không xác định")
-                : "Không xác định";
-        final String description = post.getDescription() != null && !post.getDescription().isBlank() ? post.getDescription() : post.getAiDescription();
+            String categoryName = post.getCategoryId() != null
+                    ? categoryRepository.findById(post.getCategoryId()).map(Category::getName).orElse("Không xác định")
+                    : "Không xác định";
+            String itemName = post.getItemId() != null
+                    ? itemRepository.findById(post.getItemId()).map(Item::getName).orElse("Không xác định")
+                    : "Không xác định";
+            String description = post.getDescription() != null && !post.getDescription().isBlank()
+                    ? post.getDescription()
+                    : post.getAiDescription();
 
-        String promptText = String.format("""
-                Bạn là chuyên gia marketing và tối ưu bài đăng thương mại điện tử chuyên đồ gia dụng cũ tại Việt Nam.
-                Hãy tạo đúng 01 tiêu đề bài đăng bán hàng hấp dẫn, chuyên nghiệp và chuẩn SEO dựa trên thông tin sau:
-                - Danh mục: %s
-                - Loại sản phẩm: %s
-                - Thông tin phụ / Tình trạng: %s
-                - Mô tả tóm tắt: %s
+            String promptText = String.format("""
+                    Bạn là chuyên gia marketing và tối ưu bài đăng thương mại điện tử chuyên đồ gia dụng cũ tại Việt Nam.
+                    Hãy tạo đúng 01 tiêu đề bài đăng bán hàng hấp dẫn, chuyên nghiệp và chuẩn SEO dựa trên thông tin sau:
+                    - Danh mục: %s
+                    - Loại sản phẩm: %s
+                    - Thông tin phụ / Tình trạng: %s
+                    - Mô tả tóm tắt: %s
 
-                YÊU CẦU BẮT BUỘC:
-                - Độ dài tiêu đề: từ 35 đến 80 ký tự.
-                - Chứa tên thiết bị, thương hiệu (nếu có), phân khúc/tính năng nổi bật và độ mới thực tế (ví dụ: Like New 99%%, Đẹp 95%%, Chính Hãng...).
-                - CHỈ trả về đúng 01 dòng tiêu đề duy nhất. TUYỆT ĐỐI KHÔNG có dấu ngoặc kép, không có lời chào hay giải thích gì thêm.
-                """,
-                categoryName, itemName, context != null ? context : "", description != null ? description : "");
+                    YÊU CẦU BẮT BUỘC:
+                    - Độ dài tiêu đề: từ 35 đến 80 ký tự.
+                    - Chứa tên thiết bị, thương hiệu (nếu có), phân khúc/tính năng nổi bật và độ mới thực tế (ví dụ: Like New 99%%, Đẹp 95%%, Chính Hãng...).
+                    - CHỈ trả về đúng 01 dòng tiêu đề duy nhất. TUYỆT ĐỐI KHÔNG sử dụng emoji/icon, không có dấu ngoặc kép, không có lời chào hay giải thích gì thêm.
+                    """,
+                    categoryName, itemName, context != null ? context : "", description != null ? description : "");
+            return new TitlePromptContext(promptText, post.getTitle(), idempotencyKey);
+        });
 
-        String generatedTitle = chatGateway.complete(promptText);
-        if (generatedTitle != null && !generatedTitle.isBlank()) {
-            generatedTitle = generatedTitle.replaceAll("^[\\\"'\\*\\-\\s]+|[\\\"'\\*\\-\\s]+$", "").trim();
-            post.setTitle(generatedTitle);
-            postRepository.save(post);
-        } else {
-            generatedTitle = post.getTitle();
+        String generatedTitle;
+        try {
+            generatedTitle = chatGateway.complete(promptContext.promptText());
+        } catch (RuntimeException ex) {
+            runInTransaction(() -> listingCredits.refund(
+                    userId, CreditType.AI_CHAT, promptContext.creditKey() + ":REFUND"));
+            throw ex;
         }
-        return generatedTitle;
+
+        if (generatedTitle != null && !generatedTitle.isBlank()) {
+            final String cleanedTitle = AiChatServiceImpl.stripEmojis(generatedTitle).replaceAll("^[\\\"'\\*\\-\\s]+|[\\\"'\\*\\-\\s]+$", "").trim();
+            runInTransaction(() -> {
+                Post post = listingAccess.owned(userId, postId, true);
+                listingAccess.requireDraft(post);
+                post.setTitle(cleanedTitle);
+                postRepository.save(post);
+            });
+            return cleanedTitle;
+        }
+        return promptContext.fallbackTitle();
     }
 
     @Override
     @Transactional
     public PostSubmitResponse submitPost(UUID userId, UUID postId, PostSubmitRequest request) {
-
         Post post = listingAccess.owned(userId, postId, true);
 
         if (request.title() == null || request.title().isBlank() || request.title().length() > 255
-
                 || request.description() == null || request.description().isBlank() || request.description().length() > 10000
-
                 || request.price() == null || request.price().compareTo(BigDecimal.ONE) < 0
-
                 || request.price().scale() > 2 || request.price().precision() - request.price().scale() > 16)
-
             throw new BadRequestException("A valid title, description and positive VND price are required");
 
         // A retry after acceptance may return the prior outcome but cannot edit/re-up the listing.
-
         if (post.isListingCreditCharged() || "PENDING".equals(post.getStatus()) || "PENDING_INSPECTION".equals(post.getStatus())) {
-
             if (!("ACTIVE".equals(post.getStatus()) || "PENDING_INSPECTION".equals(post.getStatus()) || "PENDING".equals(post.getStatus()))
-
                     || !listingFingerprint.normalize(request.title()).equals(listingFingerprint.normalize(post.getTitle()))
-
                     || !listingFingerprint.normalize(request.description()).equals(listingFingerprint.normalize(post.getDescription()))
-
                     || request.price().compareTo(post.getPrice()) != 0)
-
                 throw new ConflictException("This post has already been submitted; re-up is not supported");
 
             return submitResponse(post);
-
         }
 
         listingAccess.requireDraft(post);
-
         listingAccess.requireVerifiedSeller(userId);
 
         if (!post.isDescriptionAccepted() || !listingFingerprint.normalize(request.description()).equals(listingFingerprint.normalize(post.getDescription())))
-
             throw new ConflictException("Accept the latest product description before submitting");
 
         if (post.getImageUrl() == null || post.getImageUrl().isBlank()) throw new BadRequestException("A product image is required");
@@ -781,504 +637,328 @@ public class PostServiceImpl implements PostService {
         publication.requirePublishAvailable(userId);
 
         post.setTitle(request.title().trim());
-
         post.setDescription(request.description().trim());
-
         post.setPrice(request.price());
-
         post.setShippingWeight(request.shippingWeight());
-
         post.setShippingLength(request.shippingLength());
-
         post.setShippingWidth(request.shippingWidth());
-
         post.setShippingHeight(request.shippingHeight());
 
         postRepository.lockForSubmission();
 
         var matches = new ArrayList<UUID>();
-
         for (Post other : postRepository.findByIdNotAndStatusIn(postId,
-
                 List.of("ACTIVE", "PENDING_INSPECTION", "PENDING"))) {
-
             boolean sameImage = !Collections.disjoint(post.getImageFingerprints(), other.getImageFingerprints());
-
             boolean visuallySimilar = post.getImages().stream().anyMatch(image -> other.getImages().stream().anyMatch(candidate ->
-
                     imageSimilarity.similar(image.getPerceptualFingerprint(), candidate.getPerceptualFingerprint())));
-
             boolean sameProduct = userId.equals(other.getUser().getId()) && Objects.equals(post.getCategoryId(), other.getCategoryId())
-
                     && Objects.equals(post.getItemId(), other.getItemId())
-
                     && listingFingerprint.normalize(post.getTitle()).equals(listingFingerprint.normalize(other.getTitle()))
-
                     && listingFingerprint.normalize(post.getDescription()).equals(listingFingerprint.normalize(other.getDescription()));
-
             if (sameImage || visuallySimilar || sameProduct) matches.add(other.getId());
-
         }
 
         post.setReviewReason(null);
-
         post.setDuplicatePostIds(null);
-
-        post.setReviewedBy(null); post.setReviewedAt(null);
+        post.setReviewedBy(null);
+        post.setReviewedAt(null);
 
         if (!matches.isEmpty()) {
-
             post.setStatus("PENDING");
-
             post.setRejectionReason(null);
-
             post.setReviewReason("Possible duplicate product images or listing content; STAFF review required");
-
             post.setDuplicatePostIds(matches.stream().map(UUID::toString).collect(Collectors.joining(",")));
-
             postRepository.save(post);
-
             return submitResponse(post);
-
         }
 
         String scanResult = aiScanPost(post);
-
         if (scanResult.startsWith("REJECTED:")) {
-
             String reason = scanResult.substring("REJECTED:".length()).trim();
-
             post.setStatus("REJECTED");
-
             post.setRejectionReason("AI tự động từ chối: " + reason);
-
             postRepository.save(post);
-
             return new PostSubmitResponse(
-
                     "REJECTED",
-
                     false,
-
                     null,
-
                     null,
-
                     "Bài đăng bị từ chối bởi hệ thống AI: " + reason,
-
                     null
-
             );
-
         }
 
         publication.accept(post);
-
         postRepository.save(post);
-
         return submitResponse(post);
-
     }
 
     private PostSubmitResponse submitResponse(Post post) {
-
         if ("PENDING".equals(post.getStatus()))
-
             return new PostSubmitResponse("PENDING", false, null, null, "Bài có dấu hiệu trùng lặp, đang chờ STAFF kiểm duyệt; chưa trừ credit đăng bài", null);
-
         boolean inspection = "PENDING_INSPECTION".equals(post.getStatus());
-
         return new PostSubmitResponse(post.getStatus(), inspection, inspection ? inspectionFee : null,
-
                 inspection ? shippingFee : null, inspection
-
                 ? "Đã nhận bài và tạo đơn kiểm định. Phí kiểm định/vận chuyển thanh toán qua luồng riêng."
-
                 : "Bài đăng đã được duyệt và hiển thị trên sàn.", null);
-
     }
 
     /**
-
      * Gọi Google Gemini để scan bài đăng.
-
      * Returns "APPROVED" hoặc "REJECTED:<reason>"
-
      */
-
     private String aiScanPost(Post post) {
-
         String prompt = String.format("""
-
                 Bạn là hệ thống kiểm duyệt tự động cho sàn mua bán đồ cũ SecondLife.
-
                 Hãy đánh giá bài đăng sản phẩm sau có phù hợp để hiển thị trên sàn hay không:
-
                 Tiêu đề: %s
-
                 Mô tả: %s
-
                 Giá: %s VNĐ
-
                 TIÊU CHÍ KIỂM DUYỆT:
-
                 1. HỢP LỆ (APPROVED):
-
                    - Sản phẩm là đồ dùng, gia dụng, thiết bị sinh hoạt cũ/đã qua sử dụng hợp pháp.
-
                    - Mô tả rõ ràng (chấp nhận định dạng Markdown hoặc mô tả do AI hỗ trợ tạo).
-
                    - Mức giá khả thi (không phải giá 0 VNĐ hoặc spam số ảo).
-
                 2. TỪ CHỐI (REJECTED):
-
                    - Hàng cấm theo quy định (vũ khí, ma túy, chất kích thích, động vật quý hiếm, nội dung đồi trụy).
-
                    - Dấu hiệu lừa đảo trắng trợn, spam vô nghĩa, lôi kéo giao dịch ngoài sàn.
-
                    - Tiêu đề và mô tả hoàn toàn sai lệch hoặc không liên quan đến đồ dùng cần bán.
-
                 QUY TẮC BẮT BUỘC:
-
                 CHỈ trả về đúng một trong hai dạng sau trên một dòng duy nhất, không giải thích thêm:
-
                 APPROVED
-
                 hoặc
-
                 REJECTED:<lý do ngắn gọn bằng tiếng Việt>
-
                 """,
-
                 post.getTitle(), post.getDescription(), post.getPrice()
-
         );
 
         Prompt aiPrompt = new Prompt(new UserMessage(prompt));
-
         String result;
-
-        try { result = googleChatGateway.complete(aiPrompt); }
-
-        catch (Exception ex) { throw new AiProviderException("AI moderation unavailable; no listing credit was consumed", ex); }
+        try {
+            result = googleChatGateway.complete(aiPrompt);
+        } catch (Exception ex) {
+            throw new AiProviderException("AI moderation unavailable; no listing credit was consumed", ex);
+        }
 
         if (result == null) throw new AiProviderException("AI moderation returned no result");
-
         result = result.trim();
 
         if (!"APPROVED".equals(result) && !(result.startsWith("REJECTED:") && result.substring(9).trim().length() > 0))
-
             throw new AiProviderException("AI moderation returned an invalid result");
 
         return result;
-
     }
 
     @Override
-
     @Transactional
-
     public void approvePost(UUID postId) {
-
         Post post = postRepository.findById(postId)
-
                 .orElseThrow(() -> new RuntimeException("Post not found"));
-
         if (!"PENDING".equals(post.getStatus())) {
-
             throw new RuntimeException("Post must be in PENDING status to be approved");
-
         }
-
         listingAccess.requireVerifiedSeller(post.getUser().getId());
-
         post.setStatus("ACTIVE");
-
         postRepository.save(post);
-
         reviews.approve(postId, null);
-
     }
 
     @Override
-
     @Transactional
-
     public void rejectPost(UUID postId, String reason) {
-
         reviews.reject(postId, null, reason);
-
         Post post = postRepository.findById(postId)
-
                 .orElseThrow(() -> new RuntimeException("Post not found"));
-
         if (!"PENDING".equals(post.getStatus())) {
-
             throw new RuntimeException("Post must be in PENDING status to be rejected");
-
         }
-
         post.setStatus("REJECTED");
-
         post.setRejectionReason(reason);
-
         postRepository.save(post);
-
     }
 
     @Override
-
     @Transactional(readOnly = true)
-
     public Page<PostDto> getAdminPosts(
-
             String status, UUID categoryId, UUID itemId, Pageable pageable) {
-
         Specification<Post> spec = (root, query, cb) -> {
-
             if (Long.class != query.getResultType()) {
-
                 Fetch<Object, Object> userFetch = root.fetch("user", JoinType.LEFT);
-
                 userFetch.fetch("profile", JoinType.LEFT);
-
             }
-
             return cb.conjunction();
-
         };
 
         if (status != null && !status.isEmpty()) {
-
             spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), status));
-
         }
-
         if (categoryId != null) {
-
             spec = spec.and((root, query, cb) -> cb.equal(root.get("categoryId"), categoryId));
-
         }
-
         if (itemId != null) {
-
             spec = spec.and((root, query, cb) -> cb.equal(root.get("itemId"), itemId));
-
         }
-
         return postRepository.findAll(spec, pageable).map(postMapper::toResponse);
-
     }
 
     @Override
-
     @Transactional(readOnly = true)
-
     public Page<PostDto> getPublicPosts(UUID categoryId, UUID itemId, Pageable pageable) {
-
-        // Public posts should only return ACTIVE ones
-
         Specification<Post> spec = (root, query, cb) -> {
-
             if (Long.class != query.getResultType()) {
-
                 Fetch<Object, Object> userFetch = root.fetch("user", JoinType.LEFT);
-
                 userFetch.fetch("profile", JoinType.LEFT);
-
             }
-
             return cb.equal(root.get("status"), "ACTIVE");
-
         };
 
-        
-
         if (categoryId != null) {
-
             spec = spec.and((root, query, cb) -> cb.equal(root.get("categoryId"), categoryId));
-
         }
-
         if (itemId != null) {
-
             spec = spec.and((root, query, cb) -> cb.equal(root.get("itemId"), itemId));
-
         }
-
         return postRepository.findAll(spec, pageable).map(postMapper::toResponse);
-
     }
 
     @Override
-
     @Transactional(readOnly = true)
-
     public PostDto getPostDetail(UUID postId) {
-
         Post post = postRepository.findById(postId).orElseThrow(() -> new NotFoundException("Post not found"));
-
         return postMapper.toResponse(post);
-
     }
 
     @Override
-    @Transactional
     public AiPriceEstimationResponse estimatePrice(UUID userId, UUID postId, String requestId) {
-        Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new NotFoundException("Post not found"));
-        if (post.getUser() == null || !userId.equals(post.getUser().getId())) {
-            throw new ForbiddenException("This post belongs to another user");
-        }
-
-        listingAccess.requireDraft(post);
-
-        // Deduct 1 valuation credit (each valuation / re-valuation consumes 1 credit)
-        String valuationKey = "VALUATION:" + postId + ":" + UUID.randomUUID();
-        listingCredits.consume(userId, CreditType.VALUATION, valuationKey);
-
-        // Build context from post data
-
-        String itemName = post.getItemId() != null ?
-
-                itemRepository.findById(post.getItemId())
-
-                        .map(Item::getName).orElse("Không xác định")
-
-                : "Không xác định";
-
-        String description = post.getDescription() != null ? post.getDescription() : "Không có mô tả";
-
-        String priceContext = post.getAiSuggestedPrice() != null
-
-                ? "Giá mà người bán đã đề xuất: " + post.getAiSuggestedPrice() + " VNĐ."
-
-                : "";
-
-        StringBuilder chatContext = new StringBuilder();
-        UUID targetSessionId = null;
-        if (requestId != null && !requestId.trim().isEmpty()) {
-            try {
-                targetSessionId = UUID.fromString(requestId.trim());
-            } catch (Exception ignored) {
+        ValuationPromptContext promptContext = executeInTransaction(() -> {
+            Post post = postRepository.findById(postId)
+                    .orElseThrow(() -> new NotFoundException("Post not found"));
+            if (post.getUser() == null || !userId.equals(post.getUser().getId())) {
+                throw new ForbiddenException("This post belongs to another user");
             }
-        }
 
-        // Defensive fallback: Nếu targetSessionId null hoặc không có tin nhắn, tự động lấy aiChatSession gắn liền với Post
-        if (targetSessionId == null && post.getAiChatSession() != null) {
-            targetSessionId = post.getAiChatSession().getId();
-        }
+            listingAccess.requireDraft(post);
 
-        if (targetSessionId != null) {
-            List<AiChatMessage> messages =
-                    chatMessageRepository.findBySessionIdOrderBySentAtAsc(targetSessionId);
+            String valuationKey = "VALUATION:" + postId + ":" + UUID.randomUUID();
+            listingCredits.consume(userId, CreditType.VALUATION, valuationKey);
 
-            // Nếu sessionId do client truyền lên không có tin nhắn nhưng post có aiChatSession, ưu tiên session của post
-            if (messages.isEmpty() && post.getAiChatSession() != null && !targetSessionId.equals(post.getAiChatSession().getId())) {
+            String itemName = post.getItemId() != null
+                    ? itemRepository.findById(post.getItemId()).map(Item::getName).orElse("Không xác định")
+                    : "Không xác định";
+
+            String description = post.getDescription() != null ? post.getDescription() : "Không có mô tả";
+            String priceContext = post.getAiSuggestedPrice() != null
+                    ? "Giá mà người bán đã đề xuất: " + post.getAiSuggestedPrice() + " VNĐ."
+                    : "";
+
+            StringBuilder chatContext = new StringBuilder();
+            UUID targetSessionId = null;
+            if (requestId != null && !requestId.trim().isEmpty()) {
+                try {
+                    targetSessionId = UUID.fromString(requestId.trim());
+                } catch (Exception ignored) {
+                }
+            }
+
+            if (targetSessionId == null && post.getAiChatSession() != null) {
                 targetSessionId = post.getAiChatSession().getId();
-                messages = chatMessageRepository.findBySessionIdOrderBySentAtAsc(targetSessionId);
             }
 
-            for (AiChatMessage msg : messages) {
-                // Chỉ lấy các thông tin người dùng cung cấp thực tế, bỏ qua prompt kỹ thuật phân tích ảnh ban đầu
-                if ("USER".equals(msg.getRole()) && msg.getMessageContent() != null && !msg.getMessageContent().isBlank()) {
-                    String content = msg.getMessageContent().trim();
-                    if (!content.startsWith("Danh mục người bán chọn:")) {
-                        chatContext.append("- ").append(content).append("\n");
+            if (targetSessionId != null) {
+                List<AiChatMessage> messages =
+                        chatMessageRepository.findBySessionIdOrderBySentAtAsc(targetSessionId);
+
+                if (messages.isEmpty() && post.getAiChatSession() != null && !targetSessionId.equals(post.getAiChatSession().getId())) {
+                    targetSessionId = post.getAiChatSession().getId();
+                    messages = chatMessageRepository.findBySessionIdOrderBySentAtAsc(targetSessionId);
+                }
+
+                for (AiChatMessage msg : messages) {
+                    if ("USER".equals(msg.getRole()) && msg.getMessageContent() != null && !msg.getMessageContent().isBlank()) {
+                        String content = AiChatServiceImpl.sanitizePersistedMessageForContext("USER", msg.getMessageContent());
+                        if (!content.isBlank() && !content.startsWith("Danh mục người bán chọn:")) {
+                            chatContext.append("- ").append(content).append("\n");
+                        }
                     }
                 }
             }
+
+            String pricePrompt = String.format(
+                    """
+                    Bạn là chuyên gia thẩm định và định giá đồ gia dụng cũ tại thị trường Việt Nam.
+                    Nhiệm vụ của bạn là thẩm định sản phẩm dựa trên thông tin thực tế của sản phẩm và người bán để đưa ra khoảng giá thanh lý hợp lý nhất bằng VNĐ.
+
+                    THÔNG TIN SẢN PHẨM:
+                    - Loại sản phẩm: %s
+                    - Mô tả hiện tại: %s
+                    %s
+                    - Chi tiết người bán cung cấp thêm:
+                    %s
+
+                    QUY TẮC ĐỊNH GIÁ THỰC TẾ:
+                    1. Ước lượng giá mua mới của sản phẩm trên thị trường Việt Nam làm mốc chuẩn. Bỏ qua giá mua mới nếu người bán cung cấp mức giá phi thực tế.
+                    2. ĐÁNH GIÁ THEO HAO MÒN THỰC TẾ & TẦN SUẤT SỬ DỤNG (Ưu tiên ngoại quan, số lần dùng và tình trạng bảo hành/phụ kiện hơn là chỉ đếm thời gian mua):
+                       - Hàng lướt / Like New: Mới dùng vài lần, nguyên hộp/phụ kiện, đẹp 98-99%% (kể cả đã mua vài tháng đến 1 năm nhưng ít dùng): Giảm 15-25%% so với giá mới.
+                       - Hàng còn rất tốt / Dùng giữ gìn: Ngoại hình đẹp 90-95%%, không lỗi lầm, dùng ít hoặc mua 6 tháng - 1 năm tần suất sử dụng thấp: Giảm 25-35%% so với giá mới.
+                       - Hàng sử dụng thông thường: Dùng đều đặn 1-2 năm, có trầy xước nhẹ/hao mòn tự nhiên, hết bảo hành: Giảm 35-50%% so với giá mới.
+                       - Hàng đã dùng lâu / Đời cũ: Dùng trên 2-3 năm, có hao mòn rõ rệt hoặc lỗi thời: Giảm 50-65%% so với giá mới.
+                    3. Giá đề xuất (suggestedPrice) là giá thanh lý thực tế, dễ bán nhất trên thị trường đồ cũ Việt Nam. Tuyệt đối không định giá đồ cũ cao hơn hoặc bằng giá mới.
+                    4. Ràng buộc: fairPriceMin <= suggestedPrice <= fairPriceMax. Tất cả các giá đều là số nguyên dương VND (> 0).
+                    5. BẮT BUỘC chỉ trả về duy nhất định dạng JSON sau, không bọc markdown và không giải thích gì thêm:
+                    {"fairPriceMin": <số nguyên VND>, "fairPriceMax": <số nguyên VND>, "suggestedPrice": <số nguyên VND>, "expectedSellTime": "<ví dụ: 3-5 ngày>"}
+                    """,
+                    itemName, description, priceContext, chatContext.length() > 0 ? chatContext.toString() : "Không có thêm thông tin");
+            return new ValuationPromptContext(pricePrompt, valuationKey);
+        });
+
+        String aiResult;
+        try {
+            aiResult = googleChatGateway.complete(promptContext.pricePrompt());
+        } catch (RuntimeException ex) {
+            runInTransaction(() -> listingCredits.refund(
+                    userId, CreditType.VALUATION, promptContext.valuationKey() + ":REFUND"));
+            throw ex;
         }
 
-        String pricePrompt = String.format(
-                """
-                Bạn là chuyên gia thẩm định và định giá đồ gia dụng cũ tại thị trường Việt Nam.
-                Nhiệm vụ của bạn là thẩm định sản phẩm dựa trên thông tin thực tế của sản phẩm và người bán để đưa ra khoảng giá thanh lý hợp lý nhất bằng VNĐ.
-
-                THÔNG TIN SẢN PHẨM:
-                - Loại sản phẩm: %s
-                - Mô tả hiện tại: %s
-                %s
-                - Chi tiết người bán cung cấp thêm:
-                %s
-
-                QUY TẮC ĐỊNH GIÁ THỰC TẾ:
-                1. Ước lượng giá mua mới của sản phẩm trên thị trường Việt Nam làm mốc chuẩn. Bỏ qua giá mua mới nếu người bán cung cấp mức giá phi thực tế.
-                2. ĐÁNH GIÁ THEO HAO MÒN THỰC TẾ & TẦN SUẤT SỬ DỤNG (Ưu tiên ngoại quan, số lần dùng và tình trạng bảo hành/phụ kiện hơn là chỉ đếm thời gian mua):
-                   - Hàng lướt / Like New: Mới dùng vài lần, nguyên hộp/phụ kiện, đẹp 98-99%% (kể cả đã mua vài tháng đến 1 năm nhưng ít dùng): Giảm 15-25%% so với giá mới.
-                   - Hàng còn rất tốt / Dùng giữ gìn: Ngoại hình đẹp 90-95%%, không lỗi lầm, dùng ít hoặc mua 6 tháng - 1 năm tần suất sử dụng thấp: Giảm 25-35%% so với giá mới.
-                   - Hàng sử dụng thông thường: Dùng đều đặn 1-2 năm, có trầy xước nhẹ/hao mòn tự nhiên, hết bảo hành: Giảm 35-50%% so với giá mới.
-                   - Hàng đã dùng lâu / Đời cũ: Dùng trên 2-3 năm, có hao mòn rõ rệt hoặc lỗi thời: Giảm 50-65%% so với giá mới.
-                3. Giá đề xuất (suggestedPrice) là giá thanh lý thực tế, dễ bán nhất trên thị trường đồ cũ Việt Nam. Tuyệt đối không định giá đồ cũ cao hơn hoặc bằng giá mới.
-                4. Ràng buộc: fairPriceMin <= suggestedPrice <= fairPriceMax. Tất cả các giá đều là số nguyên dương VND (> 0).
-                5. BẮT BUỘC chỉ trả về duy nhất định dạng JSON sau, không bọc markdown và không giải thích gì thêm:
-                {"fairPriceMin": <số nguyên VND>, "fairPriceMax": <số nguyên VND>, "suggestedPrice": <số nguyên VND>, "expectedSellTime": "<ví dụ: 3-5 ngày>"}
-                """,
-                itemName, description, priceContext, chatContext.length() > 0 ? chatContext.toString() : "Không có thêm thông tin");
-
-        String aiResult = googleChatGateway.complete(pricePrompt);
-
         BigDecimal fairPriceMin = BigDecimal.ZERO;
-
         BigDecimal fairPriceMax = BigDecimal.ZERO;
-
         BigDecimal suggestedPrice = BigDecimal.ZERO;
-
         String expectedSellTime = "3-5 ngày";
 
         try {
-
-            // Extract JSON from the AI response
-
             String jsonStr = aiResult;
-
             if (aiResult.contains("{") && aiResult.contains("}")) {
-
                 jsonStr = aiResult.substring(aiResult.indexOf("{"), aiResult.lastIndexOf("}") + 1);
-
             }
-
             ObjectMapper mapper = new ObjectMapper();
-
             JsonNode node = mapper.readTree(jsonStr);
-
             fairPriceMin = BigDecimal.valueOf(node.get("fairPriceMin").asLong());
-
             fairPriceMax = BigDecimal.valueOf(node.get("fairPriceMax").asLong());
-
             suggestedPrice = BigDecimal.valueOf(node.get("suggestedPrice").asLong());
-
             if (node.has("expectedSellTime")) {
-
                 expectedSellTime = node.get("expectedSellTime").asText();
-
             }
-
         } catch (Exception e) {
-
-            // Fallback: try to extract numbers from raw text
-
-            Matcher m = Pattern.compile("[0-9]{5,}").matcher(aiResult.replaceAll("[.,]", ""));
-
+            Matcher m = Pattern.compile("[0-9]{5,}").matcher(aiResult != null ? aiResult.replaceAll("[.,]", "") : "");
             List<Long> nums = new ArrayList<>();
-
             while (m.find()) nums.add(Long.parseLong(m.group()));
-
             if (nums.size() >= 3) {
-
                 fairPriceMin = BigDecimal.valueOf(nums.get(0));
-
                 fairPriceMax = BigDecimal.valueOf(nums.get(1));
-
                 suggestedPrice = BigDecimal.valueOf(nums.get(2));
-
             }
-
         }
 
-        if (suggestedPrice != null && suggestedPrice.compareTo(BigDecimal.ZERO) > 0) {
-            post.setAiSuggestedPrice(suggestedPrice);
-            postRepository.save(post);
+        final BigDecimal finalSuggestedPrice = suggestedPrice;
+        if (finalSuggestedPrice != null && finalSuggestedPrice.compareTo(BigDecimal.ZERO) > 0) {
+            runInTransaction(() -> {
+                Post post = postRepository.findById(postId).orElse(null);
+                if (post != null) {
+                    post.setAiSuggestedPrice(finalSuggestedPrice);
+                    postRepository.save(post);
+                }
+            });
         }
 
         return AiPriceEstimationResponse.builder()
@@ -1293,23 +973,13 @@ public class PostServiceImpl implements PostService {
     }
 
     @Override
-
     @Transactional(readOnly = true)
-
-    public Page<PostDto> getMyPosts(UUID userId,
-
-                                                                                                           Pageable pageable) {
-
+    public Page<PostDto> getMyPosts(UUID userId, Pageable pageable) {
         Specification<Post> spec = (root, query, cb) -> {
-
             if (Long.class != query.getResultType()) {
-
                 Fetch<Object, Object> userFetch = root.fetch("user", JoinType.LEFT);
-
                 userFetch.fetch("profile", JoinType.LEFT);
-
             }
-
             return cb.equal(root.get("user").get("id"), userId);
         };
 
@@ -1321,75 +991,63 @@ public class PostServiceImpl implements PostService {
     }
 
     @Override
-
     @Transactional
-
     public PostDto updateDraft(UUID userId, UUID postId, UpdateDraftRequest request) {
-
         Post post = postRepository.findById(postId)
-
                 .orElseThrow(() -> new NotFoundException("Post not found"));
-
         if (post.getUser() == null || !userId.equals(post.getUser().getId())) {
-
             throw new ForbiddenException("This post belongs to another user");
-
         }
 
         post.setTitle(request.title());
-
         post.setDescription(request.description());
-
         post.setItemCondition(request.itemCondition());
-
         post.setPrice(request.price());
 
-        
-
         if (request.shippingWeight() != null) post.setShippingWeight(request.shippingWeight());
-
         if (request.shippingLength() != null) post.setShippingLength(request.shippingLength());
-
         if (request.shippingWidth() != null) post.setShippingWidth(request.shippingWidth());
-
         if (request.shippingHeight() != null) post.setShippingHeight(request.shippingHeight());
 
-        // Status may remain DRAFT or whatever it is, unless we explicitly change it.
-
-        // Frontend sends "status": 'DRAFT', let's assume it should stay DRAFT if it was DRAFT
-
         post = postRepository.save(post);
-
         return postMapper.toResponse(post);
-
     }
 
     @Override
-
     @Transactional
-
     public PostDto acceptDescription(UUID userId, UUID postId, AcceptDescriptionRequest request) {
-
         Post post = postRepository.findById(postId)
-
                 .orElseThrow(() -> new NotFoundException("Post not found"));
-
         if (post.getUser() == null || !userId.equals(post.getUser().getId())) {
-
             throw new ForbiddenException("This post belongs to another user");
-
         }
 
         post.setDescription(request.description());
-
-        // For 'descriptionAccepted' behavior, we save it to description.
-
-        // If there is an 'aiDescription' we might want to keep it unchanged.
-
         post = postRepository.save(post);
-
         return postMapper.toResponse(post);
-
     }
 
+    private <T> T executeInTransaction(Supplier<T> action) {
+        if (transactionTemplate != null) {
+            return transactionTemplate.execute(tx -> action.get());
+        }
+        return action.get();
+    }
+
+    private void runInTransaction(Runnable action) {
+        if (transactionTemplate != null) {
+            transactionTemplate.executeWithoutResult(tx -> action.run());
+        } else {
+            action.run();
+        }
+    }
+
+    private record SessionPrecheck(UUID postId, String creditKey) {
+    }
+
+    private record TitlePromptContext(String promptText, String fallbackTitle, String creditKey) {
+    }
+
+    private record ValuationPromptContext(String pricePrompt, String valuationKey) {
+    }
 }

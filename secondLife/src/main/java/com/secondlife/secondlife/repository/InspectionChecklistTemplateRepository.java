@@ -12,7 +12,7 @@ import java.util.UUID;
 
 public interface InspectionChecklistTemplateRepository extends JpaRepository<InspectionChecklistTemplate, UUID> {
 
-    List<InspectionChecklistTemplate> findByCategoryIdAndActiveTrue(UUID categoryId);
+    List<InspectionChecklistTemplate> findByCategory_IdAndActiveTrue(UUID categoryId);
 
     @EntityGraph(attributePaths = {"category", "items"})
     List<InspectionChecklistTemplate> findByActiveTrueOrderByCreatedAtDesc();
