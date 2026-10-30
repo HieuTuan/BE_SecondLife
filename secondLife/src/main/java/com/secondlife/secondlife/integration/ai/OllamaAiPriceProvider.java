@@ -1,5 +1,6 @@
 package com.secondlife.secondlife.integration.ai;
 
+import com.secondlife.secondlife.config.OllamaConfig;
 import com.secondlife.secondlife.exception.AiProviderException;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -25,7 +26,7 @@ import java.util.Locale;
 public class OllamaAiPriceProvider implements AiPriceProvider {
     private final ChatModel model;
     private final ObjectMapper mapper;
-    private final String modelVersion;
+    private String modelVersion;
     private final ChatModel visionModel;
     private final String visionModelVersion;
     private final String cloudName;
@@ -45,6 +46,11 @@ public class OllamaAiPriceProvider implements AiPriceProvider {
         this.model = model; this.mapper = mapper; this.modelVersion = modelVersion;
         this.visionModel = visionModel; this.visionModelVersion = visionModelVersion; this.cloudName = cloudName;
         this.maxImages = maxImages;
+    }
+
+    @Autowired(required = false)
+    void configureOllamaCloudEndpoint(@Value("${spring.ai.ollama.base-url:}") String baseUrl) {
+        this.modelVersion = OllamaConfig.normalizeCloudModelName(baseUrl, this.modelVersion);
     }
 
     @Override

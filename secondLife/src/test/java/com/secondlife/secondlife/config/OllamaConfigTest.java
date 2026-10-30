@@ -91,6 +91,17 @@ class OllamaConfigTest {
     }
 
     @Test
+    void cloudEndpointStripsLocalCloudSuffixFromModelName() {
+        assertEquals("gemma4:31b", OllamaConfig.normalizeCloudModelName("https://ollama.com", "gemma4:31b-cloud"));
+        assertEquals("gemma4:31b", OllamaConfig.normalizeCloudModelName("https://ollama.com", "gemma4:31b:cloud"));
+        assertEquals("gemma4:31b", OllamaConfig.normalizeCloudModelName("https://ollama.com", "gemma4:31b"));
+        assertEquals("gemma4:31b-cloud", OllamaConfig.normalizeCloudModelName("http://127.0.0.1:11434", "gemma4:31b-cloud"));
+        assertThat(OllamaConfig.isCloudUrlWithoutApiKey("https://ollama.com", "")).isTrue();
+        assertThat(OllamaConfig.isCloudUrlWithoutApiKey("https://ollama.com", "real-cloud-key")).isFalse();
+        assertThat(OllamaConfig.isCloudUrlWithoutApiKey("http://127.0.0.1:11434", "")).isFalse();
+    }
+
+    @Test
     void configuredReadTimeoutStopsASlowOllamaResponse() throws Exception {
         try (LocalHttpServer server = new LocalHttpServer(200, "{\"models\":[]}", 400)) {
             configuration().withPropertyValues("spring.ai.ollama.base-url=" + server.baseUrl()).run(context ->

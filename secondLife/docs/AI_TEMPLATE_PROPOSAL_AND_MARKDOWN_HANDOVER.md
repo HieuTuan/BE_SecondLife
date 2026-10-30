@@ -15,7 +15,7 @@
    - Khi người bán chọn mặt hàng chưa có bộ câu hỏi gợi ý trong DB, AI tự động sinh bộ câu hỏi tạm thời để người bán sử dụng ngay không bị gián đoạn, đồng thời đẩy bản đề xuất (`PENDING`) sang trang Quản trị để Admin xem xét, chỉnh sửa thủ công rồi mới duyệt lưu chính thức xuống DB.
    - Giữ đầy đủ **6 nhóm câu hỏi nền tảng** về tình trạng đồ cũ (ngoại hình/độ mới, thời gian mua & bảo hành, chức năng & lỗi, lịch sử sửa chữa, phụ kiện đi kèm, lý do bán) và **bắt buộc bổ sung 2–4 câu hỏi thông số kỹ thuật đặc thù theo từng mặt hàng** (ví dụ: TV hỏi kích thước bao nhiêu inch, độ phân giải 4K/Full HD, tấm nền, hệ điều hành; Điện thoại/Laptop hỏi RAM/ROM/CPU/Pin; Tủ lạnh/Máy giặt hỏi dung tích lít/khối lượng giặt/Inverter...).
 2. **Xử lý triệt để lỗi load rất lâu (~22 phút) ở Bước 2 ("Tạo mô tả bằng AI"):**
-   - Loại bỏ cơ chế retry ngầm 10 lần với exponential backoff lên tới 300s khi dịch vụ Ollama local không chạy; thêm cơ chế ngắt nhanh (fast-fail ~2ms) + cooldown 60s để chuyển thẳng sang Google Gemini.
+   - Sửa lỗi cấu hình `.env` bị trôi về `http://127.0.0.1:11434` (thay vì gọi **Ollama Cloud Direct API** `https://ollama.com` qua `OLLAMA_API_KEY` như thiết kế), đồng thời loại bỏ cơ chế retry ngầm 10 lần với exponential backoff lên tới 300s; bổ sung tự động chuẩn hóa tên model Cloud (`gemma4:31b-cloud` -> `gemma4:31b`), fast-fail và cooldown 60s chuyển mượt sang Google Gemini khi một trong hai dịch vụ Cloud AI gặp sự cố hoặc chưa điền key.
    - Tách rời hoàn toàn các lệnh gọi AI bên ngoài khỏi `@Transactional` của Database để tránh giữ kết nối HikariCP (đặc biệt quan trọng trên Supabase Pooler), kèm cơ chế tự động hoàn (refund) lượt `AI_CHAT` credit nếu cuộc gọi AI thất bại.
 3. **Hỗ trợ định dạng Markdown (`.md`) cho Ô Mô tả chi tiết sản phẩm:**
    - Bổ sung trình soạn thảo Markdown có thanh công cụ định dạng nhanh và 3 chế độ xem (`Soạn thảo (.md)` / `Xem hiển thị` / `Song song`).
@@ -101,11 +101,14 @@
   - `service/impl/PostServiceImpl.java`
   - `.env.example`
 - **Nguyên nhân gốc trước khi sửa:**
-  - Khi máy dev/server không bật Ollama local (`127.0.0.1:11434`), `RetryTemplate` với cấu hình cũ (`maxAttempts=10`, `maxInterval=300000ms`) vẫn cố retry lỗi `ConnectException` tổng cộng **~22 phút** rồi mới chuyển sang Google Gemini.
+  - Hệ thống được thiết kế dùng **Ollama Cloud Direct API** (`https://ollama.com` kèm header `Authorization: Bearer <OLLAMA_API_KEY>`, gọi trực tiếp qua HTTPS giống Gemini mà không cần cài Ollama dưới máy). Tuy nhiên sau đợt chuẩn hóa tên biến môi trường (`OLLAMA_BASE_URL` -> `SPRING_AI_OLLAMA_BASE_URL`), file `.env` bị trôi cấu hình về `SPRING_AI_OLLAMA_BASE_URL=http://127.0.0.1:11434`, `OLLAMA_API_KEY=` bị để trống, và tên model để `gemma4:31b-cloud` (hậu tố `-cloud` chỉ dành cho daemon local; trên API trực tiếp `https://ollama.com` tên model chuẩn là `gemma4:31b`). Khi kết hợp với `RetryTemplate` cũ (`maxAttempts=10`, `maxInterval=300000ms`), mỗi lần gọi bị treo retry `ConnectException` tổng cộng **~22 phút** trước khi sang Google Gemini.
   - Các hàm `finalizeChatAndDescription`, `regenerateChatAndDescription`, `suggestTitle`, `estimatePrice` trong `PostServiceImpl` đặt `@Transactional` bao trùm cả thời gian chờ mạng gọi AI, gây nghẽn HikariCP connection pool.
   - Tin nhắn hệ thống kiểm duyệt ảnh ở Bước 1 (~2.500 ký tự) bị nạp lại vào ngữ cảnh lịch sử chat ở Bước 2 làm phình prompt không cần thiết.
 - **Hướng xử lý kỹ thuật:**
-  1. **Ngắt retry tức thì khi Host không thể kết nối (`OllamaConfig`):** Bổ sung `.predicate(throwable -> !hasUnreachableHostCause(throwable))` vào `aiRetryTemplate`. Khi gặp `ConnectException` / `UnknownHostException`, hệ thống bỏ qua retry ngay ở mili-giây đầu tiên (~2ms) để fallback sang Gemini.
+  1. **Chuẩn hóa kết nối Ollama Cloud API & Fast-fail (`OllamaConfig`):**
+     - Cập nhật URL chuẩn `https://ollama.com` và tự động chuẩn hóa tên model (`normalizeCloudModelName`: tự cắt hậu tố `-cloud` / `:cloud` thành `gemma4:31b` khi gọi trực tiếp `ollama.com` để tương thích ngược nếu `.env` cũ vẫn ghi `gemma4:31b-cloud`).
+     - Nếu `SPRING_AI_OLLAMA_BASE_URL=https://ollama.com` nhưng máy dev chưa điền `OLLAMA_API_KEY`, hệ thống ghi log cảnh báo rõ ràng lúc khởi động và chuyển thẳng sang Google Gemini (0ms chờ) thay vì bắn request lỗi `401`.
+     - Bổ sung `.predicate(throwable -> !hasUnreachableHostCause(throwable))` vào `aiRetryTemplate` để gặp `ConnectException` / `UnknownHostException` là ngắt retry ngay tức thì (~2ms).
   2. **Cooldown 60 giây & Thu gọn Context (`AiChatServiceImpl`):** Ghi nhận thời điểm Ollama lỗi kết nối để tự động bỏ qua Ollama trong 60 giây kế tiếp (`OLLAMA_FAILURE_COOLDOWN_MS`); thêm hàm `sanitizePersistedMessageForContext(...)` cắt bỏ khối hướng dẫn kiểm tra ảnh Bước 1 khỏi lịch sử hội thoại trước khi gửi lên Gemini.
   3. **Tách Transaction ngắn & Hoàn Credit tự động (`PostServiceImpl`):** Gỡ `@Transactional` trên các hàm gọi AI, chia thành Pha 1 (đọc dữ liệu & trừ credit trong `TransactionTemplate` ngắn) -> Pha 2 (gọi AI ngoài transaction DB) -> Pha 3 (lưu kết quả trong `TransactionTemplate` ngắn; nếu AI lỗi tự động gọi `creditService.refundCredit(...)`).
 
@@ -159,9 +162,14 @@
    git checkout feature/ai-template-proposal-and-markdown-desc
    git pull origin feature/ai-template-proposal-and-markdown-desc
    ```
-2. **QUAN TRỌNG — Cập nhật các biến timeout/retry AI trong file `.env` local:**
-   Do file `.env` không đẩy lên Git (chứa API keys cá nhân), các bạn BE cần mở `BE_SecondLife/secondLife/.env` trên máy mình và cập nhật lại cụm cấu hình timeout/retry (đã có mẫu trong `.env.example`) để tránh bị treo retry 22 phút khi không bật Ollama:
+2. **QUAN TRỌNG — Cập nhật cấu hình Ollama Cloud API & các biến timeout/retry AI trong file `.env` local:**
+   Do file `.env` không đẩy lên Git (chứa API keys cá nhân), các bạn BE cần mở `BE_SecondLife/secondLife/.env` trên máy mình và kiểm tra/cập nhật lại cụm cấu hình **Ollama Cloud API** + **Timeout/Retry** (đã cập nhật mẫu trong `.env.example`), tránh trường hợp `.env` cũ bị trôi về `http://127.0.0.1:11434`:
    ```properties
+   # AI Ollama Cloud Direct API (gọi trực tiếp qua HTTPS API như Gemini, không cần cài Ollama local)
+   SPRING_AI_OLLAMA_BASE_URL=https://ollama.com
+   SPRING_AI_OLLAMA_CHAT_MODEL=gemma4:31b
+   OLLAMA_API_KEY=<điền_API_Key_Ollama_Cloud_của_bạn_từ_ollama.com/settings/keys>
+
    # AI Google GenAI (cập nhật các dòng timeout & retry bên dưới, giữ nguyên GOOGLE_API_KEY của bạn)
    GOOGLE_AI_CONNECT_TIMEOUT_MS=10000
    GOOGLE_AI_READ_TIMEOUT_MS=40000
@@ -173,10 +181,10 @@
    GOOGLE_AI_RETRY_MULTIPLIER=2
    GOOGLE_AI_RETRY_JITTER=0.2
 
-   # AI timeout và retry chung (ngắt nhanh khi Ollama local không bật)
-   AI_CONNECT_TIMEOUT_MS=3000
-   AI_STREAMING_CONNECT_TIMEOUT_MS=5000
-   AI_READ_TIMEOUT_MS=30000
+   # AI timeout và retry chung cho Cloud API
+   AI_CONNECT_TIMEOUT_MS=10000
+   AI_STREAMING_CONNECT_TIMEOUT_MS=10000
+   AI_READ_TIMEOUT_MS=45000
    AI_MAX_RETRIES=1
    AI_RETRY_INITIAL_INTERVAL_MS=500
    AI_RETRY_MULTIPLIER=2
@@ -200,3 +208,4 @@
      - **Vai trò Seller:** Tạo tin đăng mới với mặt hàng chưa có template -> Kiểm tra câu hỏi thông số kỹ thuật -> Bấm "Tạo mô tả bằng AI" (tốc độ phản hồi nhanh, không có emoji, hiển thị đẹp ở chế độ Markdown `.md`).
      - **Vai trò Admin:** Truy cập **Quản trị -> Danh mục & AI** (`/admin?subtab=catalog-ai`) -> Kiểm tra mục đề xuất từ AI chờ duyệt -> Chỉnh sửa thủ công câu hỏi/gợi ý -> Duyệt lưu xuống DB hoặc Từ chối.
      - **Vai trò Buyer / Staff:** Mở chi tiết tin đăng, so sánh tin đăng và trang duyệt tin của Staff để kiểm tra hiển thị định dạng Markdown.
+

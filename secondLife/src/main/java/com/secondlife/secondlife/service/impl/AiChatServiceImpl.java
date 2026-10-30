@@ -1,5 +1,6 @@
 package com.secondlife.secondlife.service.impl;
 
+import com.secondlife.secondlife.config.OllamaConfig;
 import com.secondlife.secondlife.dto.request.AiChatRequest;
 import com.secondlife.secondlife.dto.response.AiChatResponse;
 import com.secondlife.secondlife.dto.response.PostFinalizeResponse;
@@ -64,7 +65,8 @@ public class AiChatServiceImpl implements AiChatService {
     private final int rateLimitMaxMessages;
     private final long rateLimitWindowSeconds;
     private final int sessionMaxMessages;
-    private final String ollamaModel;
+    private String ollamaModel;
+    private volatile boolean ollamaCloudKeyMissing = false;
     private final ListingCreditService listingCreditService;
 
     private volatile long ollamaCooldownUntilEpochMs = 0L;
@@ -124,6 +126,14 @@ public class AiChatServiceImpl implements AiChatService {
         this.sessionMaxMessages = sessionMaxMessages;
         this.ollamaModel = ollamaModel;
         this.listingCreditService = listingCreditService;
+    }
+
+    @Autowired(required = false)
+    void configureOllamaCloudEndpoint(
+            @Value("${spring.ai.ollama.base-url:}") String baseUrl,
+            @Value("${ollama.api-key:}") String apiKey) {
+        this.ollamaModel = OllamaConfig.normalizeCloudModelName(baseUrl, this.ollamaModel);
+        this.ollamaCloudKeyMissing = OllamaConfig.isCloudUrlWithoutApiKey(baseUrl, apiKey);
     }
 
     @Override
@@ -476,6 +486,14 @@ public class AiChatServiceImpl implements AiChatService {
 
     private String callTextGatewayWithCooldown(Prompt ollamaPrompt) {
         Prompt googlePrompt = new Prompt(ollamaPrompt.getInstructions());
+
+        if (ollamaCloudKeyMissing && googleChatGateway != null) {
+            try {
+                return googleChatGateway.complete(googlePrompt);
+            } catch (Exception geminiEx) {
+                throw new AiProviderException("AI chat unavailable; please retry", geminiEx);
+            }
+        }
 
         if (isOllamaInCooldown() && googleChatGateway != null) {
             try {

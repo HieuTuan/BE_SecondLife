@@ -1,5 +1,6 @@
 package com.secondlife.secondlife.service.impl;
 
+import com.secondlife.secondlife.config.OllamaConfig;
 import com.secondlife.secondlife.dto.request.ApproveTemplateProposalRequest;
 import com.secondlife.secondlife.dto.request.CategoryQuestionTemplateRequest;
 import com.secondlife.secondlife.dto.request.RejectTemplateProposalRequest;
@@ -31,6 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -68,7 +70,8 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
     private final NotificationService notificationService;
     private final AiChatGateway googleChatGateway;
     private final AiChatGateway ollamaChatGateway;
-    private final String ollamaModel;
+    private String ollamaModel;
+    private volatile boolean ollamaCloudKeyMissing = false;
     private final TransactionTemplate writeTransactionTemplate;
     private final TransactionTemplate readTransactionTemplate;
 
@@ -111,6 +114,14 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
             this.writeTransactionTemplate = null;
             this.readTransactionTemplate = null;
         }
+    }
+
+    @Autowired(required = false)
+    void configureOllamaCloudEndpoint(
+            @Value("${spring.ai.ollama.base-url:}") String baseUrl,
+            @Value("${ollama.api-key:}") String apiKey) {
+        this.ollamaModel = OllamaConfig.normalizeCloudModelName(baseUrl, this.ollamaModel);
+        this.ollamaCloudKeyMissing = OllamaConfig.isCloudUrlWithoutApiKey(baseUrl, apiKey);
     }
 
     @Override
@@ -501,6 +512,10 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
         } catch (Exception googleEx) {
             log.warn("Google Gemini failed to generate template for category='{}', item='{}': {}. Falling back to Ollama.",
                     categoryName, itemName, googleEx.getMessage());
+        }
+
+        if (ollamaCloudKeyMissing) {
+            return null;
         }
 
         try {

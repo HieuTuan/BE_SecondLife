@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.config;
 
 import io.netty.channel.ChannelOption;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.ollama.OllamaChatModel;
 import org.springframework.ai.ollama.api.OllamaApi;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
@@ -21,7 +22,9 @@ import reactor.netty.http.client.HttpClient;
 import java.net.ConnectException;
 import java.net.UnknownHostException;
 import java.time.Duration;
+import java.util.Locale;
 
+@Slf4j
 @Configuration
 public class OllamaConfig {
 
@@ -46,10 +49,18 @@ public class OllamaConfig {
         HttpClient httpClient = HttpClient.create().option(ChannelOption.CONNECT_TIMEOUT_MILLIS, streamingConnectTimeoutMs)
                 .responseTimeout(readTimeoutMs == 0 ? null : Duration.ofMillis(readTimeoutMs));
         webClientBuilder.clientConnector(new ReactorClientHttpConnector(httpClient));
-        if (apiKey != null && !apiKey.isEmpty() && !apiKey.equals("demo")) {
-            // Apply API key for cloud Ollama
-            restClientBuilder.defaultHeader("Authorization", "Bearer " + apiKey);
-            webClientBuilder.defaultHeader("Authorization", "Bearer " + apiKey);
+        boolean hasApiKey = hasValidApiKey(apiKey);
+        if (hasApiKey) {
+            // Apply API key for Ollama Cloud Direct API (https://ollama.com)
+            restClientBuilder.defaultHeader("Authorization", "Bearer " + apiKey.trim());
+            webClientBuilder.defaultHeader("Authorization", "Bearer " + apiKey.trim());
+            if (isLoopbackUrl(baseUrl)) {
+                log.warn("OLLAMA_API_KEY is configured, but SPRING_AI_OLLAMA_BASE_URL='{}' points to localhost instead of https://ollama.com.",
+                        baseUrl);
+            }
+        } else if (isOllamaCloudUrl(baseUrl)) {
+            log.warn("Ollama Cloud URL ('{}') is configured without OLLAMA_API_KEY; requests will fall back directly to Google Gemini until OLLAMA_API_KEY is provided.",
+                    baseUrl);
         }
 
         return OllamaApi.builder()
@@ -88,10 +99,52 @@ public class OllamaConfig {
 
     @Bean
     public OllamaChatModel ollamaChatModel(OllamaApi ollamaApi, RetryTemplate aiRetryTemplate) {
+        String resolvedModel = normalizeCloudModelName(baseUrl, defaultModel);
         return OllamaChatModel.builder()
                 .ollamaApi(ollamaApi)
                 .retryTemplate(aiRetryTemplate)
-                .options(OllamaChatOptions.builder().model(defaultModel).build())
+                .options(OllamaChatOptions.builder().model(resolvedModel).build())
                 .build();
+    }
+
+    public static String normalizeCloudModelName(String baseUrl, String model) {
+        if (model == null) {
+            return null;
+        }
+        String trimmed = model.trim();
+        if (!isOllamaCloudUrl(baseUrl)) {
+            return trimmed;
+        }
+        if (trimmed.endsWith("-cloud")) {
+            return trimmed.substring(0, trimmed.length() - "-cloud".length());
+        }
+        if (trimmed.endsWith(":cloud")) {
+            return trimmed.substring(0, trimmed.length() - ":cloud".length());
+        }
+        return trimmed;
+    }
+
+    public static boolean isCloudUrlWithoutApiKey(String baseUrl, String apiKey) {
+        return isOllamaCloudUrl(baseUrl) && !hasValidApiKey(apiKey);
+    }
+
+    public static boolean isOllamaCloudUrl(String baseUrl) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return false;
+        }
+        String normalized = baseUrl.trim().toLowerCase(Locale.ROOT);
+        return normalized.contains("ollama.com");
+    }
+
+    private static boolean isLoopbackUrl(String baseUrl) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return false;
+        }
+        String normalized = baseUrl.trim().toLowerCase(Locale.ROOT);
+        return normalized.contains("127.0.0.1") || normalized.contains("localhost");
+    }
+
+    private static boolean hasValidApiKey(String apiKey) {
+        return apiKey != null && !apiKey.trim().isEmpty() && !"demo".equalsIgnoreCase(apiKey.trim());
     }
 }
