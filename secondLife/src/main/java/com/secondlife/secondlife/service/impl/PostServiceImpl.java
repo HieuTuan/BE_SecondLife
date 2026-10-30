@@ -1,7 +1,6 @@
 package com.secondlife.secondlife.service.impl;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.secondlife.secondlife.common.validation.ImageUploadValidator;
 import com.secondlife.secondlife.dto.request.AcceptDescriptionRequest;
 import com.secondlife.secondlife.dto.request.AiChatRequest;
 import com.secondlife.secondlife.dto.request.PostInitRequest;
@@ -46,6 +45,9 @@ import com.secondlife.secondlife.service.ListingImageSimilarity;
 import com.secondlife.secondlife.service.ListingPublicationService;
 import com.secondlife.secondlife.service.ListingReviewService;
 import com.secondlife.secondlife.service.PostService;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.criteria.Fetch;
 import jakarta.persistence.criteria.JoinType;
 import lombok.extern.slf4j.Slf4j;
@@ -68,7 +70,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -90,6 +91,7 @@ public class PostServiceImpl implements PostService {
     private final int minImages;
 
     private final int maxImages;
+    private final ImageUploadValidator imageValidator;
 
     private final ListingImageSimilarity imageSimilarity;
     private final ListingFingerprint listingFingerprint;
@@ -176,9 +178,11 @@ public class PostServiceImpl implements PostService {
                            @Value("${app.listing.min-images}") int minImages,
 
                            @Value("${app.listing.max-images}") int maxImages, PostMapper postMapper,
-                           PlatformTransactionManager transactions) {
+                           PlatformTransactionManager transactions,
+                           ImageUploadValidator imageValidator) {
         this.transactionTemplate = transactions != null ? new TransactionTemplate(transactions) : null;
         this.postMapper = postMapper;
+        this.imageValidator = imageValidator;
 
         if (inspectionFee.signum() < 0 || shippingFee.signum() < 0)
 
@@ -241,6 +245,16 @@ public class PostServiceImpl implements PostService {
 
     }
 
+    private void cleanupUploadedImages(List<CloudinaryService.UploadedImage> uploads) {
+        for (var upload : uploads) {
+            try {
+                cloudinaryService.deleteImage(upload.publicId());
+            } catch (IOException | RuntimeException ex) {
+                log.warn("Could not clean listing image {}", upload.publicId());
+            }
+        }
+    }
+
     @Override
     public PostInitResponse initPost(UUID userId, PostInitRequest request) {
         User user = userRepository.findById(userId)
@@ -258,34 +272,28 @@ public class PostServiceImpl implements PostService {
         if (postRepository.countByUser_IdAndStatusIn(userId, List.of("DRAFT", "REJECTED", "PENDING", "PENDING_INSPECTION")) >= maxUnfinishedDrafts)
             throw new ConflictException("Maximum " + maxUnfinishedDrafts + " unfinished drafts; finish an existing draft first");
 
-        if (request.images() == null || request.images().size() < minImages || request.images().size() > maxImages)
-            throw new BadRequestException("Upload between " + minImages + " and " + maxImages + " product images");
-
-        for (var image : request.images()) {
-            if (image == null || image.isEmpty() || image.getSize() > maxImageBytes || image.getContentType() == null
-                    || !Set.of("image/jpeg", "image/png", "image/webp").contains(image.getContentType()))
-                throw new BadRequestException("Every image must be a non-empty JPEG, PNG or WebP no larger than " + maxImageBytes + " bytes");
-        }
-
+        var prepared = imageValidator.prepareListingImages(request.images(), minImages, maxImages, maxImageBytes);
         List<PostImage> postImages = new ArrayList<>();
-        for (var image : request.images()) {
+        for (var image : prepared) {
             try {
-                byte[] imageBytes = image.getBytes();
+                byte[] imageBytes = image.file().getBytes();
                 String perceptualFingerprint = imageSimilarity.fingerprint(imageBytes);
-                String imageUrl = cloudinaryService.uploadImage(image);
-                if (imageUrl == null || imageUrl.isBlank()) throw new IllegalStateException("Image upload returned an empty URL");
-                postImages.add(new PostImage(imageUrl,
-                        listingFingerprint.sha256(imageBytes), perceptualFingerprint));
+                postImages.add(new PostImage(null, image.originalFingerprint(), perceptualFingerprint));
             } catch (IOException e) {
-                throw new RuntimeException("Failed to upload image to Cloudinary", e);
-            } catch (IllegalArgumentException e) {
-                throw new BadRequestException("Invalid or excessively large image dimensions");
+                throw new IllegalStateException("Failed to read a prepared image", e);
             }
         }
 
         Post post;
-        if (transactionTemplate != null) {
-            post = transactionTemplate.execute(tx -> {
+        List<CloudinaryService.UploadedImage> uploads = new ArrayList<>();
+        try {
+            for (int index = 0; index < prepared.size(); index++) {
+                var uploaded = cloudinaryService.uploadImage(prepared.get(index).file());
+                uploads.add(uploaded);
+                postImages.get(index).setImageUrl(uploaded.secureUrl());
+            }
+            if (transactionTemplate != null) {
+                post = transactionTemplate.execute(tx -> {
                 Post p = new Post();
                 p.setUser(userRepository.getReferenceById(userId));
                 p.setCategoryId(request.categoryId());
@@ -295,17 +303,24 @@ public class PostServiceImpl implements PostService {
                 p.setImageUrl(postImages.getFirst().getImageUrl());
                 p.setImageFingerprint(postImages.getFirst().getImageFingerprint());
                 return postRepository.save(p);
-            });
-        } else {
-            Post p = new Post();
-            p.setUser(userRepository.getReferenceById(userId));
-            p.setCategoryId(request.categoryId());
-            p.setItemId(request.itemId());
-            p.setStatus("DRAFT");
-            p.getImages().addAll(postImages);
-            p.setImageUrl(postImages.getFirst().getImageUrl());
-            p.setImageFingerprint(postImages.getFirst().getImageFingerprint());
-            post = postRepository.save(p);
+                });
+            } else {
+                Post p = new Post();
+                p.setUser(userRepository.getReferenceById(userId));
+                p.setCategoryId(request.categoryId());
+                p.setItemId(request.itemId());
+                p.setStatus("DRAFT");
+                p.getImages().addAll(postImages);
+                p.setImageUrl(postImages.getFirst().getImageUrl());
+                p.setImageFingerprint(postImages.getFirst().getImageFingerprint());
+                post = postRepository.save(p);
+            }
+        } catch (IOException ex) {
+            cleanupUploadedImages(uploads);
+            throw new IllegalStateException("Failed to upload listing images", ex);
+        } catch (RuntimeException ex) {
+            cleanupUploadedImages(uploads);
+            throw ex;
         }
 
         // Extract names early
@@ -381,7 +396,7 @@ public class PostServiceImpl implements PostService {
                     """, selectedItemName, declaredBrand != null ? " và đúng/không mâu thuẫn hãng " + declaredBrand : ""));
 
             AiChatRequest aiRequest = new AiChatRequest(
-                    null, post.getId(), visionCheckPrompt.toString(), request.images());
+                    null, post.getId(), visionCheckPrompt.toString(), prepared.stream().map(ImageUploadValidator.PreparedImage::file).toList());
 
             AiChatResponse aiResponse = aiChatService.processChat(aiRequest, userId);
             String aiReply = aiResponse.reply() != null ? aiResponse.reply().trim() : "";
@@ -421,6 +436,7 @@ public class PostServiceImpl implements PostService {
                 } else {
                     postRepository.delete(post);
                 }
+                cleanupUploadedImages(uploads);
                 throw new BadRequestException("HÌNH ẢNH KHÔNG KHỚP LOẠI SẢN PHẨM: " + cleanReason);
             }
 
@@ -441,6 +457,7 @@ public class PostServiceImpl implements PostService {
                 } else {
                     postRepository.delete(post);
                 }
+                cleanupUploadedImages(uploads);
                 String brandPrefix = detectedBrand.isEmpty() ? "" : "[DETECTED_BRAND:" + detectedBrand + "] ";
                 throw new BadRequestException("HÌNH ẢNH KHÔNG KHỚP THƯƠNG HIỆU: " + brandPrefix + cleanReason);
             }

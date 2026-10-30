@@ -2,6 +2,7 @@ package com.secondlife.secondlife.exception;
 
 import com.secondlife.secondlife.common.ErrorResponse;
 import com.secondlife.secondlife.integration.ekyc.vnpt.VnptApiException;
+
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.CannotAcquireLockException;
@@ -19,6 +20,9 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,6 +30,32 @@ import java.util.List;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<ErrorResponse> handleMissingMultipartPart(MissingServletRequestPartException ex, HttpServletRequest request) {
+        return ResponseEntity.badRequest().body(ErrorResponse.of("Thiếu dữ liệu multipart bắt buộc", request.getRequestURI(),
+                List.of(new ErrorResponse.FieldErrorItem(ex.getRequestPartName(), "Vui lòng gửi file hoặc phần dữ liệu bắt buộc."))));
+    }
+
+    @ExceptionHandler(ImageValidationException.class)
+    public ResponseEntity<ErrorResponse> handleImageValidation(ImageValidationException ex, HttpServletRequest request) {
+        String message = ex.getStatus() == HttpStatus.SERVICE_UNAVAILABLE
+                ? "Tạm thời không thể xử lý ảnh" : "Ảnh tải lên chưa hợp lệ";
+        return ResponseEntity.status(ex.getStatus()).body(ErrorResponse.of(message, request.getRequestURI(), ex.getErrors()));
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ErrorResponse> handleUploadLimit(MaxUploadSizeExceededException ex, HttpServletRequest request) {
+        String field = request.getRequestURI().equals("/api/v1/posts/init") ? "images" : "files";
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(ErrorResponse.of(
+                "Tệp hoặc tổng dung lượng upload vượt giới hạn cho phép", request.getRequestURI(),
+                List.of(new ErrorResponse.FieldErrorItem(field, "Hãy giảm dung lượng ảnh hoặc số lượng file trong một lần gửi."))));
+    }
+
+    @ExceptionHandler(MultipartException.class)
+    public ResponseEntity<ErrorResponse> handleMalformedMultipart(MultipartException ex, HttpServletRequest request) {
+        return ResponseEntity.badRequest().body(ErrorResponse.of("Dữ liệu multipart không hợp lệ", request.getRequestURI()));
+    }
+
     @ExceptionHandler(VideoUploadException.class)
     public ResponseEntity<ErrorResponse> handleVideoUpload(VideoUploadException ex, HttpServletRequest request) {
         return ResponseEntity.status(ex.getStatus()).body(ErrorResponse.of(ex.getMessage(), request.getRequestURI()));

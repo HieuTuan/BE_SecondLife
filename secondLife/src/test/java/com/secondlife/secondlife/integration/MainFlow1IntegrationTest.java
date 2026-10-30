@@ -31,6 +31,9 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.*;
 import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -86,16 +89,17 @@ class MainFlow1IntegrationTest {
         when(google.getOptions()).thenReturn(ChatOptions.builder().build());
         when(ollama.call(any(Prompt.class))).thenReturn(reply("Mô tả sản phẩm đã sử dụng, còn hoạt động tốt."));
         when(google.call(any(Prompt.class))).thenReturn(reply("APPROVED"));
-        when(cloudinary.uploadImage(any())).thenReturn("https://example.test/product.jpg");
+        when(cloudinary.uploadImage(any())).thenReturn(new CloudinaryService.UploadedImage(
+                "https://example.test/product.jpg", "listings/images/test-product"));
     }
 
     @Test void draftChatAndFinalizeAreFreeThenValuationAndPublishChargeSeparately() throws Exception {
         var seller = user("SELLER", true);
         var category = category();
-        var image = new MockMultipartFile("images", "product.jpg", "image/jpeg", new byte[]{1,2,3});
+        var image = listingPhoto(0);
         String raw = mvc.perform(multipart("/api/v1/posts/init").file(image)
-                        .file(new MockMultipartFile("images", "side.jpg", "image/jpeg", new byte[]{4,5,6}))
-                        .file(new MockMultipartFile("images", "back.jpg", "image/jpeg", new byte[]{7,8,9}))
+                        .file(listingPhoto(1))
+                        .file(listingPhoto(2))
                         .param("categoryId", category.getId().toString()).header("Authorization", bearer(seller)))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         var init = mapper.readTree(raw);
@@ -151,7 +155,7 @@ class MainFlow1IntegrationTest {
         for (int count : new int[]{0, 1, 2, 7}) {
             var request = multipart("/api/v1/posts/init").param("categoryId", category.getId().toString())
                     .header("Authorization", bearer(seller));
-            for (int i = 0; i < count; i++) request.file(new MockMultipartFile("images", "photo" + i + ".jpg", "image/jpeg", new byte[]{(byte)i, 42}));
+            for (int i = 0; i < count; i++) request.file(listingPhoto(i % 6));
             mvc.perform(request).andExpect(status().isBadRequest());
         }
         for (var invalid : java.util.List.of(
@@ -159,10 +163,10 @@ class MainFlow1IntegrationTest {
                 new MockMultipartFile("images", "file.txt", "text/plain", new byte[]{1}),
                 new MockMultipartFile("images", "big.jpg", "image/jpeg", new byte[10 * 1024 * 1024 + 1]))) {
             mvc.perform(multipart("/api/v1/posts/init")
-                            .file(new MockMultipartFile("images", "one.jpg", "image/jpeg", new byte[]{1}))
-                            .file(new MockMultipartFile("images", "two.jpg", "image/jpeg", new byte[]{2})).file(invalid)
+                            .file(listingPhoto(0))
+                            .file(listingPhoto(1)).file(invalid)
                             .param("categoryId", category.getId().toString()).header("Authorization", bearer(seller)))
-                    .andExpect(status().isBadRequest());
+                    .andExpect(status().is(invalid.getSize() > 10 * 1024 * 1024 ? 413 : 400));
         }
         assertEquals(before, posts.count());
         verifyNoInteractions(cloudinary);
@@ -170,11 +174,14 @@ class MainFlow1IntegrationTest {
 
     @Test void sixImagesAreStoredInOrderAndAllSentToAi() throws Exception {
         var seller = user("SELLER", true); var category = category();
-        when(cloudinary.uploadImage(any())).thenAnswer(invocation -> "https://example.test/" +
-                ((org.springframework.web.multipart.MultipartFile) invocation.getArgument(0)).getOriginalFilename());
+        AtomicInteger index = new AtomicInteger();
+        when(cloudinary.uploadImage(any())).thenAnswer(invocation -> {
+            int number = index.getAndIncrement();
+            return new CloudinaryService.UploadedImage("https://example.test/photo" + number + ".jpg", "listings/images/test-" + number);
+        });
         var request = multipart("/api/v1/posts/init").param("categoryId", category.getId().toString())
                 .header("Authorization", bearer(seller));
-        for (int i = 0; i < 6; i++) request.file(new MockMultipartFile("images", "photo" + i + ".jpg", "image/jpeg", new byte[]{(byte)i, 42}));
+        for (int i = 0; i < 6; i++) request.file(listingPhoto(i));
         var raw = mvc.perform(request).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String id = mapper.readTree(raw).get("postId").asText();
         assertEquals(6, jdbc.queryForObject("SELECT COUNT(*) FROM post_images WHERE post_id = ?", Integer.class, UUID.fromString(id)));
@@ -480,6 +487,13 @@ class MainFlow1IntegrationTest {
             assertEquals("PASSED".equals(result) ? 0 : 1, balance(seller, CreditType.LISTING));
             assertEquals("PASSED".equals(result) ? 1 : 0, consumes(seller));
         }
+    }
+
+    private MockMultipartFile listingPhoto(int index) throws Exception {
+        String[] files = {"valid-front.jpg", "valid-left.jpg", "valid-right.jpg", "valid-bottom.jpg",
+                "phone-orientation-6.jpg", "valid-blank-white.jpg"};
+        return new MockMultipartFile("images", "photo" + index + ".jpg", "image/jpeg",
+                Files.readAllBytes(Path.of("src/test/resources/image-validation", files[index])));
     }
 
     private User user(String role, boolean approved) {

@@ -23,6 +23,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -109,6 +110,14 @@ class MediaControllerTest {
                         .file(new MockMultipartFile("file", "photo.jpg", "image/jpeg", new byte[4])))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.publicId").value("configured-folder/photo"));
+    }
+
+    @Test
+    void missingImagePartReturns400WithTheRequiredField() throws Exception {
+        mockMvc.perform(multipart("/api/v1/media/upload"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("file"));
+        verifyNoInteractions(mediaService);
     }
 
     @Test
