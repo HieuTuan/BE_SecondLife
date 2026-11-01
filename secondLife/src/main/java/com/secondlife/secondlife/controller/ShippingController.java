@@ -16,6 +16,8 @@ import com.secondlife.secondlife.service.ShippingQuoteService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -38,6 +40,16 @@ public class ShippingController {
     private final ShippingQuoteService quotes;
     private final CurrentUserProvider current;
     private final ReverseGeocodingService geocoding;
+
+    @GetMapping("/geocode")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Tìm tọa độ GPS từ địa chỉ",
+            description = "Tìm địa chỉ trong Việt Nam và kiểm tra khu vực phục vụ bằng tọa độ.")
+    public ApiResponse<GeocodedAddressResponse> geocode(
+            @Parameter(description = "Địa chỉ cần tìm kiếm", example = "12 Cầu Giấy, Hà Nội")
+            @RequestParam("address") @NotBlank @Size(max = 500) String address) {
+        return ApiResponse.success(geocoding.geocode(address.strip()));
+    }
     @PostMapping("/reverse-geocode") @PreAuthorize("isAuthenticated()")
     @Operation(summary="Preview an address from coordinates",description="Resolves an address inside an allowed Vietnamese city. Address writes perform their own lookup.")
     public ApiResponse<GeocodedAddressResponse> reverse(@Valid @RequestBody CoordinatesRequest body) {

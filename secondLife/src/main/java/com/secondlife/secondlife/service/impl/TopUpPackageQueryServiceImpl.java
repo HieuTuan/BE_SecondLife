@@ -2,8 +2,10 @@ package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.dto.response.TopupPackageResponse;
 import com.secondlife.secondlife.mapper.TopupPackageMapper;
+import com.secondlife.secondlife.service.CreditPricingService;
 import com.secondlife.secondlife.service.CreditService;
 import com.secondlife.secondlife.service.TopupPackageQueryService;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,10 +18,17 @@ public class TopUpPackageQueryServiceImpl implements TopupPackageQueryService {
 
     private final CreditService creditService;
     private final TopupPackageMapper mapper;
+    private final CreditPricingService pricing;
+    private final TopupPackagePricingPolicy policy;
 
     @Override
     @Transactional(readOnly = true)
     public List<TopupPackageResponse> getPackages() {
-        return creditService.getAllTopupPackages().stream().map(mapper::toResponse).toList();
+        var rules = pricing.getAdminPrices();
+        return creditService.getAllTopupPackages().stream().map(pkg -> {
+            var calculated = policy.calculate(pkg, rules);
+            policy.requireConfigured(calculated);
+            return mapper.toResponse(pkg, calculated);
+        }).toList();
     }
 }

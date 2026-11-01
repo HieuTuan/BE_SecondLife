@@ -11,6 +11,10 @@ public record TopupPackageResponse(
     int chatCredits,
     int valuationCredits,
     BigDecimal price,
-    double discountPercentage
+    BigDecimal discountPercentage,
+    BigDecimal referencePrice,
+    boolean pricingAvailable,
+    boolean active,
+    long packageVersion
 ) {
 }

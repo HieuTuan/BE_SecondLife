@@ -18,6 +18,8 @@ import org.springframework.security.authentication.LockedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
@@ -182,6 +184,27 @@ public class GlobalExceptionHandler {
         log.warn("Conflict at {}", request.getRequestURI());
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ErrorResponse.of(ex.getMessage(), request.getRequestURI()));
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ErrorResponse> handleMissingParameter(
+            MissingServletRequestParameterException ex, HttpServletRequest request) {
+        return ResponseEntity.badRequest().body(ErrorResponse.of("Validation failed", request.getRequestURI(),
+                List.of(new ErrorResponse.FieldErrorItem(ex.getParameterName(), "This parameter is required"))));
+    }
+
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<ErrorResponse> handleParameterValidation(
+            HandlerMethodValidationException ex, HttpServletRequest request) {
+        if (ex.isForReturnValue()) return handleGenericException(ex, request);
+        List<ErrorResponse.FieldErrorItem> errors = new ArrayList<>();
+        for (var result : ex.getParameterValidationResults()) {
+            String name = result.getMethodParameter().getParameterName();
+            for (var error : result.getResolvableErrors()) {
+                errors.add(new ErrorResponse.FieldErrorItem(name, error.getDefaultMessage()));
+            }
+        }
+        return ResponseEntity.badRequest().body(ErrorResponse.of("Validation failed", request.getRequestURI(), errors));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
