@@ -100,6 +100,9 @@ public class SecurityConfig {
         List<String> rawHeaders = Arrays.stream(corsProperties.allowedHeaders().split(","))
                 .map(String::trim).filter(s -> !s.isEmpty()).toList();
         List<String> effectiveHeaders = new java.util.ArrayList<>(rawHeaders);
+        if (!effectiveHeaders.contains("*")) {
+            effectiveHeaders.add("*");
+        }
         if (!effectiveHeaders.contains("ngrok-skip-browser-warning")) {
             effectiveHeaders.add("ngrok-skip-browser-warning");
         }
