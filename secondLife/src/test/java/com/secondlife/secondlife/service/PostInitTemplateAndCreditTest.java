@@ -107,7 +107,8 @@ class PostInitTemplateAndCreditTest {
                 1,
                 6,
                 mock(PostMapper.class),
-                null
+                null,
+                mock(com.secondlife.secondlife.common.validation.ImageUploadValidator.class)
         );
 
         userId = UUID.randomUUID();
@@ -135,7 +136,7 @@ class PostInitTemplateAndCreditTest {
         when(postRepository.countByUser_IdAndStatusIn(eq(userId), anyList())).thenReturn(0L);
         when(imageSimilarity.fingerprint(any(byte[].class))).thenReturn("010101");
         when(listingFingerprint.sha256(any(byte[].class))).thenReturn("abc123sha");
-        when(cloudinaryService.uploadImage(any())).thenReturn("https://cdn.example.com/tv.jpg");
+        when(cloudinaryService.uploadImage(any())).thenReturn(new CloudinaryService.UploadedImage("https://cdn.example.com/tv.jpg", "public_tv_123"));
         when(postRepository.save(any(Post.class))).thenAnswer(inv -> {
             Post p = inv.getArgument(0);
             if (p.getId() == null) {

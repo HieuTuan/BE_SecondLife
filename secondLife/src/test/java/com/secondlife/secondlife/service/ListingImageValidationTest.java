@@ -63,7 +63,8 @@ class ListingImageValidationTest {
         when(users.findById(ownerId)).thenReturn(Optional.of(new User()));
         when(categories.existsById(categoryId)).thenReturn(true);
         service = new PostServiceImpl(posts, users, credits, mock(ListingAccessService.class),
-                mock(AiChatService.class), mock(CategoryQuestionTemplateRepository.class),
+                mock(AiChatService.class), mock(com.secondlife.secondlife.service.CategoryTemplateService.class),
+                mock(CategoryQuestionTemplateRepository.class),
                 mock(AiChatSessionRepository.class), mock(AiChatMessageRepository.class), categories,
                 mock(ItemRepository.class), mock(AiChatGateway.class), cloud,
                 mock(InspectionOrderRepository.class), mock(AiChatGateway.class),

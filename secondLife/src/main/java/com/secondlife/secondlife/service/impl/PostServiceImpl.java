@@ -231,8 +231,10 @@ public class PostServiceImpl implements PostService {
                 p.setItemId(request.itemId());
                 p.setStatus("DRAFT");
                 p.getImages().addAll(postImages);
-                p.setImageUrl(postImages.getFirst().getImageUrl());
-                p.setImageFingerprint(postImages.getFirst().getImageFingerprint());
+                if (!postImages.isEmpty()) {
+                    p.setImageUrl(postImages.getFirst().getImageUrl());
+                    p.setImageFingerprint(postImages.getFirst().getImageFingerprint());
+                }
                 return postRepository.save(p);
             });
         } catch (IOException ex) {
