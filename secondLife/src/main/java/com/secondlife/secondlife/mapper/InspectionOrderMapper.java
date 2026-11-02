@@ -49,6 +49,10 @@ public class InspectionOrderMapper {
         @Mapping(target = "postTitle", source = "post.title")
         @Mapping(target = "postImageUrls", source = "post.imageUrls")
         @Mapping(target = "postPrice", source = "post.price")
+        @Mapping(target = "linkedOrderId", source = "order.id")
+        @Mapping(target = "negotiationId", source = "negotiation.id")
+        @Mapping(target = "inspectionScope", expression = "java(order.getInspectionScope() != null ? order.getInspectionScope().name() : null)")
+        @Mapping(target = "appealStatus", expression = "java(order.getAppealStatus() != null ? order.getAppealStatus().name() : null)")
         @Mapping(target = "initialDepositPaid", expression = "java(resolveInitialDepositPaid(order))")
         @Mapping(target = "finalPaymentRequired", expression = "java(resolveFinalPaymentRequired(order))")
         @Mapping(target = "videoCleanedMessage", expression = "java(cleanedMessage(order.getVideoCleanupStatus()))")
@@ -56,7 +60,9 @@ public class InspectionOrderMapper {
 
         default java.math.BigDecimal resolveInitialDepositPaid(InspectionOrder order) {
             if (order == null) return java.math.BigDecimal.ZERO;
-            return order.getBuyerFeeShare() != null ? order.getBuyerFeeShare() : java.math.BigDecimal.ZERO;
+            java.math.BigDecimal feeShare = order.getBuyerFeeShare() != null ? order.getBuyerFeeShare() : java.math.BigDecimal.ZERO;
+            java.math.BigDecimal commitment = order.getBuyerCommitmentDeposit() != null ? order.getBuyerCommitmentDeposit() : java.math.BigDecimal.ZERO;
+            return feeShare.add(commitment);
         }
 
         default boolean resolveFinalPaymentRequired(InspectionOrder order) {

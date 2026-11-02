@@ -5,12 +5,14 @@ import com.secondlife.secondlife.dto.request.ReportRequests;
 import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.request.ShippingAddressRequest;
 import com.secondlife.secondlife.dto.response.ShipmentResponse;
+import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.InspectionSealLog;
 import com.secondlife.secondlife.entity.Order;
 import com.secondlife.secondlife.entity.Shipment;
 import com.secondlife.secondlife.entity.ShipmentEvent;
 import com.secondlife.secondlife.entity.UserReport;
 import com.secondlife.secondlife.enums.EscrowStatus;
+import com.secondlife.secondlife.enums.InspectionOrderType;
 import com.secondlife.secondlife.enums.NotificationType;
 import com.secondlife.secondlife.enums.OrderStatus;
 import com.secondlife.secondlife.exception.BadRequestException;
@@ -141,6 +143,8 @@ public class ShipmentServiceImpl implements ShipmentService {
         Map<String,Object> payload=readMap(quote.getPayload());
         BigDecimal quotedFee=quote.getFee();
         UserReport returnDecision=null;
+        UUID linkedInspectionId = null;
+
         if ("BUYER_TO_SELLER".equals(request.leg())) {
             if (!staff || request.reason()==null || request.reason().isBlank()) throw new ForbiddenException("A STAFF/ADMIN return decision with reason is required");
             if (order.getShippingDeliveredAt()==null) throw new ConflictException("Outbound delivery must be confirmed before creating a buyer return");
@@ -161,13 +165,22 @@ public class ShipmentServiceImpl implements ShipmentService {
             if (order.getEscrowStatus()!=EscrowStatus.HELD || order.getShippingDeliveredAt()!=null) throw new ConflictException("Order is not eligible for outbound shipping");
             if ("CENTER_TO_BUYER".equals(request.leg())) {
                 if (!staff) throw new ForbiddenException("STAFF/ADMIN creates shipments from the inspection center");
-                var inspection=inspections.findByPostId(order.getPost().getId()).orElseThrow(() -> new ConflictException("Inspection is required for the center leg"));
-                if (!"PASSED".equals(inspection.getStatus())) throw new ConflictException("Inspection has not passed");
+                var inspection = inspections.findByOrderId(order.getId())
+                        .or(() -> inspections.findFirstByPostIdAndStatusOrderByCreatedAtDesc(order.getPost().getId(), "PASSED"))
+                        .or(() -> inspections.findActiveByPostId(order.getPost().getId()))
+                        .orElseThrow(() -> new ConflictException("Inspection is required for the center leg"));
+                if (!"PASSED".equals(inspection.getStatus()) && !"DELIVERING_TO_BUYER".equals(inspection.getStatus()))
+                    throw new ConflictException("Inspection has not passed");
                 if (request.fromAddress()!=null && !matchesAddress(request.fromAddress(),ShippingPayloads.storedAddress(mapper.readTree(quote.getPayload()),"from")))
                     throw new ConflictException("Inspection center address must match the paid shipping quote");
+                linkedInspectionId = inspection.getId();
+            } else if ("SELLER_TO_BUYER".equals(request.leg())) {
+                linkedInspectionId = inspections.findByOrderId(order.getId())
+                        .or(() -> inspections.findFirstByPostIdAndStatusOrderByCreatedAtDesc(order.getPost().getId(), "PASSED"))
+                        .map(InspectionOrder::getId).orElse(null);
             }
         }
-        var prepared=prepare(actor,orderId,null,order.getSeller().getId(),order.getBuyer().getId(),request,payload,quotedFee,quote.getProvider());
+        var prepared=prepare(actor,orderId,linkedInspectionId,order.getSeller().getId(),order.getBuyer().getId(),request,payload,quotedFee,quote.getProvider());
         if (returnDecision!=null) disputes.bindReturn(order,returnDecision,shipments.findById(prepared.id()).orElseThrow());
         return prepared;
     }
@@ -179,22 +192,57 @@ public class ShipmentServiceImpl implements ShipmentService {
     private Prepared prepareForInspection(UUID actor,boolean staff,UUID inspectionId,CreateShipmentRequest request) {
         UUID seller=inspections.findOwnerId(inspectionId).orElseThrow(() -> new NotFoundException("Inspection order not found"));
         if (!staff && !actor.equals(seller)) throw new ForbiddenException("This inspection belongs to another seller");
-        if (!"SELLER_TO_CENTER".equals(request.leg()) || request.toAddress()==null) throw new BadRequestException("SELLER_TO_CENTER and an inspection center address are required");
-        if (!staff) throw new ForbiddenException("STAFF/ADMIN assigns the verified inspection center destination");
+        if (!"SELLER_TO_CENTER".equals(request.leg()) && !"CENTER_TO_SELLER".equals(request.leg())) {
+            throw new BadRequestException("Only SELLER_TO_CENTER or CENTER_TO_SELLER legs are supported for inspection shipments");
+        }
+        if (!staff && !"SELLER_TO_CENTER".equals(request.leg())) {
+            throw new ForbiddenException("STAFF/ADMIN initiates return shipments from inspection center");
+        }
         var inspection=inspections.findByIdForUpdate(inspectionId).orElseThrow();
-        if (Set.of("CANCELLED", "FAILED", "PAYMENT_EXPIRED", "COMPLETED").contains(inspection.getStatus()))
-            throw new ConflictException("Inspection order is not eligible for center shipment");
         var post=inspection.getPost();
         var saved=shipments.findById(shipmentId(inspectionId,request));
         Map<String,Object> payload;
-        if (saved.isPresent()) {
-            var original=saved.get();
-            if (!Objects.equals(original.getReason(),request.reason())
-                    || !matchesAddress(request.toAddress(),ShippingPayloads.storedAddress(mapper.readTree(original.getPayload()),"to")))
-                throw new ConflictException("requestId was already used with different shipment details");
-            payload=readMap(original.getPayload());
-        } else payload=ShippingPayloads.create(quoteService.pickup(seller),geocoding.shipping(request.toAddress()),ShippingPayloads.parcel(post),post.getTitle(),post.getPrice());
-        return prepare(actor,null,inspectionId,seller,null,request,payload,null,saved.map(Shipment::getProvider).orElse(activeCarrier()));
+        BigDecimal fee = null;
+
+        if ("CENTER_TO_SELLER".equals(request.leg())) {
+            if (inspection.getOrderType() != InspectionOrderType.AT_CENTER) {
+                throw new ConflictException("Only AT_CENTER inspections support return shipments");
+            }
+            if (!Set.of("FAILED", "CANCELLED").contains(inspection.getStatus())) {
+                throw new ConflictException("Only FAILED or CANCELLED inspections are eligible for return shipping");
+            }
+            var centerLegs = shipments.findByInspectionOrderIdOrderByCreatedAtAsc(inspectionId).stream()
+                    .filter(s -> "SELLER_TO_CENTER".equals(s.getLeg()) && "DELIVERED".equals(s.getStatus())).toList();
+            if (centerLegs.isEmpty()) {
+                throw new ConflictException("The package was never delivered to the center; return shipment cannot be created");
+            }
+            if (saved.isPresent()) {
+                payload = readMap(saved.get().getPayload());
+            } else {
+                ShippingAddress from = ShippingPayloads.storedAddress(mapper.readTree(centerLegs.getLast().getPayload()), "to");
+                ShippingAddress to = quoteService.pickup(seller);
+                if (request.toAddress() != null) {
+                    to = geocoding.shipping(request.toAddress());
+                }
+                payload = ShippingPayloads.create(from, to, ShippingPayloads.parcel(post), post.getTitle(), post.getPrice());
+            }
+            fee = inspection.getReturnShippingReserveFee();
+        } else {
+            if (request.toAddress() == null) throw new BadRequestException("SELLER_TO_CENTER requires an inspection center destination address");
+            if (!staff) throw new ForbiddenException("STAFF/ADMIN assigns the verified inspection center destination");
+            if (Set.of("CANCELLED", "FAILED", "PAYMENT_EXPIRED", "COMPLETED").contains(inspection.getStatus())) {
+                throw new ConflictException("Inspection order is not eligible for center shipment");
+            }
+            if (saved.isPresent()) {
+                var original=saved.get();
+                if (!Objects.equals(original.getReason(),request.reason())
+                        || !matchesAddress(request.toAddress(),ShippingPayloads.storedAddress(mapper.readTree(original.getPayload()),"to")))
+                    throw new ConflictException("requestId was already used with different shipment details");
+                payload=readMap(original.getPayload());
+            } else payload=ShippingPayloads.create(quoteService.pickup(seller),geocoding.shipping(request.toAddress()),ShippingPayloads.parcel(post),post.getTitle(),post.getPrice());
+        }
+
+        return prepare(actor,null,inspectionId,seller,null,request,payload,fee,saved.map(Shipment::getProvider).orElse(activeCarrier()));
     }
 
     private Prepared prepare(UUID actor,UUID orderId,UUID inspectionId,UUID seller,UUID buyer,CreateShipmentRequest request,Map<String,Object> payload,BigDecimal fee,String carrierCode) {
@@ -457,60 +505,64 @@ public class ShipmentServiceImpl implements ShipmentService {
         shipment.setProviderStatus(status); shipment.setStatus(canonicalLalamove(status)); shipment.setLastEventAt(time); shipment.setLastError(null);
         if ("COMPLETED".equals(status) && shipment.getDeliveredAt()==null) shipment.setDeliveredAt(time);
         if (Set.of("REJECTED","EXPIRED").contains(status)) freeze(shipment);
+
+        if (shipment.getOrderId()!=null) {
+            var order=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();
+            if (!Set.of(OrderStatus.COMPLETED,OrderStatus.CANCELLED).contains(order.getStatus())) {
+                boolean toBuyer=Set.of("SELLER_TO_BUYER","CENTER_TO_BUYER").contains(shipment.getLeg());
+                if (toBuyer && "PICKED_UP".equals(status) && order.getShippingDeliveredAt()==null) {
+                    boolean statusChanged = order.getStatus() != OrderStatus.SHIPPED;
+                    order.setStatus(OrderStatus.SHIPPED);
+                    if (statusChanged && notificationService != null && order.getBuyer() != null) {
+                        String code = order.getId().toString();
+                        notificationService.notify(
+                            order.getBuyer().getId(),
+                            "Đơn hàng đang được giao #" + code,
+                            "Đơn hàng #" + code + " đã được tài xế lấy và đang trên đường giao tới bạn.",
+                            NotificationType.SHIPPING,
+                            order.getId(),
+                            "ORDER",
+                            "/buyer/orders/" + order.getId()
+                        );
+                    }
+                }
+                if (toBuyer && "COMPLETED".equals(status)) {
+                    boolean statusChanged = order.getStatus() != OrderStatus.DELIVERED;
+                    order.setStatus(OrderStatus.DELIVERED);
+                    if (order.getShippingDeliveredAt()==null) order.setShippingDeliveredAt(shipment.getDeliveredAt());
+                    if (statusChanged && notificationService != null) {
+                        String code = order.getId().toString();
+                        if (order.getBuyer() != null) {
+                            notificationService.notify(
+                                order.getBuyer().getId(),
+                                "Đơn hàng đã giao thành công #" + code,
+                                "Đơn hàng #" + code + " đã được giao thành công. Vui lòng kiểm tra sản phẩm và xác nhận trong 48h.",
+                                NotificationType.SHIPPING,
+                                order.getId(),
+                                "ORDER",
+                                "/buyer/orders/" + order.getId()
+                            );
+                        }
+                        if (order.getSeller() != null) {
+                            notificationService.notify(
+                                order.getSeller().getId(),
+                                "Đơn hàng đã giao thành công #" + code,
+                                "Đơn hàng #" + code + " đã được giao tới người mua.",
+                                NotificationType.SHIPPING,
+                                order.getId(),
+                                "ORDER",
+                                "/seller/orders/" + order.getId()
+                            );
+                        }
+                    }
+                }
+                orders.save(order);
+            }
+        }
+
         if (shipment.getInspectionOrderId() != null) {
             applyLalamoveInspectionStatus(shipment, status, time);
         }
-        if (shipment.getOrderId()==null) return;
-        var order=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();
-        if (Set.of(OrderStatus.COMPLETED,OrderStatus.CANCELLED).contains(order.getStatus())) return;
-        boolean toBuyer=Set.of("SELLER_TO_BUYER","CENTER_TO_BUYER").contains(shipment.getLeg());
-        if (toBuyer && "PICKED_UP".equals(status) && order.getShippingDeliveredAt()==null) {
-            boolean statusChanged = order.getStatus() != OrderStatus.SHIPPED;
-            order.setStatus(OrderStatus.SHIPPED);
-            if (statusChanged && notificationService != null && order.getBuyer() != null) {
-                String code = order.getId().toString();
-                notificationService.notify(
-                    order.getBuyer().getId(),
-                    "Đơn hàng đang được giao #" + code,
-                    "Đơn hàng #" + code + " đã được tài xế lấy và đang trên đường giao tới bạn.",
-                    NotificationType.SHIPPING,
-                    order.getId(),
-                    "ORDER",
-                    "/buyer/orders/" + order.getId()
-                );
-            }
-        }
-        if (toBuyer && "COMPLETED".equals(status)) {
-            boolean statusChanged = order.getStatus() != OrderStatus.DELIVERED;
-            order.setStatus(OrderStatus.DELIVERED);
-            if (order.getShippingDeliveredAt()==null) order.setShippingDeliveredAt(shipment.getDeliveredAt());
-            if (statusChanged && notificationService != null) {
-                String code = order.getId().toString();
-                if (order.getBuyer() != null) {
-                    notificationService.notify(
-                        order.getBuyer().getId(),
-                        "Đơn hàng đã giao thành công #" + code,
-                        "Đơn hàng #" + code + " đã được giao thành công. Vui lòng kiểm tra sản phẩm và xác nhận trong 48h.",
-                        NotificationType.SHIPPING,
-                        order.getId(),
-                        "ORDER",
-                        "/buyer/orders/" + order.getId()
-                    );
-                }
-                if (order.getSeller() != null) {
-                    notificationService.notify(
-                        order.getSeller().getId(),
-                        "Đơn hàng đã giao thành công #" + code,
-                        "Đơn hàng #" + code + " đã được giao tới người mua.",
-                        NotificationType.SHIPPING,
-                        order.getId(),
-                        "ORDER",
-                        "/seller/orders/" + order.getId()
-                    );
-                }
-            }
-        }
-        orders.save(order);
     }
 
     private void applyLalamoveInspectionStatus(Shipment shipment, String status, Instant time) {
@@ -539,7 +591,7 @@ public class ShipmentServiceImpl implements ShipmentService {
                     inspection.setStatus("INSPECTING");
                 }
             }
-        } else if ("CENTER_TO_BUYER".equals(shipment.getLeg())) {
+        } else if (Set.of("CENTER_TO_BUYER", "SELLER_TO_BUYER").contains(shipment.getLeg())) {
             if ("PICKED_UP".equals(status)) {
                 inspection.setStatus("DELIVERING_TO_BUYER");
                 if (sealLogs != null && inspection.getTamperSealId() != null
@@ -550,13 +602,12 @@ public class ShipmentServiceImpl implements ShipmentService {
                             null,
                             "CARRIER_HANDOVER",
                             "INTACT",
-                            "Tài xế nhận hàng từ Hub SecondLife",
+                            "Tài xế nhận hàng để giao tới Người mua",
                             "Ghi nhận tự động từ Webhook đối tác vận chuyển"
                     );
                     sealLogs.save(sealLog);
                 }
             } else if ("COMPLETED".equals(status)) {
-                inspection.setStatus("COMPLETED");
                 if (sealLogs != null && inspection.getTamperSealId() != null
                         && !sealLogs.existsByTamperSealIdAndScanStage(inspection.getTamperSealId(), "DELIVERED_BUYER")) {
                     var sealLog = new InspectionSealLog(
@@ -570,6 +621,10 @@ public class ShipmentServiceImpl implements ShipmentService {
                     );
                     sealLogs.save(sealLog);
                 }
+            }
+        } else if ("CENTER_TO_SELLER".equals(shipment.getLeg())) {
+            if ("COMPLETED".equals(status)) {
+                inspection.setStatus("CANCELLED");
             }
         }
         inspections.save(inspection);

@@ -94,11 +94,16 @@ public class SecurityConfig {
                 .filter(s -> !s.isEmpty())
                 .toList();
 
-        configuration.setAllowedOrigins(origins);
+        configuration.setAllowedOriginPatterns(origins);
         configuration.setAllowedMethods(Arrays.stream(corsProperties.allowedMethods().split(","))
                 .map(String::trim).filter(s -> !s.isEmpty()).toList());
-        configuration.setAllowedHeaders(Arrays.stream(corsProperties.allowedHeaders().split(","))
-                .map(String::trim).filter(s -> !s.isEmpty()).toList());
+        List<String> rawHeaders = Arrays.stream(corsProperties.allowedHeaders().split(","))
+                .map(String::trim).filter(s -> !s.isEmpty()).toList();
+        List<String> effectiveHeaders = new java.util.ArrayList<>(rawHeaders);
+        if (!effectiveHeaders.contains("ngrok-skip-browser-warning")) {
+            effectiveHeaders.add("ngrok-skip-browser-warning");
+        }
+        configuration.setAllowedHeaders(effectiveHeaders);
         configuration.setAllowCredentials(corsProperties.allowCredentials());
         configuration.setMaxAge(corsProperties.maxAgeSeconds());
 

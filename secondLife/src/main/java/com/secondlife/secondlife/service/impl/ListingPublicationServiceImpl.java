@@ -6,6 +6,8 @@ import com.secondlife.secondlife.service.ListingPublicationService;
 
 import com.secondlife.secondlife.entity.*;
 import com.secondlife.secondlife.enums.CreditType;
+import com.secondlife.secondlife.enums.InspectionFeePayer;
+import com.secondlife.secondlife.enums.InspectionScope;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.repository.*;
 import org.springframework.beans.factory.annotation.Value;
@@ -61,8 +63,14 @@ public class ListingPublicationServiceImpl implements ListingPublicationService 
         post.setRejectionReason(null);
         if (post.getPrice().compareTo(highValueThreshold) > 0) {
             InspectionOrder order = new InspectionOrder();
-            order.setPost(post); order.setInspectionFee(inspectionFee); order.setShippingFee(shippingFee);
-            order.setStatus("PENDING"); inspections.save(order);
+            order.setPost(post);
+            order.setSeller(post.getUser());
+            order.setInspectionScope(InspectionScope.PRE_LISTING);
+            order.setFeePayer(InspectionFeePayer.SELLER_PAYS);
+            order.setInspectionFee(inspectionFee);
+            order.setShippingFee(shippingFee);
+            order.setStatus("PENDING");
+            inspections.save(order);
             post.setStatus("PENDING_INSPECTION");
         } else activate(post);
         posts.save(post);

@@ -1,0 +1,196 @@
+package com.secondlife.secondlife.service.impl;
+
+import com.secondlife.secondlife.entity.InspectionFeeSettlement;
+import com.secondlife.secondlife.entity.InspectionOrder;
+import com.secondlife.secondlife.entity.Post;
+import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.enums.InspectionFeePayer;
+import com.secondlife.secondlife.enums.InspectionSettlementOutcome;
+import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
+import com.secondlife.secondlife.repository.InspectionFeeSettlementRepository;
+import com.secondlife.secondlife.repository.InspectionOrderRepository;
+import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.service.WalletService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+class InspectionFeeSettlementServiceImplTest {
+
+    @Mock
+    private InspectionFeeSettlementRepository settlements;
+
+    @Mock
+    private InspectionOrderRepository inspectionOrders;
+
+    @Mock
+    private WalletService walletService;
+
+    @Mock
+    private UserRepository userRepository;
+
+    private InspectionFeeSettlementServiceImpl settlementService;
+
+    private User buyer;
+    private User seller;
+    private User inspector;
+    private User manager;
+    private InspectionOrder order;
+    private Post post;
+
+    @BeforeEach
+    void setUp() {
+        settlementService = new InspectionFeeSettlementServiceImpl(
+                settlements,
+                inspectionOrders,
+                walletService,
+                userRepository,
+                new BigDecimal("0.10") // 10% platform fee rate
+        );
+
+        buyer = new User();
+        buyer.setId(UUID.randomUUID());
+
+        seller = new User();
+        seller.setId(UUID.randomUUID());
+
+        manager = new User();
+        manager.setId(UUID.randomUUID());
+
+        inspector = new User();
+        inspector.setId(UUID.randomUUID());
+        inspector.setManager(manager);
+
+        post = new Post();
+        post.setId(UUID.randomUUID());
+        post.setUser(seller);
+
+        order = new InspectionOrder();
+        order.setId(UUID.randomUUID());
+        order.setPost(post);
+        order.setBuyer(buyer);
+        order.setSeller(seller);
+        order.setInspector(inspector);
+        order.setInspectionFee(new BigDecimal("100000"));
+        order.setShippingFee(new BigDecimal("30000"));
+        order.setReturnShippingReserveFee(new BigDecimal("30000"));
+        order.setFeePayer(InspectionFeePayer.SPLIT_50_50);
+        order.setBuyerFeeShare(new BigDecimal("80000"));
+        order.setSellerFeeShare(new BigDecimal("80000"));
+        order.setBuyerCommitmentDeposit(new BigDecimal("50000"));
+        order.setBuyerPaidAt(Instant.now());
+        order.setSellerPaidAt(Instant.now());
+
+        lenient().when(settlements.saveAndFlush(any(InspectionFeeSettlement.class))).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    @Test
+    @DisplayName("Idempotency: nếu đơn đã hạch toán phí, trả về bản ghi cũ mà không ghi nợ/hoàn tiền lại")
+    void testIdempotencyReturnsExistingSettlement() {
+        InspectionFeeSettlement existing = new InspectionFeeSettlement();
+        existing.setId(UUID.randomUUID());
+        existing.setInspectionOrder(order);
+
+        when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.of(existing));
+
+        InspectionFeeSettlement result = settlementService.settle(order, InspectionSettlementOutcome.PASSED_PURCHASED, "Test");
+
+        assertSame(existing, result);
+        verifyNoInteractions(walletService);
+        verify(settlements, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("PAYMENT_EXPIRED: Hoàn tiền đầy đủ cho bên đã nộp, không trừ phạt hay trả phí trung tâm")
+    void testPaymentExpiredRefundsAllParties() {
+        when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.empty());
+
+        InspectionFeeSettlement settlement = settlementService.settle(order, InspectionSettlementOutcome.PAYMENT_EXPIRED, "Expired");
+
+        assertNotNull(settlement);
+        // Buyer refund = 80000 (fee) + 50000 (deposit) = 130000
+        assertEquals(new BigDecimal("130000"), settlement.getBuyerRefundAmount());
+        assertEquals(new BigDecimal("80000"), settlement.getSellerRefundAmount());
+        assertEquals(BigDecimal.ZERO, settlement.getCenterPayoutAmount());
+        assertEquals(BigDecimal.ZERO, settlement.getSellerCompensationAmount());
+
+        verify(walletService, times(1)).processRefund(eq(buyer.getId()), eq(new BigDecimal("130000")), eq(order.getId()),
+                eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+        verify(walletService, times(1)).processRefund(eq(seller.getId()), eq(new BigDecimal("80000")), eq(order.getId()),
+                eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+        verify(walletService, never()).processEarning(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("PASSED_PURCHASED: Trả phí kiểm định cho trung tâm, hoàn cọc cam kết và tiền ship hoàn dự phòng chưa dùng")
+    void testPassedPurchasedSettlement() {
+        when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.empty());
+
+        InspectionFeeSettlement settlement = settlementService.settle(order, InspectionSettlementOutcome.PASSED_PURCHASED, "Purchased");
+
+        assertNotNull(settlement);
+        // Inspection service fee = 100000. Platform rate = 10% (10000). Center payout = 90000.
+        assertEquals(new BigDecimal("90000.00"), settlement.getCenterPayoutAmount());
+        assertEquals(manager, settlement.getCenterRecipientUser());
+
+        // Return reserve = 30000, split 50/50 -> 15000 buyer, 15000 seller.
+        // Buyer refund = 50000 (deposit) + 15000 (reserve refund) = 65000
+        assertEquals(new BigDecimal("65000.00"), settlement.getBuyerRefundAmount());
+        assertEquals(new BigDecimal("15000.00"), settlement.getSellerRefundAmount());
+
+        verify(walletService, times(1)).processEarning(eq(manager.getId()), eq(new BigDecimal("90000.00")), eq(order.getId()),
+                eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+        verify(walletService, times(1)).processRefund(eq(buyer.getId()), eq(new BigDecimal("65000.00")), eq(order.getId()),
+                eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+        verify(walletService, times(1)).processRefund(eq(seller.getId()), eq(new BigDecimal("15000.00")), eq(order.getId()),
+                eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+    }
+
+    @Test
+    @DisplayName("PASSED_BUYER_DEFAULTED: Người mua bỏ cọc -> bồi hoàn cọc cam kết cho người bán, trả phí trung tâm")
+    void testPassedBuyerDefaultedCompensatesSeller() {
+        when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.empty());
+
+        InspectionFeeSettlement settlement = settlementService.settle(order, InspectionSettlementOutcome.PASSED_BUYER_DEFAULTED, "Defaulted");
+
+        assertNotNull(settlement);
+        assertEquals(new BigDecimal("90000.00"), settlement.getCenterPayoutAmount());
+        assertEquals(new BigDecimal("50000"), settlement.getSellerCompensationAmount());
+        assertEquals(BigDecimal.ZERO, settlement.getBuyerRefundAmount());
+
+        verify(walletService, times(1)).processEarning(eq(seller.getId()), eq(new BigDecimal("50000")), eq(order.getId()),
+                eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+        verify(walletService, times(1)).processEarning(eq(manager.getId()), eq(new BigDecimal("90000.00")), eq(order.getId()),
+                eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+    }
+
+    @Test
+    @DisplayName("FAILED_INSPECTION: Kiểm định không đạt -> Hoàn lại cọc cam kết cho người mua, phân bổ phí ship hoàn")
+    void testFailedInspectionRefundsCommitmentDeposit() {
+        when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.empty());
+
+        InspectionFeeSettlement settlement = settlementService.settle(order, InspectionSettlementOutcome.FAILED_INSPECTION, "Failed");
+
+        assertNotNull(settlement);
+        assertEquals(new BigDecimal("50000"), settlement.getBuyerRefundAmount());
+        assertEquals(new BigDecimal("90000.00"), settlement.getCenterPayoutAmount());
+        assertEquals(new BigDecimal("30000"), settlement.getReturnReserveAllocated());
+
+        verify(walletService, times(1)).processRefund(eq(buyer.getId()), eq(new BigDecimal("50000")), eq(order.getId()),
+                eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+    }
+}

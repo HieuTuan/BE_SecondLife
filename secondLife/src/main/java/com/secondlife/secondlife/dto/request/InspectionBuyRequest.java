@@ -25,7 +25,8 @@ public record InspectionBuyRequest(
     ShippingAddressRequest buyerDeliveryAddress,
     String note,
     BigDecimal buyerLatitude,
-    BigDecimal buyerLongitude
+    BigDecimal buyerLongitude,
+    UUID negotiationId
 ) {
     public BigDecimal buyerLatitude() {
         if (buyerLatitude != null) return buyerLatitude;
@@ -41,5 +42,4 @@ public record InspectionBuyRequest(
     public boolean buyerConsentZinLoss() {
         return buyerConsentZin;
     }
-
 }

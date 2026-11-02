@@ -23,7 +23,6 @@ import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.ReputationCalculator;
 import com.secondlife.secondlife.service.SellerReputationService;
 
-
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
@@ -240,6 +239,22 @@ public class SellerReputationServiceImpl implements SellerReputationService {
         event(sellerId,"ORDER_CONFIRMATION_"+milestone,order.getId(),null,null,
             "Seller missed confirmation deadline; deducted "+points.toPlainString()+" points",before,state(sellerId,false).orElseThrow());
         return true;
+    }
+
+    @Override
+    @Transactional
+    public void recordInspectionFailurePenalty(UUID sellerId, UUID inspectionOrderId, BigDecimal points, String reason, boolean serious) {
+        if (points == null || points.signum() <= 0) return;
+        State before = lock(sellerId);
+        reputations.increaseConfirmationPenalty(sellerId, points);
+        if (serious) {
+            reputations.incrementIncidentCounts(sellerId, 1, 1, false);
+        } else {
+            reputations.incrementIncidentCounts(sellerId, 1, 0, false);
+        }
+        event(sellerId, "INSPECTION_FAILED_MISMATCH", null, null, null,
+                reason != null ? reason : "Kiểm định không đạt, sai lệch so với mô tả đăng bán (-" + points.toPlainString() + " điểm)",
+                before, state(sellerId, false).orElseThrow());
     }
 
     private BigDecimal percentage(long count,long total) {

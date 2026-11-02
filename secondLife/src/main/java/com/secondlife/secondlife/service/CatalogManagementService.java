@@ -1,12 +1,12 @@
 package com.secondlife.secondlife.service;
 
-import com.secondlife.secondlife.dto.request.CategoryRequest;
 import com.secondlife.secondlife.dto.request.CategoryQuestionTemplateRequest;
+import com.secondlife.secondlife.dto.request.CategoryRequest;
 import com.secondlife.secondlife.dto.request.ItemRequest;
 import com.secondlife.secondlife.dto.response.CategoryResponse;
 import com.secondlife.secondlife.dto.response.ItemResponse;
 import com.secondlife.secondlife.entity.CategoryQuestionTemplate;
-import com.secondlife.secondlife.service.CatalogManagementService;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -36,5 +36,4 @@ public interface CatalogManagementService {
     void deleteTemplate(UUID id);
 
     List<CategoryQuestionTemplate> getAllTemplates();
-
 }

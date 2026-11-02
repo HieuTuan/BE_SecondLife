@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -43,6 +44,10 @@ public interface PostRepository extends JpaRepository<Post, UUID>, JpaSpecificat
     Page<Post> findByStatus(String status, Pageable pageable);
     @Query("select p.user.id from Post p where p.id = :id")
     Optional<UUID> findOwnerId(@Param("id") UUID id);
+
+    @Modifying
+    @Query("update Post p set p.template = null where p.template.id = :templateId")
+    void clearTemplateReference(@Param("templateId") UUID templateId);
 
     @Transactional(propagation = Propagation.MANDATORY)
     @Query(value = "SELECT 1 FROM pg_advisory_xact_lock(6002256281192384846)", nativeQuery = true)
