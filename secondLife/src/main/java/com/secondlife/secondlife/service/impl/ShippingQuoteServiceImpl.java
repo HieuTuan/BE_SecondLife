@@ -73,22 +73,36 @@ public class ShippingQuoteServiceImpl implements ShippingQuoteService {
         if (!"ACTIVE".equals(post.getStatus()) && !"RESERVED".equals(post.getStatus())) {
             throw new ConflictException("Post is not available for shipping quotation");
         }
-        if ("RESERVED".equals(post.getStatus()) && request.negotiationId() == null) {
+
+        var passedInspection = inspections.findFirstByPostIdAndStatusOrderByCreatedAtDesc(post.getId(), "PASSED");
+        boolean isPassedInspectionBuyer = passedInspection.isPresent()
+                && passedInspection.get().getBuyer() != null
+                && buyerId.equals(passedInspection.get().getBuyer().getId())
+                && passedInspection.get().getFinalPaymentDeadline() != null
+                && passedInspection.get().getFinalPaymentDeadline().isAfter(Instant.now());
+
+        if ("RESERVED".equals(post.getStatus()) && request.negotiationId() == null && !isPassedInspectionBuyer) {
             throw new ConflictException("Post is reserved. You must provide a valid negotiation for shipping quotation");
         }
         if (buyerId.equals(post.getUser().getId())) throw new BadRequestException("You cannot buy your own post");
-        BigDecimal price=post.getPrice();
-        if (request.negotiationId()!=null) {
-            var n=negotiations.findById(request.negotiationId()).orElseThrow(() -> new NotFoundException("Negotiation not found"));
-            if (!n.getBuyer().getId().equals(buyerId) || !n.getPost().getId().equals(post.getId()) || n.getStatus()!=NegotiationStatus.ACCEPTED
-                    || n.getExpiredAt()==null || n.getExpiredAt().isBefore(Instant.now())) throw new ConflictException("Accepted negotiation is not valid for this quote");
-            price=n.getOfferedPrice();
+
+        BigDecimal price = post.getPrice();
+        if (isPassedInspectionBuyer && passedInspection.get().getFinalItemPrice() != null) {
+            price = passedInspection.get().getFinalItemPrice();
+        } else if (request.negotiationId() != null) {
+            var n = negotiations.findById(request.negotiationId()).orElseThrow(() -> new NotFoundException("Negotiation not found"));
+            if (!n.getBuyer().getId().equals(buyerId) || !n.getPost().getId().equals(post.getId()) || n.getStatus() != NegotiationStatus.ACCEPTED
+                    || n.getExpiredAt() == null || n.getExpiredAt().isBefore(Instant.now())) throw new ConflictException("Accepted negotiation is not valid for this quote");
+            price = n.getOfferedPrice();
         }
+
         ShippingAddress sellerPickup=pickup(post.getUser().getId());
         if (sellerPickup==null) throw new BadRequestException("Seller pickup address is not configured");
         ShippingAddress origin=sellerPickup;
         String leg="SELLER_TO_BUYER";
-        var inspection=inspections.findByPostId(post.getId());
+
+        var inspection = passedInspection.or(() -> inspections.findActiveByPostId(post.getId()))
+                .or(() -> inspections.findFirstByPostIdOrderByCreatedAtDesc(post.getId()));
         if (inspection.isPresent()) {
             var centerLegs=shipments.findByInspectionOrderIdOrderByCreatedAtAsc(inspection.get().getId()).stream()
                     .filter(s -> "SELLER_TO_CENTER".equals(s.getLeg()) && !"CANCELLED".equals(s.getStatus())).toList();

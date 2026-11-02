@@ -36,6 +36,8 @@ public interface SellerReputationService {
 
     boolean recordConfirmationPenalty(Order order, String milestone, BigDecimal points);
 
+    void recordInspectionFailurePenalty(UUID sellerId, UUID inspectionOrderId, BigDecimal points, String reason, boolean serious);
+
     ReputationResponse liftRestriction(UUID sellerId, UUID adminId, String reason);
 
 }

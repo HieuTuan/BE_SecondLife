@@ -2,9 +2,12 @@ package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.common.PageResponse;
+import com.secondlife.secondlife.dto.request.ConfirmInspectionPurchaseRequest;
+import com.secondlife.secondlife.dto.request.InspectionAppealRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
-import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
+import com.secondlife.secondlife.dto.request.InspectionBuyerRespondRequest;
 import com.secondlife.secondlife.dto.request.InspectionQuoteRequest;
+import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionSealScanRequest;
 import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
@@ -69,6 +72,16 @@ public class InspectionController {
         return ResponseEntity.ok(inspectionService.respondInspection(sellerId, orderId, request));
     }
 
+    @PostMapping("/requests/{orderId}/buyer-respond")
+    @Operation(summary = "Người mua phản hồi phương án đề xuất lại của người bán (Đồng ý hoặc Từ chối)")
+    public ResponseEntity<InspectionOrderResponse> respondInspectionByBuyer(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID orderId,
+            @Valid @RequestBody InspectionBuyerRespondRequest request) {
+        UUID buyerId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(inspectionService.respondInspectionByBuyer(buyerId, orderId, request));
+    }
+
     @PostMapping("/orders/{orderId}/pay-fee")
     @Operation(summary = "Người mua hoặc Người bán nộp phần phí kiểm định ký quỹ từ ví SecondLife (trong vòng 6h)")
     public ResponseEntity<InspectionOrderResponse> payInspectionFee(
@@ -111,9 +124,10 @@ public class InspectionController {
     @Operation(summary = "Người mua thanh toán tiền hàng và ship cuối cùng sau khi sản phẩm kiểm định PASSED (trong vòng 6h)")
     public ResponseEntity<InspectionOrderResponse> confirmFinalPurchase(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @PathVariable UUID orderId) {
+            @PathVariable UUID orderId,
+            @Valid @RequestBody(required = false) ConfirmInspectionPurchaseRequest request) {
         UUID buyerId = currentUserProvider.resolveUserId(userDetails);
-        return ResponseEntity.ok(inspectionService.confirmFinalPurchase(buyerId, orderId));
+        return ResponseEntity.ok(inspectionService.confirmFinalPurchase(buyerId, orderId, request));
     }
 
     @PostMapping(value = {"/orders/{orderId}/reject-purchase", "/orders/{orderId}/cancel-purchase"})
@@ -124,6 +138,27 @@ public class InspectionController {
             @RequestBody(required = false) InspectionRejectPurchaseRequest request) {
         UUID buyerId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(inspectionService.rejectFinalPurchase(buyerId, orderId, request));
+    }
+
+    @PostMapping("/orders/{orderId}/appeal")
+    @Operation(summary = "Người bán gửi khiếu nại kết quả kiểm định trong vòng 24 giờ")
+    public ResponseEntity<ApiResponse<InspectionOrderResponse>> submitAppeal(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID orderId,
+            @Valid @RequestBody InspectionAppealRequest request) {
+        UUID sellerId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Gửi khiếu nại kết quả kiểm định thành công", inspectionService.submitAppeal(sellerId, orderId, request)));
+    }
+
+    @PostMapping("/orders/{orderId}/accept-failed")
+    @Operation(summary = "Người bán chủ động chấp nhận kết quả FAILED sớm")
+    public ResponseEntity<ApiResponse<InspectionOrderResponse>> acceptFailedResult(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID orderId) {
+        UUID sellerId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Đã xác nhận chấp nhận kết quả kiểm định không đạt", inspectionService.acceptFailedResult(sellerId, orderId)));
     }
 
     @GetMapping("/seal/{tamperSealId}")

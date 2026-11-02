@@ -2,6 +2,7 @@ package com.secondlife.secondlife.entity;
 
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionOrderType;
+import com.secondlife.secondlife.enums.InspectionScope;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -42,6 +43,14 @@ public class InspectionOrder {
     @JoinColumn(name = "order_id")
     private Order order;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "negotiation_id")
+    private Negotiation negotiation;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "inspection_scope", nullable = false, length = 30)
+    private InspectionScope inspectionScope = InspectionScope.BUYER_REQUEST;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "order_type", length = 30)
     private InspectionOrderType orderType = InspectionOrderType.AT_CENTER;
@@ -77,6 +86,12 @@ public class InspectionOrder {
     @Column(name = "return_shipping_reserve_fee", precision = 18, scale = 2)
     private BigDecimal returnShippingReserveFee = BigDecimal.ZERO;
 
+    @Column(name = "buyer_commitment_deposit", precision = 18, scale = 2, nullable = false)
+    private BigDecimal buyerCommitmentDeposit = BigDecimal.ZERO;
+
+    @Column(name = "approval_deadline")
+    private Instant approvalDeadline;
+
     @Column(name = "payment_deadline")
     private Instant paymentDeadline;
 
@@ -86,8 +101,14 @@ public class InspectionOrder {
     @Column(name = "seller_paid_at")
     private Instant sellerPaidAt;
 
+    @Column(name = "fee_settled_at")
+    private Instant feeSettledAt;
+
     @Column(name = "appointment_scheduled_at")
     private Instant appointmentScheduledAt;
+
+    @Column(name = "buyer_delivery_address_json", columnDefinition = "TEXT")
+    private String buyerDeliveryAddressJson;
 
     @Column(name = "checklist_result_json", columnDefinition = "TEXT")
     private String checklistResultJson;
@@ -142,6 +163,32 @@ public class InspectionOrder {
 
     @Column(name = "barcode", length = 100, unique = true)
     private String barcode;
+
+    @Column(name = "appeal_deadline")
+    private Instant appealDeadline;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "appeal_status", length = 30)
+    private com.secondlife.secondlife.enums.InspectionAppealStatus appealStatus = com.secondlife.secondlife.enums.InspectionAppealStatus.NONE;
+
+    @Column(name = "appeal_reason", columnDefinition = "TEXT")
+    private String appealReason;
+
+    @Column(name = "appeal_evidence_json", columnDefinition = "TEXT")
+    private String appealEvidenceJson;
+
+    @Column(name = "appeal_resolved_at")
+    private Instant appealResolvedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "appeal_resolved_by")
+    private User appealResolvedBy;
+
+    @Column(name = "reputation_penalty_applied")
+    private boolean reputationPenaltyApplied = false;
+
+    @Column(name = "reputation_penalty_points", precision = 6, scale = 2)
+    private BigDecimal reputationPenaltyPoints = BigDecimal.ZERO;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

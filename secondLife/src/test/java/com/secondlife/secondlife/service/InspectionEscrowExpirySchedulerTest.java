@@ -1,9 +1,9 @@
 package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.entity.InspectionOrder;
-import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.enums.InspectionSettlementOutcome;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.scheduler.InspectionEscrowExpiryScheduler;
@@ -34,10 +34,13 @@ class InspectionEscrowExpirySchedulerTest {
     private InspectionEscrowService inspectionEscrowService;
 
     @Mock
-    private PostRepository postRepository;
+    private InspectionService inspectionService;
 
     @Mock
-    private WalletService walletService;
+    private InspectionFeeSettlementService feeSettlementService;
+
+    @Mock
+    private PostRepository postRepository;
 
     @Mock
     private NotificationService notificationService;
@@ -49,14 +52,15 @@ class InspectionEscrowExpirySchedulerTest {
         scheduler = new InspectionEscrowExpiryScheduler(
                 inspectionOrderRepository,
                 inspectionEscrowService,
+                inspectionService,
+                feeSettlementService,
                 postRepository,
-                walletService,
                 notificationService
         );
     }
 
     @Test
-    @DisplayName("processExpiredFinalPayment: Hủy đơn, hoàn post về ACTIVE và bồi hoàn cọc cho người bán")
+    @DisplayName("processExpiredFinalPayment: Hủy đơn, hoàn post về ACTIVE và bồi hoàn cọc cho người bán qua feeSettlementService")
     void testProcessExpiredFinalPayment() {
         UUID sellerId = UUID.randomUUID();
         UUID buyerId = UUID.randomUUID();
@@ -86,8 +90,7 @@ class InspectionEscrowExpirySchedulerTest {
 
         assertEquals("CANCELLED", order.getStatus());
         assertEquals("ACTIVE", post.getStatus());
-        verify(walletService, times(1)).processEarning(eq(sellerId), eq(new BigDecimal("150000")), eq(order.getId()),
-                eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+        verify(feeSettlementService, times(1)).settle(eq(order), eq(InspectionSettlementOutcome.PASSED_BUYER_DEFAULTED), any());
         verify(inspectionOrderRepository, times(1)).save(order);
         verify(postRepository, times(1)).save(post);
     }
