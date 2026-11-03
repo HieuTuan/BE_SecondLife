@@ -42,5 +42,7 @@ public interface PostService {
 
     PostDto getPostDetail(UUID postId);
 
+    PostDto getMyPostDetail(UUID userId, UUID postId);
+
     Page<PostDto> getMyPosts(UUID userId, Pageable pageable);
 }

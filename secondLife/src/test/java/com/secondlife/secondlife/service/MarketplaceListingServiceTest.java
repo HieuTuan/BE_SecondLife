@@ -33,12 +33,45 @@ class MarketplaceListingServiceTest {
     void activeDetailContainsAllImagesAndPurchaseId() {
         Post post = listing();
         post.setImageUrl("https://example.com/product.jpg");
+        post.setShippingWeight(2000);
+        post.setShippingLength(160);
+        post.setShippingWidth(43);
+        post.setShippingHeight(18);
         when(posts.findById(post.getId())).thenReturn(Optional.of(post));
         var result = service.get(post.getId());
         assertEquals(post.getId(), result.postId());
         assertEquals(post.getUser().getId(), result.sellerId());
         assertEquals(List.of(post.getImageUrl()), result.imageUrls());
         assertEquals("ACTIVE", result.status());
+        assertEquals(2000, result.shippingWeight());
+        assertEquals(160, result.shippingLength());
+        assertEquals(43, result.shippingWidth());
+        assertEquals(18, result.shippingHeight());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void publicListingPageIncludesPackedMeasurementsWithoutInventingMissingValues() {
+        Post packed = listing();
+        packed.setShippingWeight(2000);
+        packed.setShippingLength(160);
+        packed.setShippingWidth(43);
+        packed.setShippingHeight(18);
+        Post missingParcel = listing();
+        var pageable = PageRequest.of(0, 5);
+        when(posts.findAll(any(Specification.class), eq(pageable)))
+                .thenReturn(new PageImpl<>(List.of(packed, missingParcel), pageable, 2));
+
+        var content = service.list(null, null, pageable).getContent();
+
+        assertEquals(2000, content.getFirst().shippingWeight());
+        assertEquals(160, content.getFirst().shippingLength());
+        assertEquals(43, content.getFirst().shippingWidth());
+        assertEquals(18, content.getFirst().shippingHeight());
+        assertNull(content.getLast().shippingWeight());
+        assertNull(content.getLast().shippingLength());
+        assertNull(content.getLast().shippingWidth());
+        assertNull(content.getLast().shippingHeight());
     }
 
     @Test

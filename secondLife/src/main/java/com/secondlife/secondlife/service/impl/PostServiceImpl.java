@@ -859,6 +859,17 @@ public class PostServiceImpl implements PostService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public PostDto getMyPostDetail(UUID userId, UUID postId) {
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new NotFoundException("Post not found"));
+        if (post.getUser() == null || !userId.equals(post.getUser().getId())) {
+            throw new ForbiddenException("This post belongs to another user");
+        }
+        return postMapper.toResponse(post);
+    }
+
+    @Override
     public AiPriceEstimationResponse estimatePrice(UUID userId, UUID postId, String requestId) {
         ValuationPromptContext promptContext = executeInTransaction(() -> {
             Post post = postRepository.findById(postId)

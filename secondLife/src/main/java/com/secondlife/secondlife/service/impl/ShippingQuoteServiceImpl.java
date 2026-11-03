@@ -114,7 +114,8 @@ public class ShippingQuoteServiceImpl implements ShippingQuoteService {
             }
         }
         ShippingAddress delivery=geocoding.shipping(request.deliveryAddress());
-        var payload=ShippingPayloads.create(origin,delivery,ShippingPayloads.parcel(post),post.getTitle(),price);
+        ShippingParcel parcel = ShippingPayloads.parcel(post);
+        var payload=ShippingPayloads.create(origin,delivery,parcel,post.getTitle(),price);
         String carrier=provider.code()==null?"LALAMOVE":provider.code();
         if ("LALAMOVE".equals(carrier)) {
             ShippingPayloads.requireCoordinates(sellerPickup,"Original seller pickup for return shipping");
@@ -147,7 +148,8 @@ public class ShippingQuoteServiceImpl implements ShippingQuoteService {
         quotes.save(row);
         return new ShippingQuoteResponse(row.getId(),row.getLeg(),row.getFee(),price,price.add(row.getFee()),
             BigDecimal.ZERO,row.getExpiresAt(),row.getExpectedDeliveryTime(),
-            carrier,result.path("provider_quote").path("serviceType").asText(null),result.path("provider_quote").path("quotationId").asText(null));
+            carrier,result.path("provider_quote").path("serviceType").asText(null),result.path("provider_quote").path("quotationId").asText(null),
+            parcel.weight(),parcel.length(),parcel.width(),parcel.height());
     }
     @Transactional public ShippingQuote consume(UUID buyerId,UUID postId,UUID quoteId,UUID orderId,BigDecimal price) {
         if (quoteId==null) throw new BadRequestException("shippingQuoteId is required; obtain a shipping quote before placing the order");
