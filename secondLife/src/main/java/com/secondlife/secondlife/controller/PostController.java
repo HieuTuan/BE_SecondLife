@@ -14,6 +14,7 @@ import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.MarketplaceListingService;
 import com.secondlife.secondlife.service.PostService;
+import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -22,7 +23,15 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 import java.util.UUID;
@@ -121,6 +130,19 @@ public class PostController {
         return ResponseEntity.ok(PageResponse.from(postService.getMyPosts(userId, pageable)));
     }
 
+
+    @GetMapping("/my-posts/{postId}")
+    @PreAuthorize("hasAuthority('PROFILE_READ_SELF')")
+    @Operation(summary = "View your own listing details",
+            description = "Returns the owner's listing in any status, including sold or non-public listings. "
+                    + "Includes images and packed measurements (grams and centimeters). "
+                    + "Returns 403 for another owner's listing and 404 when the listing does not exist.")
+    public ResponseEntity<PostDto> getMyPostDetail(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID postId) {
+        UUID userId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(postService.getMyPostDetail(userId, postId));
+    }
 
     @PutMapping("/{postId}/draft")
     @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")

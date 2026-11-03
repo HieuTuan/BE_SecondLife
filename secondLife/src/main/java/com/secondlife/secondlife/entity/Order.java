@@ -31,11 +31,13 @@ import java.util.UUID;
 @NoArgsConstructor
 public class Order {
     @Enumerated(EnumType.STRING)
-    @Column(nullable=false, length=20)
+    @Column(nullable = false, length = 20)
     private OrderPaymentMethod paymentMethod = OrderPaymentMethod.WALLET;
     private UUID shippingQuoteId;
-    @Column(nullable=false, precision=18, scale=2) private BigDecimal shippingFee=BigDecimal.ZERO;
-    @Column(columnDefinition="TEXT") private String deliveryAddress;
+    @Column(nullable = false, precision = 18, scale = 2)
+    private BigDecimal shippingFee = BigDecimal.ZERO;
+    @Column(columnDefinition = "TEXT")
+    private String deliveryAddress;
     private Instant shippingDeliveredAt;
     @Column(name = "shipping_hold", nullable = false)
     private boolean shippingHold;
@@ -44,8 +46,10 @@ public class Order {
     private Instant sellerConfirmedAt;
     private Instant confirmationDeadline;
     private Instant confirmationCancelAt;
-    @Column(precision=5,scale=2) private BigDecimal confirmationLatePenalty;
-    @Column(precision=5,scale=2) private BigDecimal confirmationTimeoutPenalty;
+    @Column(precision = 5, scale = 2)
+    private BigDecimal confirmationLatePenalty;
+    @Column(precision = 5, scale = 2)
+    private BigDecimal confirmationTimeoutPenalty;
     private Instant handoverDeadline;
     private Instant sellerReadyAt;
     private Instant carrierPickedUpAt;

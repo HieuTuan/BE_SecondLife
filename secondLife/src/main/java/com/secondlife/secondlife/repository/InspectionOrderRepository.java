@@ -40,9 +40,20 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
     @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
     Page<InspectionOrder> findAll(Pageable pageable);
 
-    Optional<InspectionOrder> findByPostId(UUID postId);
+    List<InspectionOrder> findAllByPostIdOrderByCreatedAtDesc(UUID postId);
+
+    Optional<InspectionOrder> findFirstByPostIdOrderByCreatedAtDesc(UUID postId);
+
+    Optional<InspectionOrder> findFirstByPostIdAndStatusOrderByCreatedAtDesc(UUID postId, String status);
+
+    default Optional<InspectionOrder> findByPostId(UUID postId) {
+        return findFirstByPostIdOrderByCreatedAtDesc(postId);
+    }
 
     Optional<InspectionOrder> findByPostIdAndStatus(UUID postId, String status);
+
+    @Query("SELECT o FROM InspectionOrder o WHERE o.post.id = :postId AND o.status NOT IN ('CANCELLED', 'FAILED', 'PAYMENT_EXPIRED', 'COMPLETED') ORDER BY o.createdAt DESC")
+    Optional<InspectionOrder> findActiveByPostId(@Param("postId") UUID postId);
 
     Optional<InspectionOrder> findByOrderId(UUID orderId);
 
@@ -54,11 +65,17 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
     @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
     Page<InspectionOrder> findBySellerIdOrderByCreatedAtDesc(UUID sellerId, Pageable pageable);
 
+    @Query("SELECT o FROM InspectionOrder o WHERE o.status IN ('WAITING_SELLER_APPROVAL', 'WAITING_BUYER_APPROVAL') AND o.approvalDeadline IS NOT NULL AND o.approvalDeadline < :now")
+    List<InspectionOrder> findExpiredApprovalOrders(@Param("now") Instant now);
+
     @Query("SELECT o FROM InspectionOrder o WHERE o.status = 'WAITING_FEE_PAYMENT' AND o.paymentDeadline IS NOT NULL AND o.paymentDeadline < :now")
     List<InspectionOrder> findExpiredUnpaidOrders(@Param("now") Instant now);
 
     @Query("SELECT o FROM InspectionOrder o WHERE o.status = 'PASSED' AND o.finalPaymentDeadline IS NOT NULL AND o.finalPaymentDeadline < :now AND o.finalPaymentPaidAt IS NULL")
     List<InspectionOrder> findExpiredFinalPaymentOrders(@Param("now") Instant now);
+
+    @Query("SELECT o FROM InspectionOrder o WHERE o.status = 'FAILED' AND o.appealStatus = com.secondlife.secondlife.enums.InspectionAppealStatus.NONE AND o.reputationPenaltyApplied = false AND o.appealDeadline IS NOT NULL AND o.appealDeadline < :now")
+    List<InspectionOrder> findExpiredAppeals(@Param("now") Instant now);
 
     @Query("SELECT o FROM InspectionOrder o WHERE o.videoCleanupStatus = 'ACTIVE' " +
            "AND o.videoRetentionUntil IS NOT NULL AND o.videoRetentionUntil <= :now " +

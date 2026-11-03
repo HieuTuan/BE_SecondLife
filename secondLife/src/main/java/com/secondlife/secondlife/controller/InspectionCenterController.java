@@ -5,6 +5,7 @@ import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.dto.request.CreateInspectorRequest;
 import com.secondlife.secondlife.dto.request.InspectionChecklistTemplateRequest;
 import com.secondlife.secondlife.dto.request.InspectionFeeProposalRequest;
+import com.secondlife.secondlife.dto.request.ReviewInspectionAppealRequest;
 import com.secondlife.secondlife.dto.response.InspectionChecklistResponse;
 import com.secondlife.secondlife.dto.response.InspectionFeeProposalResponse;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
@@ -18,7 +19,6 @@ import com.secondlife.secondlife.service.InspectionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
@@ -70,6 +70,17 @@ public class InspectionCenterController {
             @RequestParam UUID inspectorId) {
         UUID managerId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(inspectionService.assignInspector(orderId, inspectorId, managerId));
+    }
+
+    @PostMapping("/orders/{orderId}/review-appeal")
+    @PreAuthorize("hasAuthority('INSPECTION_ORDER_ASSIGN')")
+    @Operation(summary = "Quản lý thẩm duyệt khiếu nại kết quả kiểm định của người bán (UPHELD hoặc OVERTURNED)")
+    public ResponseEntity<ApiResponse<InspectionOrderResponse>> reviewAppeal(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID orderId,
+            @Valid @RequestBody ReviewInspectionAppealRequest request) {
+        UUID reviewerId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(ApiResponse.success(inspectionService.reviewAppeal(reviewerId, orderId, request)));
     }
 
     // --- 2. QUẢN LÝ CHECKLIST STUDIO ---

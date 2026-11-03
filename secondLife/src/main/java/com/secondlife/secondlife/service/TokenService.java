@@ -23,4 +23,6 @@ public interface TokenService {
     String createPasswordResetOtp(User user);
 
     User verifyAndConsumePasswordResetOtp(String email, String rawOtp);
+
+    int cleanupExpiredAndRevokedTokens();
 }

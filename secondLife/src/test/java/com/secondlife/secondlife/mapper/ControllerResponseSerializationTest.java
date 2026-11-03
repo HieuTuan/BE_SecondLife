@@ -1,12 +1,14 @@
 package com.secondlife.secondlife.mapper;
 
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.secondlife.secondlife.dto.response.TopupPackagePriceResponse;
 import com.secondlife.secondlife.entity.CategoryQuestionTemplate;
 import com.secondlife.secondlife.entity.ShipmentEvent;
 import com.secondlife.secondlife.entity.TopupPackage;
 import com.secondlife.secondlife.mapper.CategoryQuestionTemplateMapper;
 import com.secondlife.secondlife.mapper.ShipmentEventMapper;
 import com.secondlife.secondlife.mapper.TopupPackageMapper;
+
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
@@ -23,7 +25,7 @@ class ControllerResponseSerializationTest {
             new com.fasterxml.jackson.databind.ObjectMapper().registerModule(new JavaTimeModule());
 
     @Test
-    void topupPackageDtoKeepsEveryPreviouslySerializedFieldAndNullableDescription() throws Exception {
+    void topupPackageDtoUsesCalculatedPricingSaleStateAndNullableDescription() throws Exception {
         TopupPackage entity = new TopupPackage();
         entity.setId(UUID.randomUUID());
         entity.setName("Premium");
@@ -35,9 +37,16 @@ class ControllerResponseSerializationTest {
         entity.setDiscountPercentage(12.5);
         TopupPackageMapper mapper = MapperTestSupport.mapper(TopupPackageMapper.class);
 
-        assertSameJson(entity, mapper.toResponse(entity));
+        var pricing = new TopupPackagePriceResponse(true, new BigDecimal("300000.00"),
+                new BigDecimal("66.67"), new BigDecimal("20000"), new BigDecimal("2000"), new BigDecimal("2000"));
+        var response = objectMapper.readTree(objectMapper.writeValueAsString(mapper.toResponse(entity, pricing)));
+        assertEquals(entity.getId().toString(), response.path("id").asText());
+        assertEquals("66.67", response.path("discountPercentage").asText());
+        assertEquals(true, response.path("active").asBoolean());
+        assertEquals(0L, response.path("packageVersion").asLong());
+        assertEquals(0, response.path("price").decimalValue().compareTo(new BigDecimal("100000.00")));
         entity.setDescription(null);
-        assertSameJson(entity, mapper.toResponse(entity));
+        assertEquals(null, mapper.toResponse(entity, pricing).description());
     }
 
     @Test

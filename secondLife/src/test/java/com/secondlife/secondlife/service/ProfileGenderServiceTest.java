@@ -6,6 +6,7 @@ import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.impl.UserServiceImpl;
+import com.secondlife.secondlife.security.userdetails.UserPrincipalCache;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import com.secondlife.secondlife.mapper.MapperTestSupport;
@@ -24,7 +25,7 @@ class ProfileGenderServiceTest {
     @BeforeEach void setup() {
         user.setId(UUID.randomUUID()); user.setProfile(new UserProfile(user,"Nguyễn Test",null,null)); user.getProfile().setGender(Gender.MALE);
         when(users.findByIdWithProfileDetails(user.getId())).thenReturn(Optional.of(user)); when(users.save(user)).thenReturn(user);
-        service=new UserServiceImpl(users,mock(RoleRepository.class),mock(PasswordEncoder.class),mock(TokenService.class),mapper,mock(NotificationService.class),mock(SellerReputationService.class));
+        service=new UserServiceImpl(users,mock(RoleRepository.class),mock(PasswordEncoder.class),mock(TokenService.class),mapper,mock(NotificationService.class),mock(SellerReputationService.class),mock(UserPrincipalCache.class));
     }
     @Test void chosenGenderCanBeUpdatedAndReadFromProfileAndAuthSummary() {
         var result=service.updateProfile(user.getId(),new UpdateProfileRequest(null,null,null,null,null,null,null,null,null,Gender.FEMALE));

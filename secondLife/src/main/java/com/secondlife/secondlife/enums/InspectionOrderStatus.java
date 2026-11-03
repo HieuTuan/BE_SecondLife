@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.enums;
 
 public enum InspectionOrderStatus {
+    PENDING,
     WAITING_SELLER_APPROVAL,
     WAITING_BUYER_APPROVAL,
     WAITING_FEE_PAYMENT,

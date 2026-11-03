@@ -52,6 +52,7 @@ public class InspectionFeeProposal {
     @Column(name = "reviewed_at")
     private Instant reviewedAt;
 
+    @Transient
     public UUID getCategoryId() {
         return category != null ? category.getId() : null;
     }

@@ -1,5 +1,7 @@
 package com.secondlife.secondlife.security.authentication;
 
+import com.secondlife.secondlife.enums.AccountStatus;
+import com.secondlife.secondlife.repository.UserSecurityState;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider.AccessToken;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
@@ -9,6 +11,7 @@ import io.jsonwebtoken.JwtException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -42,24 +45,37 @@ public class AccessTokenAuthenticator {
         }
 
         UUID userId = accessToken.userId();
-        CustomUserDetails userDetails = userPrincipalCache.get(userId);
-
-        if (userDetails == null || userDetails.getTokenVersion() != accessToken.tokenVersion()) {
-            userDetails = userDetailsService.loadUserById(userId);
-            if (userDetails.isEnabled() && userDetails.getTokenVersion() == accessToken.tokenVersion()) {
-                userPrincipalCache.put(userId, userDetails);
+        for (int attempt = 0; attempt < 2; attempt++) {
+            long generation = userPrincipalCache.generation();
+            UserSecurityState state;
+            try {
+                state = userDetailsService.loadSecurityState(userId);
+            } catch (UsernameNotFoundException missingUser) {
+                userPrincipalCache.evict(userId);
+                throw missingUser;
             }
-        }
+            if (accessToken.tokenVersion() != state.getTokenVersion()) {
+                userPrincipalCache.evict(userId);
+                throw new BadCredentialsException("Access token has been revoked");
+            }
+            if (state.getAccountStatus() != AccountStatus.ACTIVE) {
+                userPrincipalCache.evict(userId);
+                throw new DisabledException("Account is not active");
+            }
 
-        if (accessToken.tokenVersion() != userDetails.getTokenVersion()) {
+            CustomUserDetails details = userPrincipalCache.get(userId);
+            if (details != null && details.matches(state)) {
+                return details;
+            }
+            details = userDetailsService.loadUserById(userId);
+            if (details.matches(state)) {
+                userPrincipalCache.putIfUnchanged(userId, details, generation);
+                return details;
+            }
+            // A committed security mutation occurred between the two reads.
             userPrincipalCache.evict(userId);
-            throw new BadCredentialsException("Access token has been revoked");
         }
-        if (!userDetails.isEnabled()) {
-            userPrincipalCache.evict(userId);
-            throw new DisabledException("Account is not active");
-        }
-        return userDetails;
+        throw new BadCredentialsException("Account security state changed; retry authentication");
     }
 
     public void evict(UUID userId) {

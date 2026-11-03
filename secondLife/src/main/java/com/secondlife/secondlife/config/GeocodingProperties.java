@@ -15,7 +15,7 @@ public class GeocodingProperties {
     @NotNull private String apiKey;
     @NotBlank @Pattern(regexp="https://nominatim\\.openstreetmap\\.org/reverse") private String fallbackBaseUrl;
     @NotBlank @Pattern(regexp="[^\\r\\n]+") private String fallbackUserAgent;
-    @NotBlank @Pattern(regexp="[a-z]{2}") private String language;
+    @NotBlank @Pattern(regexp="[a-z]{2}") private String language = "vi";
     @Min(1000) @Max(30000) private int timeoutMs;
     @Positive @Max(4*1024*1024) private int maxResponseCharacters;
     @AssertTrue(message="Enabled Geoapify geocoding requires an API key")

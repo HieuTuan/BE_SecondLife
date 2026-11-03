@@ -15,24 +15,39 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor
 public class SellerOnboarding {
-    @Id private UUID userId;
-    @Column(nullable = false, length = 30) private String shopName;
-    @Column(nullable = false, length = 255) private String email;
-    @Column(nullable = false, length = 16) private String phone;
-    @Column(nullable = false, columnDefinition = "TEXT") private String pickupAddressJson;
+    @Id
+    private UUID userId;
+    @Column(nullable = false, length = 30)
+    private String shopName;
+    @Column(nullable = false, length = 255)
+    private String email;
+    @Column(nullable = false, length = 16)
+    private String phone;
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String pickupAddressJson;
     private Integer pickupProvinceId;
     private Integer pickupWardId;
     private Instant emailVerifiedAt;
     @JsonIgnore
-    @Column(length = 255) private String emailOtpHash;
+    @Column(length = 255)
+    private String emailOtpHash;
     private Instant emailOtpExpiresAt;
     private Instant emailOtpSentAt;
-    @Column(nullable = false) private int emailOtpAttempts;
-    @Column(nullable = false, updatable = false) private Instant createdAt;
-    @Column(nullable = false) private Instant updatedAt;
+    @Column(nullable = false)
+    private int emailOtpAttempts;
+    @Column(nullable = false, updatable = false)
+    private Instant createdAt;
+    @Column(nullable = false)
+    private Instant updatedAt;
 
     @PrePersist
-    void created() { createdAt = Instant.now(); updatedAt = createdAt; }
+    void created() {
+        createdAt = Instant.now();
+        updatedAt = createdAt;
+    }
+
     @PreUpdate
-    void updated() { updatedAt = Instant.now(); }
+    void updated() {
+        updatedAt = Instant.now();
+    }
 }

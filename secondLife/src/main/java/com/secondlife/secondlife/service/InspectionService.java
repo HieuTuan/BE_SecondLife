@@ -1,11 +1,15 @@
 package com.secondlife.secondlife.service;
 
+import com.secondlife.secondlife.dto.request.ConfirmInspectionPurchaseRequest;
+import com.secondlife.secondlife.dto.request.InspectionAppealRequest;
 import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
+import com.secondlife.secondlife.dto.request.InspectionBuyerRespondRequest;
 import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
 import com.secondlife.secondlife.dto.request.InspectionSealScanRequest;
 import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
+import com.secondlife.secondlife.dto.request.ReviewInspectionAppealRequest;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.dto.response.InspectionSealLogResponse;
 import com.secondlife.secondlife.dto.response.InspectionSealVerificationResponse;
@@ -25,6 +29,11 @@ public interface InspectionService {
      * Người bán phản hồi yêu cầu kiểm định (Đồng ý / Từ chối / Đề xuất lại)
      */
     InspectionOrderResponse respondInspection(UUID sellerId, UUID orderId, InspectionSellerRespondRequest request);
+
+    /**
+     * Người mua phản hồi đề xuất lại của người bán (Đồng ý / Từ chối)
+     */
+    InspectionOrderResponse respondInspectionByBuyer(UUID buyerId, UUID orderId, InspectionBuyerRespondRequest request);
 
     /**
      * KTV hoặc Người bán chốt lịch hẹn đến nhà kiểm định (gói AT_HOME)
@@ -47,43 +56,52 @@ public interface InspectionService {
     Page<InspectionOrderResponse> getSellerOrders(UUID sellerId, Pageable pageable);
 
     /**
-     * Người mua xác nhận mua hàng & thanh toán tiền hàng sau khi kiểm định PASSED
+     * Người mua xác nhận hoàn tất mua hàng và thanh toán tiền hàng (sau khi kiểm định PASSED)
      */
     InspectionOrderResponse confirmFinalPurchase(UUID buyerId, UUID orderId);
 
     /**
-     * Người mua từ chối mua tiếp sau khi sản phẩm kiểm định PASSED
+     * Người mua xác nhận hoàn tất mua hàng kèm địa chỉ/phương thức mới
+     */
+    InspectionOrderResponse confirmFinalPurchase(UUID buyerId, UUID orderId, ConfirmInspectionPurchaseRequest request);
+
+    /**
+     * Người mua từ chối mua tiếp sau khi có kết quả kiểm định đạt chuẩn (hủy đơn)
      */
     InspectionOrderResponse rejectFinalPurchase(UUID buyerId, UUID orderId, InspectionRejectPurchaseRequest request);
 
     /**
-     * Inspector xem danh sách đơn kiểm định được phân công cho mình
+     * KTV xem danh sách đơn được phân công cho mình
      */
     List<InspectionOrderResponse> getMyOrders(UUID inspectorId);
 
     /**
-     * Manager xem tất cả đơn (có thể lọc theo status)
+     * Quản trị viên/Trung tâm xem toàn bộ đơn kiểm định
      */
     Page<InspectionOrderResponse> getAllOrders(String status, Pageable pageable);
 
     /**
-     * Manager phân công nhân viên cho đơn kiểm định
+     * Phân công KTV cho đơn kiểm định
      */
     InspectionOrderResponse assignInspector(UUID orderId, UUID inspectorId);
+
+    /**
+     * Manager phân công KTV thuộc trung tâm của mình
+     */
     InspectionOrderResponse assignInspector(UUID orderId, UUID inspectorId, UUID managerId);
 
     /**
-     * Inspector bắt đầu tiến hành kiểm định (chuyển trạng thái sang INSPECTING)
+     * KTV bắt đầu tiến hành kiểm tra (chuyển sang INSPECTING)
      */
     InspectionOrderResponse startInspection(UUID actorId, UUID orderId);
 
     /**
-     * Inspector nộp kết quả kiểm định kèm video bằng chứng và checklist
+     * KTV nhập biên bản kết quả kiểm định chi tiết (PASSED hoặc FAILED)
      */
     InspectionOrderResponse submitResult(UUID orderId, UUID inspectorId, InspectionResultRequest request);
 
     /**
-     * Manager tạo tài khoản nhân viên kiểm định với role INSPECTOR
+     * Thêm tài khoản nhân viên kiểm định mới
      */
     void createInspectorAccount(String email, String fullName, String password, UUID managerId);
 
@@ -106,4 +124,29 @@ public interface InspectionService {
      * Sinh mã tem niêm phong chuẩn cho đơn kiểm định
      */
     String generateSealForOrder(UUID inspectorId, UUID orderId);
+
+    /**
+     * Quét các đơn kiểm định quá hạn phản hồi (24h) chuyển sang CANCELLED
+     */
+    void processExpiredApprovals();
+
+    /**
+     * Người bán gửi khiếu nại kết quả kiểm định trong vòng 24 giờ
+     */
+    InspectionOrderResponse submitAppeal(UUID sellerId, UUID orderId, InspectionAppealRequest request);
+
+    /**
+     * Người bán chủ động chấp nhận kết quả FAILED sớm không cần chờ 24 giờ
+     */
+    InspectionOrderResponse acceptFailedResult(UUID sellerId, UUID orderId);
+
+    /**
+     * Admin hoặc Quản lý trung tâm duyệt khiếu nại của người bán (UPHELD / OVERTURNED)
+     */
+    InspectionOrderResponse reviewAppeal(UUID reviewerId, UUID orderId, ReviewInspectionAppealRequest request);
+
+    /**
+     * Tiến trình tự động quét các đơn FAILED hết hạn 24 giờ không khiếu nại để trừ điểm uy tín người bán
+     */
+    void processExpiredAppeals();
 }

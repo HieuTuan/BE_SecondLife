@@ -13,6 +13,7 @@ import com.secondlife.secondlife.repository.PasswordResetTokenRepository;
 import com.secondlife.secondlife.repository.RefreshTokenRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
+import com.secondlife.secondlife.security.userdetails.UserPrincipalCache;
 import com.secondlife.secondlife.service.impl.TokenServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,11 +50,22 @@ class TokenServiceTest {
     @Mock
     private JwtTokenProvider jwtTokenProvider;
 
+    @Mock
+    private UserPrincipalCache userPrincipalCache;
+
     @InjectMocks
     private TokenServiceImpl tokenService;
 
     private User user;
     private UUID userId;
+
+    @Test
+    void revokingAllRefreshTokensInvalidatesThePrincipalAfterCommit() {
+        UUID owner = UUID.randomUUID();
+        tokenService.revokeAllUserRefreshTokens(owner);
+        verify(refreshTokenRepository).revokeAllActiveByUserId(owner);
+        verify(userPrincipalCache).evictAfterCommit(owner);
+    }
 
     @BeforeEach
     void setUp() throws Exception {
@@ -215,5 +227,22 @@ class TokenServiceTest {
         assertEquals(user.getEmail(), resetUser.getEmail());
         assertTrue(token.isUsed());
         verify(passwordResetTokenRepository).save(token);
+    }
+
+    @Test
+    void cleanupExpiredAndRevokedTokens_ShouldCallRepositoriesAndReturnTotalCount() {
+        when(refreshTokenRepository.deleteExpiredOrRevokedBefore(any(Instant.class), any(Instant.class)))
+                .thenReturn(5);
+        when(emailVerificationTokenRepository.deleteExpiredOrUsedBefore(any(Instant.class), any(Instant.class)))
+                .thenReturn(2);
+        when(passwordResetTokenRepository.deleteExpiredOrUsedBefore(any(Instant.class), any(Instant.class)))
+                .thenReturn(1);
+
+        int totalDeleted = tokenService.cleanupExpiredAndRevokedTokens();
+
+        assertEquals(8, totalDeleted);
+        verify(refreshTokenRepository).deleteExpiredOrRevokedBefore(any(Instant.class), any(Instant.class));
+        verify(emailVerificationTokenRepository).deleteExpiredOrUsedBefore(any(Instant.class), any(Instant.class));
+        verify(passwordResetTokenRepository).deleteExpiredOrUsedBefore(any(Instant.class), any(Instant.class));
     }
 }

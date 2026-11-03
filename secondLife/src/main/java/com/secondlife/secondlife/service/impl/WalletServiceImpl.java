@@ -9,6 +9,7 @@ import com.secondlife.secondlife.entity.WalletTransaction;
 import com.secondlife.secondlife.entity.WalletWithdrawal;
 import com.secondlife.secondlife.enums.NotificationType;
 import com.secondlife.secondlife.enums.WalletTransactionType;
+import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.NotFoundException;
@@ -95,6 +96,7 @@ public class WalletServiceImpl implements WalletService {
     @Override
     @Transactional
     public void deposit(UUID userId, BigDecimal amount, UUID referenceId) {
+        validateAmountPrecision(amount);
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BadRequestException("Deposit amount must be greater than 0");
         }
@@ -121,6 +123,13 @@ public class WalletServiceImpl implements WalletService {
     @Override
     @Transactional
     public void processPayment(UUID userId, BigDecimal amount, UUID orderId) {
+        processPayment(userId, amount, orderId, WalletTransactionReferenceType.ORDER);
+    }
+
+    @Override
+    @Transactional
+    public void processPayment(UUID userId, BigDecimal amount, UUID orderId, WalletTransactionReferenceType referenceType) {
+        validateAmountPrecision(amount);
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BadRequestException("Payment amount must be greater than 0");
         }
@@ -135,12 +144,19 @@ public class WalletServiceImpl implements WalletService {
         userWalletRepository.save(wallet);
 
         // Record a negative transaction for payment
-        createTransaction(wallet, amount.negate(), WalletTransactionType.PAYMENT, orderId);
+        createTransaction(wallet, amount.negate(), WalletTransactionType.PAYMENT, orderId, referenceType);
     }
 
     @Override
     @Transactional
     public void processEarning(UUID userId, BigDecimal amount, UUID orderId) {
+        processEarning(userId, amount, orderId, WalletTransactionReferenceType.ORDER);
+    }
+
+    @Override
+    @Transactional
+    public void processEarning(UUID userId, BigDecimal amount, UUID orderId, WalletTransactionReferenceType referenceType) {
+        validateAmountPrecision(amount);
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BadRequestException("Earning amount must be greater than 0");
         }
@@ -149,7 +165,7 @@ public class WalletServiceImpl implements WalletService {
         wallet.setBalance(wallet.getBalance().add(amount));
         userWalletRepository.save(wallet);
 
-        createTransaction(wallet, amount, WalletTransactionType.EARNING, orderId);
+        createTransaction(wallet, amount, WalletTransactionType.EARNING, orderId, referenceType);
 
         if (notificationService != null) {
             notificationService.notifyWithEmail(
@@ -167,6 +183,13 @@ public class WalletServiceImpl implements WalletService {
     @Override
     @Transactional
     public void processRefund(UUID userId, BigDecimal amount, UUID orderId) {
+        processRefund(userId, amount, orderId, WalletTransactionReferenceType.ORDER);
+    }
+
+    @Override
+    @Transactional
+    public void processRefund(UUID userId, BigDecimal amount, UUID orderId, WalletTransactionReferenceType referenceType) {
+        validateAmountPrecision(amount);
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BadRequestException("Refund amount must be greater than 0");
         }
@@ -175,7 +198,7 @@ public class WalletServiceImpl implements WalletService {
         wallet.setBalance(wallet.getBalance().add(amount));
         userWalletRepository.save(wallet);
 
-        createTransaction(wallet, amount, WalletTransactionType.REFUND, orderId);
+        createTransaction(wallet, amount, WalletTransactionType.REFUND, orderId, referenceType);
 
         if (notificationService != null) {
             notificationService.notifyWithEmail(
@@ -221,12 +244,33 @@ public class WalletServiceImpl implements WalletService {
                 });
     }
 
+    private void validateAmountPrecision(BigDecimal amount) {
+        if (amount == null) throw new BadRequestException("Wallet amount is required");
+        if (amount.stripTrailingZeros().scale() > 2) {
+            throw new BadRequestException("Wallet amount must have at most 2 decimal places");
+        }
+    }
+
     private void createTransaction(UserWallet wallet, BigDecimal amount, WalletTransactionType type, UUID referenceId) {
+        WalletTransactionReferenceType referenceType = switch (type) {
+            case DEPOSIT -> WalletTransactionReferenceType.DEPOSIT_REQUEST;
+            case WITHDRAW -> WalletTransactionReferenceType.WITHDRAWAL;
+            case RETURN_SHIPPING_FEE -> WalletTransactionReferenceType.SHIPMENT;
+            default -> WalletTransactionReferenceType.UNKNOWN;
+        };
+        createTransaction(wallet, amount, type, referenceId, referenceType);
+    }
+
+    private void createTransaction(UserWallet wallet, BigDecimal amount, WalletTransactionType type, UUID referenceId,
+                                   WalletTransactionReferenceType referenceType) {
         WalletTransaction transaction = new WalletTransaction();
         transaction.setWallet(wallet);
         transaction.setAmount(amount);
         transaction.setType(type);
         transaction.setReferenceId(referenceId);
+        transaction.setReferenceType(referenceType != null ? referenceType : WalletTransactionReferenceType.UNKNOWN);
+        transaction.setBalanceAfter(wallet.getBalance());
+        transaction.setBalanceBefore(wallet.getBalance().subtract(amount));
         walletTransactionRepository.save(transaction);
     }
 
@@ -243,6 +287,7 @@ public class WalletServiceImpl implements WalletService {
         if (walletWithdrawalRepository == null) {
             throw new IllegalStateException("WalletWithdrawalRepository is not available");
         }
+        validateAmountPrecision(request.amount());
         if (request.amount() == null || request.amount().compareTo(BigDecimal.ZERO) <= 0) {
             throw new BadRequestException("Số tiền rút phải lớn hơn 0");
         }
@@ -330,7 +375,8 @@ public class WalletServiceImpl implements WalletService {
             wallet.setBalance(wallet.getBalance().add(withdrawal.getAmount()));
             userWalletRepository.save(wallet);
 
-            createTransaction(wallet, withdrawal.getAmount(), WalletTransactionType.REFUND, withdrawal.getId());
+            createTransaction(wallet, withdrawal.getAmount(), WalletTransactionType.REFUND, withdrawal.getId(),
+                    WalletTransactionReferenceType.WITHDRAWAL);
             withdrawal = walletWithdrawalRepository.save(withdrawal);
 
             if (notificationService != null) {

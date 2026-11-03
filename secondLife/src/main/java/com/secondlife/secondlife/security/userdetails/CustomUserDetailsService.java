@@ -2,6 +2,7 @@ package com.secondlife.secondlife.security.userdetails;
 
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.repository.UserSecurityState;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -32,5 +33,11 @@ public class CustomUserDetailsService implements UserDetailsService {
         User user = userRepository.findByIdWithAuthorities(id)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found with id: " + id));
         return new CustomUserDetails(user);
+    }
+
+    @Transactional(readOnly = true)
+    public UserSecurityState loadSecurityState(UUID id) {
+        return userRepository.findSecurityStateById(id)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found with id: " + id));
     }
 }

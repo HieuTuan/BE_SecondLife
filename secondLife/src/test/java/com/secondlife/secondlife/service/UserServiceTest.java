@@ -15,6 +15,7 @@ import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.security.userdetails.UserPrincipalCache;
 import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.impl.UserServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,6 +57,9 @@ class UserServiceTest {
 
     @Mock
     private SellerReputationService sellerReputationService;
+
+    @Mock
+    private UserPrincipalCache userPrincipalCache;
 
     @InjectMocks
     private UserServiceImpl userService;
@@ -205,6 +209,7 @@ class UserServiceTest {
     void updateAdminUserStatus_WhenValid_ShouldUpdateStatusAndSendNotification() {
         UUID targetUserId = UUID.randomUUID();
         User targetUser = new User("target@example.com", "pass", AccountStatus.ACTIVE);
+        targetUser.setId(targetUserId);
         AdminStatusUpdateRequest request = new AdminStatusUpdateRequest(AccountStatus.LOCKED);
 
         when(roleRepository.findByCodeForUpdate("ADMIN")).thenReturn(Optional.of(new Role("ADMIN", "Admin", null)));
@@ -216,6 +221,7 @@ class UserServiceTest {
         assertEquals(AccountStatus.LOCKED, targetUser.getAccountStatus());
         verify(userRepository).save(targetUser);
         verify(tokenService).revokeAllUserRefreshTokens(targetUserId);
+        verify(userPrincipalCache).evictAfterCommit(targetUserId);
         verify(notificationService).sendAccountStatusChanged(targetUser, AccountStatus.LOCKED);
     }
 }

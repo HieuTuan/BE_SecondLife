@@ -8,7 +8,6 @@ import com.secondlife.secondlife.entity.CreditPricingRule;
 import com.secondlife.secondlife.enums.CreditType;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
-import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.CreditMapper;
 import com.secondlife.secondlife.repository.CreditPricingRuleRepository;
 import com.secondlife.secondlife.service.CreditPricingService;
@@ -19,7 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
-import java.util.Comparator;
+import java.util.Arrays;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.UUID;
 
@@ -75,21 +75,29 @@ public class CreditPricingServiceImpl implements CreditPricingService {
     @Override
     @Transactional(readOnly = true)
     public List<CreditPricingRuleResponse> getAdminPrices() {
-        return priceRepository.findAll().stream()
-                .sorted(Comparator.comparing(CreditPricingRule::getCreditType))
-                .map(creditMapper::toPriceResponse).toList();
+        var rules = new EnumMap<CreditType, CreditPricingRule>(CreditType.class);
+        priceRepository.findAll().forEach(rule -> rules.put(rule.getCreditType(), rule));
+        return Arrays.stream(CreditType.values()).map(type -> {
+            var rule = rules.get(type);
+            return rule == null
+                    ? new CreditPricingRuleResponse(type, null, "VND", false)
+                    : creditMapper.toPriceResponse(rule);
+        }).toList();
     }
 
     @Override
     @Transactional
     public CreditPricingRuleResponse updatePrice(UUID adminId, CreditType creditType,
                                                   UpdateCreditPricingRequest request) {
-        if (request == null || request.unitPrice() == null || request.unitPrice().signum() <= 0
+        if (creditType == null || request == null || request.unitPrice() == null || request.unitPrice().signum() <= 0
                 || request.unitPrice().scale() > 2) {
             throw new BadRequestException("Unit price must be positive with at most two decimal places");
         }
+        // Provision an unconfigured row inside this transaction, without inventing a price.
+        // The unique credit_type constraint also serializes concurrent first-time updates.
+        priceRepository.ensureRuleExists(UUID.randomUUID(), creditType);
         CreditPricingRule rule = priceRepository.findByCreditType(creditType)
-                .orElseThrow(() -> new NotFoundException("Credit price not found"));
+                .orElseThrow(() -> new ConflictException("Credit pricing could not be initialized"));
         rule.setUnitPrice(request.unitPrice().setScale(2, RoundingMode.UNNECESSARY));
         rule.setActive(true);
         rule.setUpdatedBy(adminId);

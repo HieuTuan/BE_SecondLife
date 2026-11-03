@@ -1,30 +1,30 @@
 package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.entity.Post;
-import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.SellerVerificationStatus;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.SellerVerificationRepository;
-import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.service.IdentityAccessService;
 import com.secondlife.secondlife.service.ListingAccessService;
 import com.secondlife.secondlife.service.SellerReputationService;
 import org.springframework.stereotype.Service;
 
+import java.util.Set;
 import java.util.UUID;
 
 @Service("listingAccessService")
 public class ListingAccessServiceImpl implements ListingAccessService {
-    private final UserRepository users;
+    private final IdentityAccessService identityAccess;
     private final SellerReputationService reputation;
     private final PostRepository posts;
     private final SellerVerificationRepository verifications;
 
-    public ListingAccessServiceImpl(UserRepository users, SellerReputationService reputation,
+    public ListingAccessServiceImpl(IdentityAccessService identityAccess, SellerReputationService reputation,
                                   PostRepository posts, SellerVerificationRepository verifications) {
-        this.users = users;
+        this.identityAccess = identityAccess;
         this.reputation = reputation;
         this.posts = posts;
         this.verifications = verifications;
@@ -35,8 +35,7 @@ public class ListingAccessServiceImpl implements ListingAccessService {
         if (verifications.existsByUserIdAndStatus(userId, SellerVerificationStatus.APPROVED)) {
             return;
         }
-        User user = users.findByIdWithAuthorities(userId).orElse(null);
-        if (user != null && (user.hasRole("SELLER") || user.hasRole("ADMIN"))) {
+        if (identityAccess.hasAnyRole(userId, Set.of("SELLER", "ADMIN"))) {
             return;
         }
         throw new ConflictException("An approved seller verification is required before publish");

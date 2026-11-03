@@ -7,6 +7,7 @@ import com.secondlife.secondlife.enums.CreditType;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.CreditPricingService;
+import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -30,6 +31,8 @@ public class AdminCreditPricingController {
     }
 
     @PutMapping("/credit-pricing/{creditType}")
+    @Operation(summary = "Configure a credit unit price",
+            description = "Creates missing configuration or updates the existing price supplied by Admin.")
     public ResponseEntity<ApiResponse<CreditPricingRuleResponse>> updatePrice(
             @AuthenticationPrincipal CustomUserDetails admin,
             @PathVariable CreditType creditType,

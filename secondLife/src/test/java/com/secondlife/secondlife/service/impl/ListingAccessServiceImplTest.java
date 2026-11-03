@@ -2,12 +2,13 @@ package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.enums.SellerVerificationStatus;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.SellerVerificationRepository;
-import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.service.IdentityAccessService;
 import com.secondlife.secondlife.service.SellerReputationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,20 +18,23 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class ListingAccessServiceImplTest {
 
     @Mock
-    private UserRepository users;
+    private IdentityAccessService identityAccess;
 
     @Mock
     private SellerReputationService reputation;
@@ -71,7 +75,7 @@ class ListingAccessServiceImplTest {
         assertEquals(postId, result.getId());
         verify(posts).findByIdForUpdate(postId);
         verify(posts, never()).findById(postId);
-        verify(users, never()).findByIdForRoleUpdate(userId);
+        verifyNoInteractions(identityAccess);
     }
 
     @Test
@@ -84,7 +88,7 @@ class ListingAccessServiceImplTest {
         assertEquals(postId, result.getId());
         verify(posts).findById(postId);
         verify(posts, never()).findByIdForUpdate(postId);
-        verify(users, never()).findByIdForRoleUpdate(userId);
+        verifyNoInteractions(identityAccess);
     }
 
     @Test
@@ -122,5 +126,43 @@ class ListingAccessServiceImplTest {
         post.setStatus("DRAFT");
         post.setListingCreditCharged(true);
         assertThrows(ConflictException.class, () -> listingAccessService.requireDraft(post));
+    }
+
+    @Test
+    void verifiedSellerApprovalDoesNotRequireRoleFallback() {
+        when(verifications.existsByUserIdAndStatus(userId, SellerVerificationStatus.APPROVED)).thenReturn(true);
+
+        listingAccessService.requireVerifiedSeller(userId);
+
+        verify(reputation).requireSellingAllowed(userId);
+        verifyNoInteractions(identityAccess);
+    }
+
+    @Test
+    void sellerOrAdminRoleAllowsTheExistingVerificationFallback() {
+        when(identityAccess.hasAnyRole(userId, Set.of("SELLER", "ADMIN"))).thenReturn(true);
+
+        listingAccessService.requireVerifiedSeller(userId);
+
+        verify(reputation).requireSellingAllowed(userId);
+        verify(verifications).existsByUserIdAndStatus(userId, SellerVerificationStatus.APPROVED);
+    }
+
+    @Test
+    void missingApprovalAndRolePreserveThePublicationConflict() {
+        ConflictException error = assertThrows(ConflictException.class,
+                () -> listingAccessService.requireVerifiedSeller(userId));
+
+        assertEquals("An approved seller verification is required before publish", error.getMessage());
+        verify(identityAccess).hasAnyRole(userId, Set.of("SELLER", "ADMIN"));
+    }
+
+    @Test
+    void sellingRestrictionIsCheckedBeforeVerificationOrRoles() {
+        doThrow(new ConflictException("Selling restricted")).when(reputation).requireSellingAllowed(userId);
+
+        assertThrows(ConflictException.class, () -> listingAccessService.requireVerifiedSeller(userId));
+
+        verifyNoInteractions(verifications, identityAccess);
     }
 }

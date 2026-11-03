@@ -21,9 +21,8 @@ public final class ShippingPayloads {
     public static Map<String,Object> create(ShippingAddress from, ShippingAddress to, ShippingParcel parcel, String title, BigDecimal price) {
         if (price==null || price.signum()<=0 || price.stripTrailingZeros().scale()>0 || price.compareTo(BigDecimal.valueOf(Integer.MAX_VALUE))>0)
             throw new BadRequestException("Shipping requires a positive product price in whole VND within its integer limit");
-        if (parcel.weight()<1 || parcel.weight()>50000 || parcel.length()<1 || parcel.length()>200
-                || parcel.width()<1 || parcel.width()>200 || parcel.height()<1 || parcel.height()>200)
-            throw new BadRequestException("Shipping supports packages up to 50 kg and 200 cm per dimension");
+        if (parcel.weight()<1 || parcel.length()<1 || parcel.width()<1 || parcel.height()<1)
+            throw new BadRequestException("Cân nặng (g) và kích thước kiện hàng (cm) phải là số nguyên dương");
         var data = new LinkedHashMap<String,Object>();
         address(data,"from",from); address(data,"to",to); address(data,"return",from);
         data.put("weight",parcel.weight()); data.put("length",parcel.length()); data.put("width",parcel.width()); data.put("height",parcel.height());

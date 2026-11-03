@@ -35,6 +35,73 @@ class LalamoveAutoVehicleTest {
 
     @org.junit.jupiter.api.BeforeEach void setClock() { when(clock.instant()).thenReturn(now); }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"100000,220,120,100", "1000000,500,210,205", "5000000,600,220,220"})
+    void quotesHeavyAndLargeParcelsUsingTheActualVehicleCapacity(int weight,int length,int width,int height) {
+        catalogue(List.of(vehicle("MOTORCYCLE","30","kg","50","40","50","cm"),
+                vehicle("TRUCK_5000","5","t","6","2.2","2.2","m")),List.of());
+        quotation("TRUCK_5000","250000");
+        var payload=assertDoesNotThrow(()->route(weight,length,width,height));
+        var result=provider.preview(payload);
+        assertEquals("TRUCK_5000",result.path("provider_quote").path("serviceType").asText());
+        assertEquals(250000,result.path("total_fee").intValue());
+        server.verify();
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"5000001,600,220,220", "5000000,601,220,220",
+            "5000000,600,221,220", "5000000,600,220,221"})
+    void parcelExceedingAnyVehicleCapacityReturnsUnsupportedInTheHttpResponse(int weight,int length,int width,int height) throws Exception {
+        catalogue(List.of(vehicle("TRUCK_5000","5","t","6","2.2","2.2","m")),List.of());
+        assertUnsupportedResponse(assertDoesNotThrow(()->route(weight,length,width,height)),
+                "Không có loại xe Lalamove đủ tải trọng và kích thước cho kiện hàng tại điểm lấy hàng. "
+                +"Giới hạn từng loại xe tại điểm lấy hàng (dài x rộng x cao): TRUCK_5000: tối đa 5000 kg, 600 x 220 x 220 cm");
+        server.verify();
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"ERR_OUT_OF_SERVICE_AREA","ERR_INVALID_SERVICE_TYPE"})
+    void unavailableHeavyVehicleRouteReturnsUnsupportedInTheHttpResponse(String code) throws Exception {
+        catalogue(List.of(vehicle("TRUCK_5000","5","t","6","2.2","2.2","m")),List.of());
+        server.expect(requestTo(BASE+"/v3/quotations")).andRespond(withStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body("{\"errors\":[{\"id\":\""+code+"\"}]}"));
+        assertUnsupportedResponse(assertDoesNotThrow(()->route(1000000,500,210,205)),
+                "Lalamove chưa hỗ trợ tuyến giao hàng này với các loại xe phù hợp");
+        server.verify();
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"0,20,15,10", "600,-1,15,10", "600,20,0,10", "600,20,15,-1"})
+    void invalidMeasurementsNeverReachTheCarrier(int weight,int length,int width,int height) {
+        assertThrows(BadRequestException.class,()->provider.preview(route(weight,length,width,height)));
+        server.verify();
+    }
+    private void assertUnsupportedResponse(Map<String,Object> payload,String message) throws Exception {
+        var quotes=mock(ShippingQuoteService.class);
+        when(quotes.quote(any(),any())).thenAnswer(invocation -> { provider.preview(payload); return null; });
+        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
+                new com.secondlife.secondlife.controller.ShippingController(mock(ShippingCatalogService.class),quotes,
+                        mock(com.secondlife.secondlife.security.CurrentUserProvider.class),mock(ReverseGeocodingService.class)))
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .setCustomArgumentResolvers(new org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver()).build();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/shipping/quotes")
+                .contentType("application/json").content("""
+                {"postId":"1c2dd5e3-36db-420b-b313-9ed606b017a9",
+                 "deliveryAddress":{"name":"Buyer","phone":"0987654321","latitude":10.781,"longitude":106.700}}
+                """))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.success").value(false))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.message").value(message))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.path").value("/api/v1/shipping/quotes"));
+    }
+    @Test void unsupportedParcelResponseListsVerifiedLocalVehicleLimitsOnly() throws Exception {
+        var unverified=vehicle("UNKNOWN","10","unknown","1","1","1","m");
+        catalogue(List.of(vehicle("MOTORCYCLE","30000","g","500","400","500","mm"),unverified,
+                vehicle("VAN","0.5","t","1.7","1.2","1.2","m")),
+                List.of(vehicle("FOREIGN_TRUCK","10","t","10","3","3","m")));
+        assertUnsupportedResponse(route(10000,180,130,130),
+                "Không có loại xe Lalamove đủ tải trọng và kích thước cho kiện hàng tại điểm lấy hàng. "
+                +"Giới hạn từng loại xe tại điểm lấy hàng (dài x rộng x cao): "
+                +"MOTORCYCLE: tối đa 30 kg, 50 x 40 x 50 cm; VAN: tối đa 500 kg, 170 x 120 x 120 cm");
+        server.verify();
+    }
     @Test void quotesOnlyTheSmallestFittingVehicleRegardlessOfCatalogueOrder() {
         catalogue(List.of(vehicle("VAN", "0.5", "t", "2", "1", "1", "m"),
                 vehicle("MOTORCYCLE", "30000", "g", "0.5", "0.5", "0.5", "m")),List.of());

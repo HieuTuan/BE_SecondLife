@@ -67,7 +67,15 @@ public class SecurityConfig {
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/v1/webhooks/sepay").permitAll()
                         .requestMatchers(HttpMethod.POST,"/api/v1/shipping/lalamove/callback").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/posts", "/api/v1/posts/*", "/api/v1/sellers/*/reputation").permitAll()
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/v1/posts",
+                                "/api/v1/posts/*",
+                                "/api/v1/sellers/*/reputation",
+                                "/api/v1/categories",
+                                "/api/v1/categories/**",
+                                "/api/v1/items",
+                                "/api/v1/items/**"
+                        ).permitAll()
                         .requestMatchers("/api/v1/inspection/quote").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/inspection/seal/*", "/api/v1/inspections/seal/*").permitAll()
                         .requestMatchers("/error").permitAll()
@@ -94,11 +102,19 @@ public class SecurityConfig {
                 .filter(s -> !s.isEmpty())
                 .toList();
 
-        configuration.setAllowedOrigins(origins);
+        configuration.setAllowedOriginPatterns(origins);
         configuration.setAllowedMethods(Arrays.stream(corsProperties.allowedMethods().split(","))
                 .map(String::trim).filter(s -> !s.isEmpty()).toList());
-        configuration.setAllowedHeaders(Arrays.stream(corsProperties.allowedHeaders().split(","))
-                .map(String::trim).filter(s -> !s.isEmpty()).toList());
+        List<String> rawHeaders = Arrays.stream(corsProperties.allowedHeaders().split(","))
+                .map(String::trim).filter(s -> !s.isEmpty()).toList();
+        List<String> effectiveHeaders = new java.util.ArrayList<>(rawHeaders);
+        if (!effectiveHeaders.contains("*")) {
+            effectiveHeaders.add("*");
+        }
+        if (!effectiveHeaders.contains("ngrok-skip-browser-warning")) {
+            effectiveHeaders.add("ngrok-skip-browser-warning");
+        }
+        configuration.setAllowedHeaders(effectiveHeaders);
         configuration.setAllowCredentials(corsProperties.allowCredentials());
         configuration.setMaxAge(corsProperties.maxAgeSeconds());
 

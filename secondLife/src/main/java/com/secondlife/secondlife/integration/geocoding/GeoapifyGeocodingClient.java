@@ -16,10 +16,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.*;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.util.UriComponentsBuilder;
-import tools.jackson.databind.*;
-import java.io.*;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.math.BigDecimal;
@@ -27,6 +31,7 @@ import java.math.RoundingMode;
 import java.time.Duration;
 import java.util.Set;
 import java.util.Locale;
+import java.util.Map;
 
 @Service
 public class GeoapifyGeocodingClient {
@@ -36,6 +41,84 @@ public class GeoapifyGeocodingClient {
     private final RestClient.Builder builder;
     private final GeocodedLocationCacheRepository cacheRepository;
     private volatile RestClient client;
+
+    private static final String SEARCH_URL = "https://api.geoapify.com/v1/geocode/search";
+    private static final String SEARCH_ERROR =
+            "Không tìm thấy tọa độ GPS cho địa chỉ này. Vui lòng nhập chi tiết hơn.";
+
+    public GeocodedAddressResponse geocode(String address) {
+        if (address == null || address.isBlank() || address.strip().length() > 500) {
+            throw new BadRequestException("Vui lòng nhập địa chỉ từ 1 đến 500 ký tự.");
+        }
+        String query = address.strip();
+        if (!properties.isEnabled() || properties.getApiKey() == null || properties.getApiKey().isBlank()) {
+            throw new BadRequestException(SEARCH_ERROR);
+        }
+        try {
+            var uri = UriComponentsBuilder.fromUriString(SEARCH_URL)
+                    .queryParam("text", "{address}")
+                    .queryParam("filter", "countrycode:vn")
+                    .queryParam("lang", properties.getLanguage())
+                    .queryParam("limit", 1)
+                    .queryParam("apiKey", "{key}")
+                    .encode().buildAndExpand(Map.of("address", query, "key", properties.getApiKey()))
+                    .toUri();
+            JsonNode root = client().get().uri(uri).accept(MediaType.APPLICATION_JSON)
+                    .exchange((request, response) -> {
+                        if (!response.getStatusCode().is2xxSuccessful()) {
+                            throw new BadRequestException(SEARCH_ERROR);
+                        }
+                        return mapper.readTree(readBounded(response.getBody()));
+                    });
+            if (root == null || !root.path("features").isArray() || root.path("features").isEmpty()) {
+                throw new BadRequestException(SEARCH_ERROR);
+            }
+            JsonNode feature = root.path("features").get(0);
+            JsonNode fields = feature.path("properties");
+            if (!fields.isObject()) throw new BadRequestException(SEARCH_ERROR);
+            JsonNode coordinates = feature.path("geometry").path("coordinates");
+            BigDecimal latitude = null;
+            BigDecimal longitude = null;
+            if (coordinates.isArray() && coordinates.size() >= 2) {
+                longitude = searchCoordinate(coordinates.get(0));
+                latitude = searchCoordinate(coordinates.get(1));
+            }
+            if (latitude == null || longitude == null) {
+                latitude = searchCoordinate(fields.path("lat"));
+                longitude = searchCoordinate(fields.path("lon"));
+            }
+            if (latitude == null || longitude == null || latitude.abs().compareTo(BigDecimal.valueOf(90)) > 0
+                    || longitude.abs().compareTo(BigDecimal.valueOf(180)) > 0) {
+                throw new BadRequestException(SEARCH_ERROR);
+            }
+            var division = VietnameseAdministrativeAreas.locate(latitude.doubleValue(), longitude.doubleValue());
+            String country = fields.path("country_code").asText("vn").strip().toUpperCase(Locale.ROOT);
+            if (!"VN".equals(country) || division == null || policy.allowedCity(division.city().name()) == null) {
+                throw new BadRequestException(
+                        "Địa chỉ nằm ngoài khu vực phục vụ Hà Nội, Đà Nẵng và Thành phố Hồ Chí Minh");
+            }
+            String formatted = fields.path("formatted").asText("").strip();
+            if (formatted.isBlank()) formatted = query;
+            if (formatted.length() > 500) throw new BadRequestException(SEARCH_ERROR);
+            return new GeocodedAddressResponse(formatted, latitude, longitude, division.city(), country,
+                    fields.path("place_id").asText(null));
+        } catch (BadRequestException error) {
+            throw error;
+        } catch (RuntimeException error) {
+            // Do not expose provider bodies, request URLs or the API key.
+            throw new BadRequestException(SEARCH_ERROR);
+        }
+    }
+
+    private BigDecimal searchCoordinate(JsonNode value) {
+        try {
+            if (value.isNumber()) return value.decimalValue();
+            if (value.isString()) return new BigDecimal(value.asText().strip());
+        } catch (NumberFormatException invalid) {
+            return null;
+        }
+        return null;
+    }
 
     public GeoapifyGeocodingClient(GeocodingProperties properties, ShippingCatalogPolicy policy,
                                    ObjectMapper mapper, RestClient.Builder builder) {

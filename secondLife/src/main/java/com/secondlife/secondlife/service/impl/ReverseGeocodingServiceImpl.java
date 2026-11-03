@@ -15,6 +15,11 @@ public class ReverseGeocodingServiceImpl implements ReverseGeocodingService {
     private final GeoapifyGeocodingClient geocoding;
 
     @Override
+    public GeocodedAddressResponse geocode(String address) {
+        return geocoding.geocode(address);
+    }
+
+    @Override
     public ShippingAddress shipping(ShippingAddressRequest request) { return geocoding.shipping(request); }
 
     @Override

@@ -6,6 +6,8 @@ import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionOrderStatus;
 import com.secondlife.secondlife.enums.InspectionOrderType;
+import com.secondlife.secondlife.enums.InspectionSettlementOutcome;
+import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
@@ -47,6 +49,9 @@ class InspectionEscrowServiceTest {
 
     @Mock
     private com.secondlife.secondlife.repository.UserRepository userRepository;
+
+    @Mock
+    private InspectionFeeSettlementService feeSettlementService;
 
     @InjectMocks
     private com.secondlife.secondlife.service.impl.InspectionEscrowServiceImpl escrowService;
@@ -93,7 +98,8 @@ class InspectionEscrowServiceTest {
         assertNotNull(updated.getBuyerPaidAt());
         assertNull(updated.getSellerPaidAt());
         assertEquals(InspectionOrderStatus.WAITING_FEE_PAYMENT.name(), updated.getStatus());
-        verify(walletService, times(1)).processPayment(buyerId, BigDecimal.valueOf(100000), orderId);
+        verify(walletService, times(1)).processPayment(buyerId, BigDecimal.valueOf(100000), orderId,
+                WalletTransactionReferenceType.INSPECTION_ORDER);
     }
 
     @Test
@@ -108,11 +114,12 @@ class InspectionEscrowServiceTest {
         assertNotNull(updated.getBuyerPaidAt());
         assertNotNull(updated.getSellerPaidAt());
         assertEquals(InspectionOrderStatus.CONFIRMED_PENDING_DISPATCH.name(), updated.getStatus());
-        verify(walletService, times(1)).processPayment(sellerId, BigDecimal.valueOf(100000), orderId);
+        verify(walletService, times(1)).processPayment(sellerId, BigDecimal.valueOf(100000), orderId,
+                WalletTransactionReferenceType.INSPECTION_ORDER);
     }
 
     @Test
-    @DisplayName("Quá hạn 6 tiếng: Nộp tiền thất bại và kích hoạt hoàn tiền tự động")
+    @DisplayName("Quá hạn 6 tiếng: Nộp tiền thất bại và kích hoạt hoàn tiền tự động qua feeSettlementService")
     void testPaymentDeadlineExpired() {
         order.setPaymentDeadline(Instant.now().minus(1, ChronoUnit.MINUTES));
         order.setBuyerPaidAt(Instant.now().minus(2, ChronoUnit.HOURS)); // Buyer đã nộp trước
@@ -120,12 +127,12 @@ class InspectionEscrowServiceTest {
 
         assertThrows(ConflictException.class, () -> escrowService.payInspectionFee(sellerId, orderId));
 
-        verify(walletService, times(1)).processRefund(buyerId, BigDecimal.valueOf(100000), orderId);
+        verify(feeSettlementService, times(1)).settle(eq(order), eq(InspectionSettlementOutcome.PAYMENT_EXPIRED), any());
         assertEquals(InspectionOrderStatus.PAYMENT_EXPIRED.name(), order.getStatus());
     }
 
     @Test
-    @DisplayName("refundExpiredOrder: Hoàn trả tiền cho bên đã nộp và mở lại post về ACTIVE")
+    @DisplayName("refundExpiredOrder: Hoàn trả tiền qua feeSettlementService và mở lại post về ACTIVE")
     void testRefundExpiredOrder() {
         order.setBuyerPaidAt(Instant.now().minus(2, ChronoUnit.HOURS));
         Post post = new Post();
@@ -137,8 +144,7 @@ class InspectionEscrowServiceTest {
 
         escrowService.refundExpiredOrder(order);
 
-        verify(walletService, times(1)).processRefund(buyerId, BigDecimal.valueOf(100000), orderId);
-        verify(walletService, never()).processRefund(eq(sellerId), any(), any());
+        verify(feeSettlementService, times(1)).settle(eq(order), eq(InspectionSettlementOutcome.PAYMENT_EXPIRED), any());
         assertEquals(InspectionOrderStatus.PAYMENT_EXPIRED.name(), order.getStatus());
         assertEquals("ACTIVE", post.getStatus());
         verify(postRepository, times(1)).save(post);

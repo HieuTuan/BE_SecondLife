@@ -6,16 +6,17 @@ import org.springframework.ai.ollama.api.OllamaApi;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import org.springframework.core.retry.RetryTemplate;
 import org.springframework.core.retry.RetryException;
+import org.springframework.core.retry.RetryTemplate;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.io.IOException;
+import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -63,6 +64,22 @@ class OllamaConfigTest {
     }
 
     @Test
+    void connectionRefusedFailsFastWithoutRetrying() {
+        configuration()
+                .withPropertyValues("app.ai.max-retries=10", "app.ai.retry-initial-interval-ms=5000")
+                .run(context -> {
+                    AtomicInteger attempts = new AtomicInteger();
+                    assertThrows(RetryException.class, () -> context.getBean(RetryTemplate.class).execute(() -> {
+                        attempts.incrementAndGet();
+                        throw new ResourceAccessException(
+                                "I/O error on POST request",
+                                new ConnectException("Connection refused"));
+                    }));
+                    assertEquals(1, attempts.get());
+                });
+    }
+
+    @Test
     void ollamaChatUsesTheConfiguredRetryPolicy() throws Exception {
         try (LocalHttpServer server = new LocalHttpServer(503, "{\"error\":\"temporarily unavailable\"}", 0)) {
             configuration().withPropertyValues("spring.ai.ollama.base-url=" + server.baseUrl(),
@@ -71,6 +88,17 @@ class OllamaConfigTest {
                 assertEquals(3, server.attempts.get());
             });
         }
+    }
+
+    @Test
+    void cloudEndpointStripsLocalCloudSuffixFromModelName() {
+        assertEquals("gemma4:31b", OllamaConfig.normalizeCloudModelName("https://ollama.com", "gemma4:31b-cloud"));
+        assertEquals("gemma4:31b", OllamaConfig.normalizeCloudModelName("https://ollama.com", "gemma4:31b:cloud"));
+        assertEquals("gemma4:31b", OllamaConfig.normalizeCloudModelName("https://ollama.com", "gemma4:31b"));
+        assertEquals("gemma4:31b-cloud", OllamaConfig.normalizeCloudModelName("http://127.0.0.1:11434", "gemma4:31b-cloud"));
+        assertThat(OllamaConfig.isCloudUrlWithoutApiKey("https://ollama.com", "")).isTrue();
+        assertThat(OllamaConfig.isCloudUrlWithoutApiKey("https://ollama.com", "real-cloud-key")).isFalse();
+        assertThat(OllamaConfig.isCloudUrlWithoutApiKey("http://127.0.0.1:11434", "")).isFalse();
     }
 
     @Test

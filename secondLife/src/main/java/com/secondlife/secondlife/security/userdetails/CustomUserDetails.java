@@ -3,6 +3,7 @@ package com.secondlife.secondlife.security.userdetails;
 import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.AccountStatus;
+import com.secondlife.secondlife.repository.UserSecurityState;
 import lombok.Getter;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -22,6 +23,7 @@ public class CustomUserDetails implements UserDetails {
     private final AccountStatus accountStatus;
     private final boolean emailVerified;
     private final long tokenVersion;
+    private final long permissionsVersion;
     private final Collection<? extends GrantedAuthority> authorities;
 
     public CustomUserDetails(User user) {
@@ -32,9 +34,11 @@ public class CustomUserDetails implements UserDetails {
         this.emailVerified = user.isEmailVerified();
         this.tokenVersion = user.getTokenVersion();
 
+        long revision = 0;
         Set<GrantedAuthority> auths = new HashSet<>();
         if (user.getRoles() != null) {
             for (Role role : user.getRoles()) {
+                revision = Math.addExact(revision, role.getPermissionsVersion());
                 // Role authority with ROLE_ prefix
                 auths.add(new SimpleGrantedAuthority("ROLE_" + role.getCode()));
 
@@ -46,7 +50,17 @@ public class CustomUserDetails implements UserDetails {
                 }
             }
         }
+        this.permissionsVersion = revision;
         this.authorities = Set.copyOf(auths);
+    }
+
+    public boolean matches(UserSecurityState state) {
+        return id.equals(state.getId())
+                && email.equals(state.getEmail())
+                && accountStatus == state.getAccountStatus()
+                && emailVerified == state.getEmailVerified()
+                && tokenVersion == state.getTokenVersion()
+                && permissionsVersion == state.getPermissionsVersion();
     }
 
     @Override

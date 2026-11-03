@@ -1,9 +1,7 @@
 package com.secondlife.secondlife.repository;
 
 import com.secondlife.secondlife.entity.User;
-
 import jakarta.persistence.LockModeType;
-
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -20,12 +18,19 @@ import java.util.UUID;
 @Repository
 public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificationExecutor<User> {
 
+    @Query("""
+            SELECT u.id AS id, u.email AS email, u.accountStatus AS accountStatus,
+                   u.emailVerified AS emailVerified, u.tokenVersion AS tokenVersion,
+                   COALESCE(SUM(r.permissionsVersion), 0L) AS permissionsVersion
+            FROM User u LEFT JOIN u.userRoles ur LEFT JOIN ur.role r
+            WHERE u.id = :id
+            GROUP BY u.id, u.email, u.accountStatus, u.emailVerified, u.tokenVersion
+            """)
+    Optional<UserSecurityState> findSecurityStateById(@Param("id") UUID id);
+
     Optional<User> findByEmailIgnoreCase(String email);
 
     boolean existsByEmailIgnoreCase(String email);
-
-
-
 
     @Query("SELECT DISTINCT u FROM User u " +
            "LEFT JOIN FETCH u.profile " +
@@ -78,6 +83,15 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
         """)
     List<UUID> findActiveOrderReviewStaffIds();
 
+    @Query("""
+        SELECT DISTINCT u.id FROM User u JOIN u.userRoles ur JOIN ur.role r
+        JOIN r.rolePermissions rp JOIN rp.permission p
+        WHERE r.code = 'ADMIN'
+          AND p.code IN ('ADMIN_CONFIG_MANAGE', 'ADMIN_CATALOG_MANAGE')
+          AND u.accountStatus = 'ACTIVE'
+        """)
+    List<UUID> findActiveCatalogAdminIds();
+
     @Query(value = """
             SELECT u.id FROM users u
             JOIN user_roles ur ON ur.user_id=u.id JOIN roles r ON r.id=ur.role_id
@@ -89,4 +103,3 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
             """, nativeQuery = true)
     List<UUID> findEligibleReviewers(@Param("reporterId") UUID reporterId, @Param("sellerId") UUID sellerId);
 }
-
