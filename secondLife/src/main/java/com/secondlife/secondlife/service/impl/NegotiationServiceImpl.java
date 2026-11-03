@@ -295,12 +295,14 @@ public class NegotiationServiceImpl implements NegotiationService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Page<NegotiationResponseDTO> getBuyerNegotiations(UUID buyerId, Pageable pageable) {
         Pageable safePageable = PageableUtils.sanitize(pageable, ALLOWED_NEGOTIATION_SORT_PROPERTIES, DEFAULT_NEGOTIATION_SORT);
         return negotiationRepository.findByBuyerId(buyerId, safePageable).map(negotiationMapper::toResponse);
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Page<NegotiationResponseDTO> getSellerNegotiations(UUID sellerId, Pageable pageable) {
         Pageable safePageable = PageableUtils.sanitize(pageable, ALLOWED_NEGOTIATION_SORT_PROPERTIES, DEFAULT_NEGOTIATION_SORT);
         return negotiationRepository.findByPostUserId(sellerId, safePageable).map(negotiationMapper::toResponse);

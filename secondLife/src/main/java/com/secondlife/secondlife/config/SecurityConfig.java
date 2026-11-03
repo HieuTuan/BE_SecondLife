@@ -67,7 +67,15 @@ public class SecurityConfig {
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/v1/webhooks/sepay").permitAll()
                         .requestMatchers(HttpMethod.POST,"/api/v1/shipping/lalamove/callback").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/posts", "/api/v1/posts/*", "/api/v1/sellers/*/reputation").permitAll()
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/v1/posts",
+                                "/api/v1/posts/*",
+                                "/api/v1/sellers/*/reputation",
+                                "/api/v1/categories",
+                                "/api/v1/categories/**",
+                                "/api/v1/items",
+                                "/api/v1/items/**"
+                        ).permitAll()
                         .requestMatchers("/api/v1/inspection/quote").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/inspection/seal/*", "/api/v1/inspections/seal/*").permitAll()
                         .requestMatchers("/error").permitAll()

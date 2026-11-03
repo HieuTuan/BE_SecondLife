@@ -5,6 +5,7 @@ import com.secondlife.secondlife.entity.Negotiation;
 import com.secondlife.secondlife.enums.NegotiationStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -28,8 +29,11 @@ public interface NegotiationRepository extends JpaRepository<Negotiation, UUID>,
     @Query("SELECT COUNT(n) > 0 FROM Negotiation n WHERE n.post.id = :postId AND n.buyer.id = :buyerId AND n.status IN :statuses")
     boolean existsByPostIdAndBuyerIdAndStatusIn(@Param("postId") UUID postId, @Param("buyerId") UUID buyerId, @Param("statuses") List<NegotiationStatus> statuses);
 
+    // Fetch inverse User.profile associations too; Hibernate otherwise issues a query per user.
+    @EntityGraph(attributePaths = {"post", "post.user", "post.user.profile", "buyer", "buyer.profile"})
     Page<Negotiation> findByBuyerId(UUID buyerId, Pageable pageable);
 
+    @EntityGraph(attributePaths = {"post", "post.user", "post.user.profile", "buyer", "buyer.profile"})
     Page<Negotiation> findByPostUserId(UUID sellerId, Pageable pageable);
 
     List<Negotiation> findByPostIdAndStatus(UUID postId, NegotiationStatus status);

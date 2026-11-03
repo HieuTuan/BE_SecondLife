@@ -15,6 +15,7 @@ import com.secondlife.secondlife.service.CreditPurchaseService;
 import com.secondlife.secondlife.service.InspectionChecklistService;
 import com.secondlife.secondlife.service.InspectionService;
 import com.secondlife.secondlife.service.MarketplaceListingService;
+import com.secondlife.secondlife.service.NegotiationService;
 import com.secondlife.secondlife.service.OrderService;
 import com.secondlife.secondlife.service.SellerReputationService;
 import com.secondlife.secondlife.service.SellerVerificationService;
@@ -54,7 +55,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest
 @TestPropertySource(locations = "classpath:application-test.properties", properties = {
         "spring.flyway.enabled=true", "spring.jpa.hibernate.ddl-auto=none", "app.seeder.enabled=false",
-        "spring.jpa.properties.hibernate.generate_statistics=true",
+        "spring.jpa.properties.hibernate.generate_statistics=true", "spring.jpa.open-in-view=false",
         "spring.jpa.properties.hibernate.query.fail_on_pagination_over_collection_fetch=true"
 })
 class ReadQueryIntegrationTest {
@@ -72,6 +73,7 @@ class ReadQueryIntegrationTest {
     @Autowired ChatService chats;
     @Autowired CreditPurchaseService credits;
     @Autowired OrderService orders;
+    @Autowired NegotiationService negotiations;
     @Autowired MarketplaceListingService marketplace;
     @Autowired InspectionService inspections;
     @Autowired InspectionChecklistService checklists;
@@ -306,6 +308,69 @@ class ReadQueryIntegrationTest {
         assertThrows(NotFoundException.class, () -> reputation.history(UUID.randomUUID(), PageRequest.of(0, 5)));
     }
 
+    @Test void buyerNegotiationsKeepLazyDetailsOwnershipAndPaginationWithBoundedQueries() {
+        List<UUID> ids = new ArrayList<>();
+        List<UUID> sellers = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            UUID seller = user("Negotiation seller " + i);
+            sellers.add(seller);
+            ids.add(negotiation(post(seller, i), buyer, i));
+        }
+        negotiation(post(user("Unrelated seller"), 100), user("Other buyer"), 100);
+        statistics.clear();
+
+        // No surrounding test transaction or Open Session in View: the service must own the session.
+        var result = negotiations.getBuyerNegotiations(buyer,
+                PageRequest.of(0, 3, Sort.by("createdAt").descending()));
+
+        assertEquals(6, result.getTotalElements());
+        assertEquals(2, result.getTotalPages());
+        assertEquals(List.of(ids.get(5), ids.get(4), ids.get(3)), result.map(n -> n.id()).getContent());
+        assertEquals(List.of("Post 5", "Post 4", "Post 3"), result.map(n -> n.postTitle()).getContent());
+        assertEquals(List.of(sellers.get(5), sellers.get(4), sellers.get(3)), result.map(n -> n.sellerId()).getContent());
+        assertTrue(result.stream().allMatch(n -> buyer.equals(n.buyerId())));
+        assertTrue(result.stream().allMatch(n -> new BigDecimal("800.00").equals(n.offeredPrice())));
+        assertTrue(result.stream().allMatch(n -> n.postId() != null && n.status() != null));
+        boundedQueries(2);
+    }
+
+    @Test void sellerNegotiationsKeepLazyDetailsOwnershipAndPaginationWithBoundedQueries() {
+        UUID seller = user("Seller");
+        List<UUID> ids = new ArrayList<>();
+        List<UUID> buyers = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            UUID negotiationBuyer = user("Negotiation buyer " + i);
+            buyers.add(negotiationBuyer);
+            ids.add(negotiation(post(seller, i), negotiationBuyer, i));
+        }
+        negotiation(post(user("Other seller"), 100), buyer, 100);
+        statistics.clear();
+
+        var result = negotiations.getSellerNegotiations(seller,
+                PageRequest.of(1, 2, Sort.by("createdAt").descending()));
+
+        assertEquals(6, result.getTotalElements());
+        assertEquals(3, result.getTotalPages());
+        assertEquals(1, result.getNumber());
+        assertEquals(List.of(ids.get(3), ids.get(2)), result.map(n -> n.id()).getContent());
+        assertEquals(List.of("Post 3", "Post 2"), result.map(n -> n.postTitle()).getContent());
+        assertEquals(List.of(buyers.get(3), buyers.get(2)), result.map(n -> n.buyerId()).getContent());
+        assertTrue(result.stream().allMatch(n -> seller.equals(n.sellerId())));
+        boundedQueries(2);
+    }
+
+    @Test void emptyNegotiationPagesKeepTheirExistingResponses() {
+        statistics.clear();
+        var buyerPage = negotiations.getBuyerNegotiations(buyer, PageRequest.of(0, 50));
+        var sellerPage = negotiations.getSellerNegotiations(buyer, PageRequest.of(0, 50));
+
+        assertTrue(buyerPage.isEmpty());
+        assertTrue(sellerPage.isEmpty());
+        assertEquals(0, buyerPage.getTotalElements());
+        assertEquals(0, sellerPage.getTotalElements());
+        boundedQueries(2);
+    }
+
     @Test void emptyListsKeepTheirExistingResponses() {
         assertTrue(chats.getUserRooms(buyer).isEmpty());
         assertTrue(credits.getPurchases(buyer, PageRequest.of(0, 5)).items().isEmpty());
@@ -333,6 +398,15 @@ class ReadQueryIntegrationTest {
     private void message(UUID room, UUID sender, String content, int second) {
         jdbc.update("INSERT INTO chat_messages(message_id,room_id,sender_id,message_content,sent_at) VALUES (?,?,?,?,?)",
                 UUID.randomUUID(), room, sender, content, time(second));
+    }
+
+    private UUID negotiation(UUID postId, UUID buyerId, int number) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO negotiations(id,post_id,buyer_id,offered_price,status,created_at,updated_at)
+                VALUES (?,?,?,800,'PENDING',?,?)
+                """, id, postId, buyerId, time(number), time(number));
+        return id;
     }
 
     private UUID purchase(UUID user, int number, boolean withIntent) {
