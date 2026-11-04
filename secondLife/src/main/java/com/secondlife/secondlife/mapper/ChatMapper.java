@@ -35,6 +35,8 @@ public class ChatMapper {
         @Mapping(target = "postId", source = "room.post.id")
         @Mapping(target = "postTitle", source = "room.post.title")
         @Mapping(target = "postImageUrl", source = "room.post.imageUrl")
+        @Mapping(target = "postPrice", source = "room.post.price")
+        @Mapping(target = "postStatus", source = "room.post.status")
         @Mapping(target = "buyerId", source = "room.buyer.id")
         @Mapping(target = "sellerId", source = "room.seller.id")
         @Mapping(target = "buyerName", expression = "java(partyName(room.getBuyer()))")

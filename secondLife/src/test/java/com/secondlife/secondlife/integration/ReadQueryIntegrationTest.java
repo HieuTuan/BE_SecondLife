@@ -107,6 +107,9 @@ class ReadQueryIntegrationTest {
         for (int i = 0; i < 6; i++) {
             UUID seller = user("Seller " + i);
             UUID post = post(seller, i);
+            String postStatus = List.of("ACTIVE", "RESERVED", "SOLD", "PAYMENT_PENDING", "REJECTED", "PENDING").get(i);
+            jdbc.update("UPDATE posts SET status=?,price=?,image_url=? WHERE id=?", postStatus,
+                    new BigDecimal(1000 + i), i == 5 ? null : "https://image/" + i + "/primary", post);
             UUID room = UUID.randomUUID();
             roomIds.addFirst(room);
             jdbc.update("INSERT INTO chat_rooms(room_id,post_id,buyer_id,seller_id,created_at,updated_at) VALUES (?,?,?,?,?,?)",
@@ -116,6 +119,7 @@ class ReadQueryIntegrationTest {
                 message(room, seller, "latest " + i, 2);
             }
         }
+        assertTrue(chats.getUserRooms(user("Outsider")).isEmpty());
         statistics.clear();
         var result = chats.getUserRooms(buyer);
         assertEquals(roomIds, result.stream().map(r -> r.id()).toList());
@@ -123,6 +127,12 @@ class ReadQueryIntegrationTest {
         assertEquals("latest 4", result.get(1).lastMessage());
         assertEquals("Seller 4", result.get(1).sellerName());
         assertEquals("latest 0", result.getLast().lastMessage());
+        for (int i = 0; i < 6; i++) {
+            var room = result.get(5 - i);
+            assertEquals(new BigDecimal(1000 + i).setScale(2), room.postPrice());
+            assertEquals(List.of("ACTIVE", "RESERVED", "SOLD", "PAYMENT_PENDING", "REJECTED", "PENDING").get(i), room.postStatus());
+            assertEquals(i == 5 ? null : "https://image/" + i + "/primary", room.postImageUrl());
+        }
         boundedQueries(2);
     }
 

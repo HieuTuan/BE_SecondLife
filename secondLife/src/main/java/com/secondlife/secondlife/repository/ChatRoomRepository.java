@@ -12,6 +12,7 @@ import java.util.UUID;
 
 public interface ChatRoomRepository extends JpaRepository<ChatRoom, UUID> {
 
+    @EntityGraph(attributePaths = {"post", "buyer", "seller", "buyer.profile", "seller.profile"})
     Optional<ChatRoom> findFirstByPostIdAndBuyerIdAndSellerIdOrderByCreatedAtAsc(UUID postId, UUID buyerId, UUID sellerId);
 
     default Optional<ChatRoom> findByPostIdAndBuyerIdAndSellerId(UUID postId, UUID buyerId, UUID sellerId) {

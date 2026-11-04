@@ -7,6 +7,7 @@ import com.secondlife.secondlife.entity.ChatMessage;
 import com.secondlife.secondlife.entity.ChatRoom;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.ChatMapper;
 import com.secondlife.secondlife.repository.ChatMessageRepository;
@@ -63,6 +64,10 @@ public class ChatServiceImpl implements ChatService {
 
         ChatRoom room = chatRoomRepository.findFirstByPostIdAndBuyerIdAndSellerIdOrderByCreatedAtAsc(postId, buyerId, post.getUser().getId())
                 .orElseGet(() -> {
+                    // Existing participants retain history; outsiders cannot open a room to read private listings.
+                    if (!"ACTIVE".equals(post.getStatus()) && !"RESERVED".equals(post.getStatus())) {
+                        throw new ForbiddenException("Cannot create a conversation for a non-public listing");
+                    }
                     User buyer = userRepository.findById(buyerId)
                             .orElseThrow(() -> new NotFoundException("Buyer not found"));
                     ChatRoom newRoom = new ChatRoom();
@@ -103,7 +108,7 @@ public class ChatServiceImpl implements ChatService {
                 .orElseThrow(() -> new NotFoundException("Room not found"));
         
         if (!room.getBuyer().getId().equals(userId) && !room.getSeller().getId().equals(userId)) {
-            throw new IllegalArgumentException("Not authorized to view this room");
+            throw new ForbiddenException("Not authorized to view this room");
         }
 
         return chatMessageRepository.findByChatRoomIdOrderBySentAtAsc(roomId).stream()
@@ -117,7 +122,7 @@ public class ChatServiceImpl implements ChatService {
                 .orElseThrow(() -> new NotFoundException("Room not found"));
 
         if (!room.getBuyer().getId().equals(senderId) && !room.getSeller().getId().equals(senderId)) {
-            throw new IllegalArgumentException("Not authorized to send message to this room");
+            throw new ForbiddenException("Not authorized to send message to this room");
         }
 
         User sender = userRepository.findById(senderId)

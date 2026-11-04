@@ -2,6 +2,7 @@ package com.secondlife.secondlife.dto.response;
 
 import lombok.Builder;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -18,6 +19,8 @@ public record ChatRoomDto(
     String sellerName,
     String sellerAvatar,
     String lastMessage,
-    Instant updatedAt
+    Instant updatedAt,
+    BigDecimal postPrice,
+    String postStatus
 ) {
 }

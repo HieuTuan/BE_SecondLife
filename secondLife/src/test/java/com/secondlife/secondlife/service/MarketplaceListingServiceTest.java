@@ -7,6 +7,8 @@ import com.secondlife.secondlife.mapper.PostMapper;
 import com.secondlife.secondlife.repository.PostRepository;
 import jakarta.persistence.criteria.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -101,6 +103,22 @@ class MarketplaceListingServiceTest {
         var page = service.list(category, item, pageable);
         assertEquals(1, page.getTotalElements());
         assertEquals("ACTIVE", page.getContent().getFirst().status());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SOLD", "PAYMENT_PENDING", "DRAFT", "REJECTED"})
+    void nonPublicListingStillCannotBeReadFromPublicMarketplace(String status) {
+        Post post = listing(); post.setStatus(status);
+        when(posts.findById(post.getId())).thenReturn(Optional.of(post));
+        assertThrows(NotFoundException.class, () -> service.get(post.getId()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ACTIVE", "RESERVED"})
+    void publicDetailKeepsExistingVisibleStatuses(String status) {
+        Post post = listing(); post.setStatus(status);
+        when(posts.findById(post.getId())).thenReturn(Optional.of(post));
+        assertEquals(status, service.get(post.getId()).status());
     }
 
     private Post listing() {
