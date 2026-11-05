@@ -134,10 +134,10 @@ public class InspectionOrder {
     @Column(name = "video_retention_until")
     private Instant videoRetentionUntil;
 
-    @Column(name = "buyer_consent_zin")
+    @Column(name = "buyer_consent_zin", nullable = false)
     private boolean buyerConsentZin = false;
 
-    @Column(name = "seller_consent_zin")
+    @Column(name = "seller_consent_zin", nullable = false)
     private boolean sellerConsentZin = false;
 
     @Column(name = "final_payment_deadline")

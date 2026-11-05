@@ -3,8 +3,9 @@ package com.secondlife.secondlife.integration.shipping;
 import com.secondlife.secondlife.config.LalamoveProperties;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
-import com.secondlife.secondlife.exception.ShippingProviderException;
 import com.secondlife.secondlife.exception.LalamoveRequestException;
+import com.secondlife.secondlife.exception.ShippingProviderException;
+import com.secondlife.secondlife.exception.ShippingRouteUnavailableException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -114,19 +115,31 @@ public class LalamoveShippingProvider implements ShippingProvider {
     private JsonNode automaticPreview(Map<String,Object> payload,List<Map<String,Object>> stops) {
         LalamoveVehicleSelector.validateParcel(payload);
         var candidates=LalamoveVehicleSelector.eligible(cities(),payload);
+        var rejections = new ArrayList<LalamoveVehicleSelection.RejectedVehicle>();
+        LalamoveRequestException lastInvalidService = null;
 
         for(String service:candidates) {
             JsonNode result;
             try { result=previewForService(service,stops); }
             catch(LalamoveRequestException error) {
-                if(error.getUpstreamStatus()==422 && Set.of("ERR_OUT_OF_SERVICE_AREA","ERR_INVALID_SERVICE_TYPE").contains(error.getErrorCode()==null?"":error.getErrorCode())) continue;
+                if (error.getUpstreamStatus() == 422
+                        && Set.of("ERR_OUT_OF_SERVICE_AREA", "ERR_INVALID_SERVICE_TYPE").contains(
+                                error.getErrorCode() == null ? "" : error.getErrorCode())) {
+                    rejections.add(new LalamoveVehicleSelection.RejectedVehicle(service, error.getErrorCode()));
+                    if ("ERR_INVALID_SERVICE_TYPE".equals(error.getErrorCode())) lastInvalidService = error;
+                    continue;
+                }
                 throw error;
             }
             if(!Instant.parse(result.path("expires_at").asText()).isAfter(clock.instant()))
                 throw new ConflictException("Báo giá vận chuyển đã hết hạn; vui lòng lấy lại báo giá trước khi thanh toán");
+            ((ObjectNode) result).set("vehicle_selection", mapper.valueToTree(
+                    new LalamoveVehicleSelection(candidates.getFirst(), service, rejections)));
             return result;
         }
-        throw new BadRequestException("Lalamove chưa hỗ trợ tuyến giao hàng này với các loại xe phù hợp");
+        // A stale/invalid service catalogue is not proof that the route is unsupported.
+        if (lastInvalidService != null) throw lastInvalidService;
+        throw new ShippingRouteUnavailableException(candidates.getFirst(), candidates);
     }
 
     private JsonNode previewForService(String serviceType,List<Map<String,Object>> stops) {

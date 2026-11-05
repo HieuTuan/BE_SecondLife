@@ -8,6 +8,7 @@ import com.secondlife.secondlife.entity.ShippingPickupAddress;
 import com.secondlife.secondlife.entity.ShippingQuote;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.integration.shipping.ShippingProvider;
+import com.secondlife.secondlife.mapper.ShippingVehicleSelectionMapper;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.NegotiationRepository;
 import com.secondlife.secondlife.repository.PostRepository;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
+import org.mapstruct.factory.Mappers;
 import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
@@ -27,6 +29,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.mock;
@@ -42,7 +45,8 @@ class ShippingQuoteParcelTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final ShippingQuoteService service = new ShippingQuoteServiceImpl(posts,
             mock(NegotiationRepository.class), addresses, quotes, mock(InspectionOrderRepository.class),
-            mock(ShipmentRepository.class), provider, mapper, geocoding);
+            mock(ShipmentRepository.class), provider, mapper, geocoding,
+            new ShippingVehicleSelectionMapper(Mappers.getMapper(ShippingVehicleSelectionMapper.Delegate.class)));
     private final Post post = new Post();
     private final UUID buyerId = UUID.randomUUID();
     private final ShippingAddressRequest delivery = new ShippingAddressRequest("Buyer", "0912345678",
@@ -108,5 +112,6 @@ class ShippingQuoteParcelTest {
         assertEquals(vehicle, response.serviceType());
         assertEquals(new BigDecimal(fee), response.shippingFee());
         assertEquals(new BigDecimal("150000").add(new BigDecimal(fee)), response.totalPayable());
+        assertFalse(json.has("vehicleSelection"));
     }
 }

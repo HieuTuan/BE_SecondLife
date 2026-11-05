@@ -8,6 +8,7 @@ import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.integration.shipping.ShippingProvider;
+import com.secondlife.secondlife.mapper.ShippingVehicleSelectionMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -45,7 +46,7 @@ class ShippingQuoteReservedPostTest {
         geocoding = mock(ReverseGeocodingService.class);
         mapper = mock(ObjectMapper.class);
         service = new com.secondlife.secondlife.service.impl.ShippingQuoteServiceImpl(posts, negotiations, addresses, quotes,
-                inspections, shipments, provider, mapper, geocoding);
+                inspections, shipments, provider, mapper, geocoding, mock(ShippingVehicleSelectionMapper.class));
     }
 
     @Test

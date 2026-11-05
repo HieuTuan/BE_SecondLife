@@ -1,25 +1,39 @@
 package com.secondlife.secondlife.service.impl;
 
-import com.secondlife.secondlife.integration.shipping.ShippingProvider;
-
-import com.secondlife.secondlife.service.ReverseGeocodingService;
-import com.secondlife.secondlife.mapper.ShippingPayloads;
-import com.secondlife.secondlife.service.ShippingQuoteService;
-
 import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.request.ShippingParcel;
 import com.secondlife.secondlife.dto.request.ShippingQuoteRequest;
 import com.secondlife.secondlife.dto.response.ShippingQuoteResponse;
-import com.secondlife.secondlife.entity.*;
+import com.secondlife.secondlife.entity.Post;
+import com.secondlife.secondlife.entity.ShippingPickupAddress;
+import com.secondlife.secondlife.entity.ShippingQuote;
 import com.secondlife.secondlife.enums.NegotiationStatus;
-import com.secondlife.secondlife.exception.*;
-import com.secondlife.secondlife.repository.*;
+import com.secondlife.secondlife.exception.BadRequestException;
+import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.exception.ForbiddenException;
+import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.exception.ShippingProviderException;
+import com.secondlife.secondlife.exception.ShippingRouteUnavailableException;
+import com.secondlife.secondlife.integration.shipping.ShippingProvider;
+import com.secondlife.secondlife.mapper.ShippingPayloads;
+import com.secondlife.secondlife.mapper.ShippingVehicleSelectionMapper;
+import com.secondlife.secondlife.repository.InspectionOrderRepository;
+import com.secondlife.secondlife.repository.NegotiationRepository;
+import com.secondlife.secondlife.repository.PostRepository;
+import com.secondlife.secondlife.repository.ShipmentRepository;
+import com.secondlife.secondlife.repository.ShippingPickupAddressRepository;
+import com.secondlife.secondlife.repository.ShippingQuoteRepository;
+import com.secondlife.secondlife.service.ReverseGeocodingService;
+import com.secondlife.secondlife.service.ShippingQuoteService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import java.util.*;
-import java.time.Instant;
+
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.Set;
+import java.util.UUID;
 
 @Service("shippingQuoteService")
 public class ShippingQuoteServiceImpl implements ShippingQuoteService {
@@ -32,6 +46,7 @@ public class ShippingQuoteServiceImpl implements ShippingQuoteService {
     private final ShippingProvider provider;
     private final ObjectMapper mapper;
     private final ReverseGeocodingService geocoding;
+    private final ShippingVehicleSelectionMapper vehicleSelectionMapper;
 
     public ShippingQuoteServiceImpl(PostRepository posts,
                                   NegotiationRepository negotiations,
@@ -41,7 +56,8 @@ public class ShippingQuoteServiceImpl implements ShippingQuoteService {
                                   ShipmentRepository shipments,
                                   ShippingProvider provider,
                                   ObjectMapper mapper,
-                                  ReverseGeocodingService geocoding) {
+                                  ReverseGeocodingService geocoding,
+                                  ShippingVehicleSelectionMapper vehicleSelectionMapper) {
         this.posts = posts;
         this.negotiations = negotiations;
         this.addresses = addresses;
@@ -51,6 +67,7 @@ public class ShippingQuoteServiceImpl implements ShippingQuoteService {
         this.provider = provider;
         this.mapper = mapper;
         this.geocoding = geocoding;
+        this.vehicleSelectionMapper = vehicleSelectionMapper;
     }
 
     @Transactional public ShippingAddress savePickup(UUID userId,ShippingAddress address) {
@@ -122,11 +139,17 @@ public class ShippingQuoteServiceImpl implements ShippingQuoteService {
             ShippingPayloads.requireCoordinates(origin,"Seller/inspection center pickup");
             ShippingPayloads.requireCoordinates(delivery,"Buyer delivery");
         }
-        var result=provider.preview(payload);
+        JsonNode result;
+        try {
+            result = provider.preview(payload);
+        } catch (ShippingRouteUnavailableException error) {
+            throw error.withCities(vehicleSelectionMapper.city(origin), vehicleSelectionMapper.city(delivery));
+        }
         var total=result.get("total_fee");
         if (total==null || !total.isNumber() || total.decimalValue().signum()<0 || total.decimalValue().compareTo(BigDecimal.valueOf(1000000000))>0)
             throw new ShippingProviderException("Carrier returned an invalid shipping fee");
         if (result.hasNonNull("provider_quote")) payload.put("provider_quote",result.get("provider_quote"));
+        if (result.hasNonNull("vehicle_selection")) payload.put("vehicle_selection", result.get("vehicle_selection"));
         if ("LALAMOVE".equals(carrier)) {
             String selected=result.path("provider_quote").path("serviceType").asText();
             if(!selected.matches("[A-Z][A-Z0-9_]{0,59}")) throw new ShippingProviderException("Lalamove returned no selected vehicle");
@@ -149,7 +172,8 @@ public class ShippingQuoteServiceImpl implements ShippingQuoteService {
         return new ShippingQuoteResponse(row.getId(),row.getLeg(),row.getFee(),price,price.add(row.getFee()),
             BigDecimal.ZERO,row.getExpiresAt(),row.getExpectedDeliveryTime(),
             carrier,result.path("provider_quote").path("serviceType").asText(null),result.path("provider_quote").path("quotationId").asText(null),
-            parcel.weight(),parcel.length(),parcel.width(),parcel.height());
+            parcel.weight(),parcel.length(),parcel.width(),parcel.height(),
+            vehicleSelectionMapper.toResponse(result, origin, delivery));
     }
     @Transactional public ShippingQuote consume(UUID buyerId,UUID postId,UUID quoteId,UUID orderId,BigDecimal price) {
         if (quoteId==null) throw new BadRequestException("shippingQuoteId is required; obtain a shipping quote before placing the order");

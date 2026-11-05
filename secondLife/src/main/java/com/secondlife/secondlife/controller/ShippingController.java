@@ -7,6 +7,7 @@ import com.secondlife.secondlife.dto.request.ShippingAddressRequest;
 import com.secondlife.secondlife.dto.request.ShippingQuoteRequest;
 import com.secondlife.secondlife.dto.response.GeocodedAddressResponse;
 import com.secondlife.secondlife.dto.response.ShippingQuoteResponse;
+import com.secondlife.secondlife.dto.response.ShippingRouteErrorResponse;
 import com.secondlife.secondlife.dto.response.ShippingVehicleCatalogResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
@@ -15,6 +16,9 @@ import com.secondlife.secondlife.service.ShippingCatalogService;
 import com.secondlife.secondlife.service.ShippingQuoteService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -78,8 +82,18 @@ public class ShippingController {
     @GetMapping("/pickup-address") @PreAuthorize("hasAnyRole('SELLER', 'BUYER')")
     public ApiResponse<ShippingAddress> pickup(@AuthenticationPrincipal CustomUserDetails user) { return ApiResponse.success(quotes.pickup(current.resolveUserId(user))); }
     @PostMapping("/quotes") @PreAuthorize("hasRole('BUYER') or hasRole('SELLER')")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200",
+                    description = "Báo giá thành công; vehicleSelection giải thích phương tiện thay thế nếu có"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "422",
+                    description = "Tất cả xe phù hợp đã thử đều bị hãng từ chối vì ngoài vùng phục vụ",
+                    content = @Content(schema = @Schema(implementation = ShippingRouteErrorResponse.class)))
+    })
     @Operation(summary="Tự chọn xe phù hợp và lấy phí vận chuyển",
-        description="BUYER gửi bài đăng và địa chỉ nhận. BE lọc tải trọng/kích thước kiện hàng theo danh mục xe Lalamove, ưu tiên xe có tải trọng nhỏ nhất đủ chở kiện hàng và lấy báo giá đầu tiên thành công. serviceType trong response do BE quyết định.")
+        description="BUYER gửi bài đăng và địa chỉ nhận. BE ưu tiên xe có tải trọng nhỏ nhất đủ chở kiện hàng và lấy báo giá đầu tiên thành công. "
+                + "vehicleSelection giải thích phương tiện thay thế và tuyến thực tế; báo giá thay thế vẫn trả 200. "
+                + "Nếu tất cả xe phù hợp bị hãng từ chối vì ngoài vùng phục vụ, trả 422 với code NO_SUITABLE_VEHICLE_FOR_ROUTE. "
+                + "Lỗi kỹ thuật của hãng được xử lý riêng. serviceType trong response do BE quyết định.")
     public ApiResponse<ShippingQuoteResponse> quote(@AuthenticationPrincipal CustomUserDetails user,@Valid @RequestBody ShippingQuoteRequest body) {
         return ApiResponse.success(quotes.quote(current.resolveUserId(user),body));
     }

@@ -57,14 +57,14 @@ class LalamoveAutoVehicleTest {
                 +"Giới hạn từng loại xe tại điểm lấy hàng (dài x rộng x cao): TRUCK_5000: tối đa 5000 kg, 600 x 220 x 220 cm");
         server.verify();
     }
-    @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings={"ERR_OUT_OF_SERVICE_AREA","ERR_INVALID_SERVICE_TYPE"})
-    void unavailableHeavyVehicleRouteReturnsUnsupportedInTheHttpResponse(String code) throws Exception {
+    @Test
+    void unavailableHeavyVehicleRouteReturnsUnsupportedInTheHttpResponse() throws Exception {
         catalogue(List.of(vehicle("TRUCK_5000","5","t","6","2.2","2.2","m")),List.of());
         server.expect(requestTo(BASE+"/v3/quotations")).andRespond(withStatus(HttpStatus.UNPROCESSABLE_ENTITY)
-                .body("{\"errors\":[{\"id\":\""+code+"\"}]}"));
+                .body("{\"errors\":[{\"id\":\"ERR_OUT_OF_SERVICE_AREA\"}]}"));
         assertUnsupportedResponse(assertDoesNotThrow(()->route(1000000,500,210,205)),
-                "Lalamove chưa hỗ trợ tuyến giao hàng này với các loại xe phù hợp");
+                "Không tìm được phương tiện Lalamove phù hợp phục vụ tuyến giao hàng đã chọn. "
+                        + "Vui lòng kiểm tra lại địa chỉ lấy hàng và địa chỉ nhận hàng.", 422);
         server.verify();
     }
     @org.junit.jupiter.params.ParameterizedTest
@@ -74,6 +74,9 @@ class LalamoveAutoVehicleTest {
         server.verify();
     }
     private void assertUnsupportedResponse(Map<String,Object> payload,String message) throws Exception {
+        assertUnsupportedResponse(payload, message, 400);
+    }
+    private void assertUnsupportedResponse(Map<String,Object> payload,String message,int status) throws Exception {
         var quotes=mock(ShippingQuoteService.class);
         when(quotes.quote(any(),any())).thenAnswer(invocation -> { provider.preview(payload); return null; });
         var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
@@ -86,7 +89,7 @@ class LalamoveAutoVehicleTest {
                 {"postId":"1c2dd5e3-36db-420b-b313-9ed606b017a9",
                  "deliveryAddress":{"name":"Buyer","phone":"0987654321","latitude":10.781,"longitude":106.700}}
                 """))
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().is(status))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.success").value(false))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.message").value(message))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.path").value("/api/v1/shipping/quotes"));

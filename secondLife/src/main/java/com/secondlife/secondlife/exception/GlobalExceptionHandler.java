@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.exception;
 
 import com.secondlife.secondlife.common.ErrorResponse;
+import com.secondlife.secondlife.dto.response.ShippingRouteErrorResponse;
 import com.secondlife.secondlife.integration.ekyc.vnpt.VnptApiException;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -73,6 +74,13 @@ public class GlobalExceptionHandler {
                 ex.getUpstreamStatus()==503 ? HttpStatus.SERVICE_UNAVAILABLE :
                 ex.getUpstreamStatus()==504 ? HttpStatus.GATEWAY_TIMEOUT : HttpStatus.BAD_GATEWAY;
         return ResponseEntity.status(status).body(ErrorResponse.of(ex.getMessage(),request.getRequestURI()));
+    }
+
+    @ExceptionHandler(ShippingRouteUnavailableException.class)
+    public ResponseEntity<ShippingRouteErrorResponse> handleShippingRouteUnavailable(
+            ShippingRouteUnavailableException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(ShippingRouteErrorResponse.of(ex, request.getRequestURI()));
     }
 
     @ExceptionHandler({org.springframework.web.servlet.resource.NoResourceFoundException.class,
