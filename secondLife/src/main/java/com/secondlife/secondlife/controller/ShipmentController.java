@@ -56,7 +56,7 @@ public class ShipmentController {
     public ApiResponse<List<ShipmentResponse>> order(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID orderId) {
         return ApiResponse.success(shipments.orderShipments(actor(user),staff(),orderId));
     }
-    @PostMapping("/inspection-orders/{inspectionId}/shipments") @PreAuthorize("hasRole('STAFF') or hasRole('ADMIN')")
+    @PostMapping("/inspection-orders/{inspectionId}/shipments") @PreAuthorize("isAuthenticated()")
     public ApiResponse<ShipmentResponse> inspectionCreate(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID inspectionId,@Valid @RequestBody CreateShipmentRequest body) {
         return ApiResponse.success(shipments.createForInspection(actor(user),staff(),inspectionId,body));
     }

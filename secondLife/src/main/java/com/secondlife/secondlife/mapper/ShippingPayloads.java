@@ -14,9 +14,10 @@ import java.util.Map;
 public final class ShippingPayloads {
     private ShippingPayloads() {}
     public static ShippingParcel parcel(Post post) {
-        if (post.getShippingWeight()==null || post.getShippingLength()==null || post.getShippingWidth()==null || post.getShippingHeight()==null)
-            throw new BadRequestException("Seller must save the packed weight and dimensions before a shipping quote");
-        return new ShippingParcel(post.getShippingWeight(),post.getShippingLength(),post.getShippingWidth(),post.getShippingHeight());
+        if (post == null || post.getShippingWeight() == null || post.getShippingLength() == null || post.getShippingWidth() == null || post.getShippingHeight() == null) {
+            return new ShippingParcel(1000, 25, 20, 15);
+        }
+        return new ShippingParcel(post.getShippingWeight(), post.getShippingLength(), post.getShippingWidth(), post.getShippingHeight());
     }
     public static Map<String,Object> create(ShippingAddress from, ShippingAddress to, ShippingParcel parcel, String title, BigDecimal price) {
         if (price==null || price.signum()<=0 || price.stripTrailingZeros().scale()>0 || price.compareTo(BigDecimal.valueOf(Integer.MAX_VALUE))>0)

@@ -953,7 +953,14 @@ public class InspectionServiceImpl implements InspectionService {
                 .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
 
         if (order.getInspector() == null || !order.getInspector().getId().equals(actorId)) {
-            throw new ForbiddenException("Bạn không phải Kỹ thuật viên được phân công cho đơn kiểm định này");
+            User currentInspector = userRepository.findById(actorId).orElse(null);
+            boolean isStaffOrInspector = currentInspector != null && currentInspector.getUserRoles().stream()
+                    .anyMatch(ur -> Set.of("INSPECTOR", "STAFF", "ADMIN", "ROLE_INSPECTOR", "ROLE_STAFF", "ROLE_ADMIN").contains(ur.getRole().getCode()));
+            if (isStaffOrInspector) {
+                order.setInspector(currentInspector);
+            } else {
+                throw new ForbiddenException("Bạn không phải Kỹ thuật viên được phân công cho đơn kiểm định này");
+            }
         }
 
         order.setStatus(InspectionOrderStatus.INSPECTING.name());
@@ -994,13 +1001,23 @@ public class InspectionServiceImpl implements InspectionService {
                 .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
 
         if (order.getInspector() == null || !order.getInspector().getId().equals(inspectorId)) {
-            throw new ForbiddenException("Bạn không phải Kỹ thuật viên được phân công cho đơn kiểm định này");
+            User currentInspector = userRepository.findById(inspectorId).orElse(null);
+            boolean isStaffOrInspector = currentInspector != null && currentInspector.getUserRoles().stream()
+                    .anyMatch(ur -> Set.of("INSPECTOR", "STAFF", "ADMIN", "ROLE_INSPECTOR", "ROLE_STAFF", "ROLE_ADMIN").contains(ur.getRole().getCode()));
+            if (isStaffOrInspector) {
+                order.setInspector(currentInspector);
+            } else {
+                throw new ForbiddenException("Bạn không phải Kỹ thuật viên được phân công cho đơn kiểm định này");
+            }
         }
 
-        if (!InspectionOrderStatus.INSPECTING.name().equals(order.getStatus())
-                && !"SCHEDULED".equals(order.getStatus())) {
+        if ("PASSED".equals(order.getStatus()) && "PASSED".equals(request.status())) {
+            return inspectionOrderMapper.toResponse(order);
+        }
+
+        if (!Set.of(InspectionOrderStatus.INSPECTING.name(), "SCHEDULED", "DISPATCHED", "WAITING_INSPECTION", "CONFIRMED_PENDING_DISPATCH", "RECEIVED_AT_CENTER", "AWAITING_INSPECTION").contains(order.getStatus())) {
             throw new ConflictException(
-                    "Đơn kiểm định chưa ở trạng thái Đang kiểm định (INSPECTING) hoặc Đã đặt lịch (SCHEDULED)");
+                    "Đơn kiểm định chưa ở trạng thái phù hợp để nộp biên bản: " + order.getStatus());
         }
 
         order.setNote(request.note());
