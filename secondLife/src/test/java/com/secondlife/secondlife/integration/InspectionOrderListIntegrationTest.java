@@ -6,9 +6,10 @@ import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
 import com.secondlife.secondlife.service.InspectionService;
+
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -62,12 +63,14 @@ class InspectionOrderListIntegrationTest {
     private UUID preListingId;
     private UUID buyerRequestId;
     private String authorization;
+    private UUID centerId;
 
     @BeforeEach
     void fixture() {
         var manager = new User(UUID.randomUUID() + "@example.test", "test-hash", AccountStatus.ACTIVE);
         manager.addRole(roles.findByCode("INSPECTION_CENTER").orElseThrow());
         manager = users.saveAndFlush(manager);
+        centerId = manager.getId();
         authorization = "Bearer " + tokens.generateAccessToken(manager);
         UUID seller = UUID.randomUUID();
         UUID buyer = UUID.randomUUID();
@@ -94,7 +97,7 @@ class InspectionOrderListIntegrationTest {
     @ParameterizedTest
     @ValueSource(strings = {"/api/v1/inspector-center/orders", "/api/v1/inspector/orders/all"})
     void filteringAndCountQueriesStillWork(String path) throws Exception {
-        int total = jdbc.queryForObject("SELECT count(*) FROM inspection_orders WHERE status='PENDING'", Integer.class);
+        int total = jdbc.queryForObject("SELECT count(*) FROM inspection_orders WHERE status='PENDING' AND inspection_center_id=?", Integer.class, centerId);
         mvc.perform(get(path).header("Authorization", authorization).param("page", "0").param("size", "1").param("status", "pending"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.size").value(1))
@@ -127,9 +130,9 @@ class InspectionOrderListIntegrationTest {
                     "https://example.test/listing/" + post + "/" + position);
         }
         jdbc.update("""
-                INSERT INTO inspection_orders(id,post_id,seller_id,buyer_id,status,inspection_scope,inspection_fee,shipping_fee,created_at)
-                VALUES (?,?,?,?,?,?,100000,50000,CURRENT_TIMESTAMP)
-                """, order, post, seller, buyer, status, scope);
+                INSERT INTO inspection_orders(id,post_id,seller_id,buyer_id,status,inspection_scope,inspection_center_id,inspection_fee,shipping_fee,created_at)
+                VALUES (?,?,?,?,?,?,?,100000,50000,CURRENT_TIMESTAMP)
+                """, order, post, seller, buyer, status, scope, centerId);
         return order;
     }
 }

@@ -29,7 +29,9 @@ public record InspectionQuoteResponse(
     Map<String, BigDecimal> atCenterSplitOptions, // BUYER_PAYS, SELLER_PAYS, SPLIT_50_50
     // Gói cấu trúc lồng nhau (Nested objects theo BE_INSPECTION_ACTION_PLAN.md)
     AtHomePackageDto atHomePackage,
-    AtCenterPackageDto atCenterPackage
+    AtCenterPackageDto atCenterPackage,
+    InspectionConfigurationResponse inspectionConfiguration,
+    InspectionShippingQuoteResponse shippingQuote
 ) {
 
     @JsonProperty("baseFee")

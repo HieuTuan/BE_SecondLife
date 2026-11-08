@@ -1,9 +1,24 @@
 package com.secondlife.secondlife.entity;
 
+import com.secondlife.secondlife.enums.InspectionAppealStatus;
+import com.secondlife.secondlife.enums.InspectionComplexityLevel;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionOrderType;
 import com.secondlife.secondlife.enums.InspectionScope;
-import jakarta.persistence.*;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -30,6 +45,31 @@ public class InspectionOrder {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "inspector_id")
     private User inspector; // Được phân công sau bởi Manager
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "inspection_center_id")
+    private User inspectionCenter;
+
+    @Column(name = "inspection_shipping_quote_id")
+    private UUID inspectionShippingQuoteId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "checklist_template_id")
+    private InspectionChecklistTemplate checklistTemplate;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "fee_proposal_id")
+    private InspectionFeeProposal feeProposal;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "complexity_level", length = 2)
+    private InspectionComplexityLevel complexityLevel;
+
+    @Column(name = "checklist_snapshot_json", columnDefinition = "TEXT")
+    private String checklistSnapshotJson;
+
+    @Column(name = "platform_fee_rate_snapshot", precision = 9, scale = 6)
+    private BigDecimal platformFeeRateSnapshot;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "buyer_id")
@@ -169,7 +209,7 @@ public class InspectionOrder {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "appeal_status", length = 30)
-    private com.secondlife.secondlife.enums.InspectionAppealStatus appealStatus = com.secondlife.secondlife.enums.InspectionAppealStatus.NONE;
+    private InspectionAppealStatus appealStatus = InspectionAppealStatus.NONE;
 
     @Column(name = "appeal_reason", columnDefinition = "TEXT")
     private String appealReason;

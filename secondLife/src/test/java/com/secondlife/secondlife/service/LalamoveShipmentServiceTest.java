@@ -70,7 +70,7 @@ class LalamoveShipmentServiceTest {
         service = new ShipmentServiceImpl(shipments, events, orders, inspections, quotes, quoteService,
                 mock(ReverseGeocodingService.class), router, mapper, wallets, transactions,
                 mock(SystemWalletService.class), mock(SellerReputationService.class), new ListingFingerprintImpl(),
-                MapperTestSupport.mapper(ShipmentMapper.class), mock(OrderDisputeService.class), mock(ReturnShippingFeeService.class));
+                MapperTestSupport.mapper(ShipmentMapper.class), mock(OrderDisputeService.class), mock(ReturnShippingFeeService.class), mock(InspectionCenterProfileService.class), mock(InspectionShippingQuoteService.class));
     }
     private CreateShipmentRequest request(UUID id) { return new CreateShipmentRequest(id,"SELLER_TO_BUYER",null,null,null); }
     private Shipment booked() { service.createForOrder(seller,false,order.getId(),request(UUID.randomUUID())); return rows.values().iterator().next(); }

@@ -1,6 +1,8 @@
 package com.secondlife.secondlife.dto.response;
 
+import com.secondlife.secondlife.enums.InspectionComplexityLevel;
 import com.secondlife.secondlife.enums.InspectionFeeProposalStatus;
+
 import lombok.Builder;
 
 import java.math.BigDecimal;
@@ -24,6 +26,7 @@ public record InspectionFeeProposalResponse(
     InspectionFeeProposalStatus status,
     String rejectReason,
     Instant createdAt,
-    Instant reviewedAt
+    Instant reviewedAt,
+    InspectionComplexityLevel complexityLevel
 ) {
 }

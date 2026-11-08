@@ -17,6 +17,7 @@ import com.secondlife.secondlife.entity.AiChatMessage;
 import com.secondlife.secondlife.entity.AiChatSession;
 import com.secondlife.secondlife.entity.Category;
 import com.secondlife.secondlife.entity.CategoryQuestionTemplate;
+import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Item;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.PostImage;
@@ -60,8 +61,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.IOException;
@@ -69,20 +70,19 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.function.Supplier;
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
-import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.UUID;
 
 @Slf4j
 @Service
 public class PostServiceImpl implements PostService {
     private final PostMapper postMapper;
-    private final BigDecimal inspectionFee;
-    private final BigDecimal shippingFee;
     private final int maxUnfinishedDrafts;
     private final long maxImageBytes;
     private final int minImages;
@@ -128,8 +128,6 @@ public class PostServiceImpl implements PostService {
                            ListingReviewService reviews,
                            ListingImageSimilarity imageSimilarity,
                            ListingFingerprint listingFingerprint,
-                           @Value("${app.inspection.inspection-fee}") BigDecimal inspectionFee,
-                           @Value("${app.inspection.shipping-fee}") BigDecimal shippingFee,
                            @Value("${app.listing.max-unfinished-drafts}") int maxUnfinishedDrafts,
                            @Value("${app.listing.max-image-bytes}") long maxImageBytes,
                            @Value("${app.listing.min-images}") int minImages,
@@ -140,9 +138,6 @@ public class PostServiceImpl implements PostService {
         this.transactionTemplate = transactions != null ? new TransactionTemplate(transactions) : null;
         this.postMapper = postMapper;
         this.imageValidator = imageValidator;
-
-        if (inspectionFee.signum() < 0 || shippingFee.signum() < 0)
-            throw new IllegalArgumentException("Inspection and shipping fees must be non-negative");
 
         if (maxUnfinishedDrafts <= 0 || maxImageBytes <= 0)
             throw new IllegalArgumentException("Listing draft and image byte limits must be positive");
@@ -169,8 +164,6 @@ public class PostServiceImpl implements PostService {
         this.reviews = reviews;
         this.imageSimilarity = imageSimilarity;
         this.listingFingerprint = listingFingerprint;
-        this.inspectionFee = inspectionFee;
-        this.shippingFee = shippingFee;
         this.maxUnfinishedDrafts = maxUnfinishedDrafts;
         this.maxImageBytes = maxImageBytes;
         this.minImages = minImages;
@@ -197,6 +190,9 @@ public class PostServiceImpl implements PostService {
 
         if (request.itemId() != null) {
             var item = itemRepository.findById(request.itemId()).orElseThrow(() -> new BadRequestException("Invalid itemId"));
+            if (!item.isSelectable()) {
+                throw new BadRequestException("Loại sản phẩm đã được tách. Vui lòng chọn loại cụ thể trong danh sách Item hiện hành.");
+            }
             if (!request.categoryId().equals(item.getCategory().getId()))
                 throw new BadRequestException("itemId does not belong to categoryId");
         }
@@ -727,8 +723,10 @@ public class PostServiceImpl implements PostService {
         if ("PENDING".equals(post.getStatus()))
             return new PostSubmitResponse("PENDING", false, null, null, "Bài có dấu hiệu trùng lặp, đang chờ STAFF kiểm duyệt; chưa trừ credit đăng bài", null);
         boolean inspection = "PENDING_INSPECTION".equals(post.getStatus());
-        return new PostSubmitResponse(post.getStatus(), inspection, inspection ? inspectionFee : null,
-                inspection ? shippingFee : null, inspection
+        InspectionOrder inspectionOrder = inspection ? inspectionOrderRepository.findActiveByPostId(post.getId())
+                .orElseThrow(() -> new ConflictException("Không tìm thấy đơn kiểm định của bài đăng")) : null;
+        return new PostSubmitResponse(post.getStatus(), inspection, inspection ? inspectionOrder.getInspectionFee() : null,
+                inspection ? inspectionOrder.getShippingFee() : null, inspection
                 ? "Đã nhận bài và tạo đơn kiểm định. Phí kiểm định/vận chuyển thanh toán qua luồng riêng."
                 : "Bài đăng đã được duyệt và hiển thị trên sàn.", null);
     }
@@ -867,6 +865,29 @@ public class PostServiceImpl implements PostService {
             throw new ForbiddenException("This post belongs to another user");
         }
         return postMapper.toResponse(post);
+    }
+
+    @Override
+    @Transactional
+    public PostDto reclassifyItem(UUID userId, UUID postId, UUID itemId) {
+        Post post = postRepository.findByIdForUpdate(postId).orElseThrow(() -> new NotFoundException("Post not found"));
+        if (post.getUser() == null || !userId.equals(post.getUser().getId())) {
+            throw new ForbiddenException("This post belongs to another user");
+        }
+        if (post.getStatus() == null || !Set.of("DRAFT", "ACTIVE", "REJECTED", "PENDING").contains(post.getStatus())
+                || inspectionOrderRepository.findActiveByPostId(postId).isPresent()) {
+            throw new ConflictException("Không được đổi loại sản phẩm khi bài đã bán, giữ chỗ hoặc đang kiểm định/giao dịch");
+        }
+        Item item = itemRepository.findById(itemId).orElseThrow(() -> new NotFoundException("Item not found"));
+        if (!item.isSelectable() || !item.getCategory().getId().equals(post.getCategoryId())) {
+            throw new BadRequestException("Cần chọn Item hiện hành thuộc đúng danh mục của bài đăng");
+        }
+        if (itemId.equals(post.getItemId())) return postMapper.toResponse(post);
+        if (post.getItemId() != null && itemRepository.findById(post.getItemId()).map(Item::isSelectable).orElse(false)) {
+            throw new ConflictException("Bài đăng đã có loại sản phẩm cụ thể; API này chỉ dùng cho Item cũ đã được tách");
+        }
+        post.setItemId(item.getId());
+        return postMapper.toResponse(postRepository.saveAndFlush(post));
     }
 
     @Override

@@ -6,11 +6,14 @@ import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.service.InspectionChecklistService;
-import org.junit.jupiter.api.Test;
+import com.secondlife.secondlife.service.InspectionGovernanceAccessService;
+
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
-import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.Mock;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -29,6 +32,8 @@ class InspectionOrderChecklistServiceImplTest {
     private InspectionOrderRepository orderRepository;
     @Mock
     private InspectionChecklistService checklistService;
+    @Mock private InspectionGovernanceAccessService access;
+    @Mock private ObjectMapper objectMapper;
     @InjectMocks
     private InspectionOrderChecklistServiceImpl service;
 
@@ -44,7 +49,7 @@ class InspectionOrderChecklistServiceImplTest {
         when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
         when(checklistService.getByCategoryId(categoryId)).thenReturn(checklist);
 
-        assertSame(checklist, service.getForOrder(orderId));
+        assertSame(checklist, service.getForOrder(UUID.randomUUID(), orderId));
     }
 
     @Test
@@ -54,7 +59,7 @@ class InspectionOrderChecklistServiceImplTest {
         InspectionChecklistResponse checklist = InspectionChecklistResponse.builder().title("Default").build();
         when(checklistService.getByCategoryId(null)).thenReturn(checklist);
 
-        assertSame(checklist, service.getForOrder(orderId));
+        assertSame(checklist, service.getForOrder(UUID.randomUUID(), orderId));
         verify(checklistService).getByCategoryId(null);
     }
 
@@ -63,7 +68,7 @@ class InspectionOrderChecklistServiceImplTest {
         UUID orderId = UUID.randomUUID();
         when(orderRepository.findById(orderId)).thenReturn(Optional.empty());
 
-        NotFoundException error = assertThrows(NotFoundException.class, () -> service.getForOrder(orderId));
+        NotFoundException error = assertThrows(NotFoundException.class, () -> service.getForOrder(UUID.randomUUID(), orderId));
 
         assertEquals("Đơn kiểm định không tồn tại", error.getMessage());
         verifyNoInteractions(checklistService);

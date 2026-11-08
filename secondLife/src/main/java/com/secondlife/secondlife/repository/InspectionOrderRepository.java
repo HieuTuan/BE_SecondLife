@@ -3,7 +3,6 @@ package com.secondlife.secondlife.repository;
 import com.secondlife.secondlife.entity.InspectionOrder;
 
 import jakarta.persistence.LockModeType;
-
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -13,11 +12,14 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface InspectionOrderRepository extends JpaRepository<InspectionOrder, UUID> {
+
+    Optional<InspectionOrder> findByInspectionShippingQuoteId(UUID quoteId);
 
     @Query("select o.post.user.id from InspectionOrder o where o.id = :id")
     Optional<UUID> findOwnerId(@Param("id") UUID id);
@@ -35,10 +37,22 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
     Page<InspectionOrder> findByStatus(String status, Pageable pageable);
 
     @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
-    Page<InspectionOrder> findByStatusIn(java.util.Collection<String> statuses, Pageable pageable);
+    Page<InspectionOrder> findByStatusIn(Collection<String> statuses, Pageable pageable);
 
     @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
     Page<InspectionOrder> findAll(Pageable pageable);
+
+    @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
+    @Query("""
+            select o from InspectionOrder o left join o.inspector i left join i.manager m
+            where (o.inspectionCenter.id=:centerId or (o.inspectionCenter is null and m.id=:centerId))
+              and (:status is null or o.status=:status)
+            """)
+    Page<InspectionOrder> findVisibleToCenter(@Param("centerId") UUID centerId, @Param("status") String status, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
+    @Query("select o from InspectionOrder o where o.inspector.id=:inspectorId and (:status is null or o.status=:status)")
+    Page<InspectionOrder> findVisibleToInspector(@Param("inspectorId") UUID inspectorId, @Param("status") String status, Pageable pageable);
 
     List<InspectionOrder> findAllByPostIdOrderByCreatedAtDesc(UUID postId);
 

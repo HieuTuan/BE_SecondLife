@@ -4,12 +4,13 @@ import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.dto.request.ConfirmInspectionPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionAppealRequest;
-import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyerRespondRequest;
+import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
 import com.secondlife.secondlife.dto.request.InspectionQuoteRequest;
 import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionSealScanRequest;
 import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
+import com.secondlife.secondlife.dto.response.InspectionCenterOptionResponse;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.dto.response.InspectionQuoteResponse;
 import com.secondlife.secondlife.dto.response.InspectionSealLogResponse;
@@ -19,13 +20,20 @@ import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.InspectionEscrowService;
 import com.secondlife.secondlife.service.InspectionPricingService;
 import com.secondlife.secondlife.service.InspectionService;
+
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -51,6 +59,12 @@ public class InspectionController {
     @Operation(summary = "Tính toán báo giá chi tiết kiểm định cho bài đăng (cả 2 gói Tại nhà và Tại trung tâm)")
     public ResponseEntity<InspectionQuoteResponse> getQuote(@Valid @RequestBody InspectionQuoteRequest request) {
         return ResponseEntity.ok(pricingService.quote(request));
+    }
+
+    @GetMapping("/centers")
+    @Operation(summary = "Danh sách trung tâm đang hoạt động để chọn khi lấy báo giá kiểm định")
+    public ApiResponse<List<InspectionCenterOptionResponse>> centers() {
+        return ApiResponse.success(pricingService.getAvailableCenters());
     }
 
     @PostMapping("/requests")

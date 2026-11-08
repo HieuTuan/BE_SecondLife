@@ -106,7 +106,7 @@ class LalamoveReturnSafetyTest {
         var service = new ShipmentServiceImpl(shipments, mock(ShipmentEventRepository.class), orders,
                 mock(InspectionOrderRepository.class), quotes, mock(ShippingQuoteService.class), mock(ReverseGeocodingService.class), router,
                 mapper, wallets, transactions, mock(SystemWalletService.class), mock(SellerReputationService.class), new ListingFingerprintImpl(),
-                MapperTestSupport.mapper(ShipmentMapper.class), disputes, mock(ReturnShippingFeeService.class));
+                MapperTestSupport.mapper(ShipmentMapper.class), disputes, mock(ReturnShippingFeeService.class), mock(InspectionCenterProfileService.class), mock(InspectionShippingQuoteService.class));
         var request = new CreateShipmentRequest(UUID.randomUUID(), "BUYER_TO_SELLER", null, null, "Approved dispute return", decision.getId());
 
         var first = service.createForOrder(UUID.randomUUID(), true, order.getId(), request);

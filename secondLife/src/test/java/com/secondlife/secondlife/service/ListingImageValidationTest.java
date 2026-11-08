@@ -70,7 +70,7 @@ class ListingImageValidationTest {
                 mock(InspectionOrderRepository.class), mock(AiChatGateway.class),
                 mock(ListingPublicationService.class), mock(ListingReviewService.class),
                 new ListingImageSimilarityImpl(16000, 25000000, 20971520, 100, 8, 12, 90),
-                new ListingFingerprintImpl(), BigDecimal.ZERO, BigDecimal.ZERO, 30,
+                new ListingFingerprintImpl(), 30,
                 10485760, 3, 6, mock(PostMapper.class), null,
                 new ImageUploadValidator(600, 16000, 25000000, 2560));
         doThrow(new AssertionError("Invalid batch must be rejected before any upload"))

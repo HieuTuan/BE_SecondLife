@@ -1,7 +1,21 @@
 package com.secondlife.secondlife.entity;
 
+import com.secondlife.secondlife.enums.InspectionComplexityLevel;
 import com.secondlife.secondlife.enums.InspectionFeeProposalStatus;
-import jakarta.persistence.*;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -24,6 +38,10 @@ public class InspectionFeeProposal {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")
     private Category category;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "complexity_level", length = 2)
+    private InspectionComplexityLevel complexityLevel;
 
     @Column(name = "base_inspection_fee", nullable = false, precision = 18, scale = 2)
     private BigDecimal baseInspectionFee;

@@ -1,31 +1,62 @@
 package com.secondlife.secondlife.service.impl;
 
-import tools.jackson.databind.ObjectMapper;
-import com.secondlife.secondlife.dto.request.*;
-import com.secondlife.secondlife.dto.response.*;
-import com.secondlife.secondlife.entity.*;
-import com.secondlife.secondlife.enums.*;
+import com.secondlife.secondlife.dto.request.InspectionAppealRequest;
+import com.secondlife.secondlife.dto.request.InspectionBuyerRespondRequest;
+import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
+import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
+import com.secondlife.secondlife.dto.request.InspectionResultRequest;
+import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
+import com.secondlife.secondlife.dto.response.InspectionQuoteResponse;
+import com.secondlife.secondlife.entity.InspectionOrder;
+import com.secondlife.secondlife.entity.Negotiation;
+import com.secondlife.secondlife.entity.Post;
+import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.enums.InspectionAppealStatus;
+import com.secondlife.secondlife.enums.InspectionFeePayer;
+import com.secondlife.secondlife.enums.InspectionOrderStatus;
+import com.secondlife.secondlife.enums.InspectionOrderType;
+import com.secondlife.secondlife.enums.InspectionScope;
+import com.secondlife.secondlife.enums.InspectionSettlementOutcome;
+import com.secondlife.secondlife.enums.NegotiationStatus;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.integration.ai.AiChatGateway;
 import com.secondlife.secondlife.mapper.InspectionOrderMapper;
 import com.secondlife.secondlife.mapper.InspectionSealLogMapper;
 import com.secondlife.secondlife.mapper.UserMapper;
-import com.secondlife.secondlife.repository.*;
-import com.secondlife.secondlife.service.*;
+import com.secondlife.secondlife.repository.InspectionOrderRepository;
+import com.secondlife.secondlife.repository.InspectionSealLogRepository;
+import com.secondlife.secondlife.repository.NegotiationRepository;
+import com.secondlife.secondlife.repository.OrderRepository;
+import com.secondlife.secondlife.repository.PostRepository;
+import com.secondlife.secondlife.repository.RoleRepository;
+import com.secondlife.secondlife.repository.ShipmentRepository;
+import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.service.CommissionService;
+import com.secondlife.secondlife.service.InspectionFeeSettlementService;
+import com.secondlife.secondlife.service.InspectionOrderChecklistService;
+import com.secondlife.secondlife.service.InspectionPricingService;
+import com.secondlife.secondlife.service.ListingPublicationService;
+import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.service.PaidOrderService;
+import com.secondlife.secondlife.service.SellerReputationService;
+import com.secondlife.secondlife.service.ShippingQuoteService;
+import com.secondlife.secondlife.service.TamperSealService;
+import com.secondlife.secondlife.service.WalletService;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
+import org.junit.jupiter.api.Test;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.Mock;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -144,7 +175,8 @@ class InspectionServiceImplWorkflowTest {
                 inspectionSealLogMapper,
                 24,
                 new BigDecimal("0.05"), // 5% commitment deposit
-                new BigDecimal("500000")
+                new BigDecimal("500000"),
+                mock(InspectionOrderChecklistService.class)
         );
 
         buyer = new User();
@@ -199,7 +231,7 @@ class InspectionServiceImplWorkflowTest {
                 null,
                 null,
                 null,
-                null
+                null, null, null, null, UUID.randomUUID()
         );
 
         assertThrows(ConflictException.class, () -> service.requestInspection(buyer.getId(), req));
@@ -330,7 +362,7 @@ class InspectionServiceImplWorkflowTest {
                 null,
                 null,
                 null,
-                negotiationId
+                negotiationId, null, null, null, UUID.randomUUID()
         );
 
         service.requestInspection(buyer.getId(), req);

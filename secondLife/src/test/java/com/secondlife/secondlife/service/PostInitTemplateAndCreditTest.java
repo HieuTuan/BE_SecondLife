@@ -100,8 +100,6 @@ class PostInitTemplateAndCreditTest {
                 mock(ListingReviewService.class),
                 imageSimilarity,
                 listingFingerprint,
-                BigDecimal.valueOf(50000),
-                BigDecimal.valueOf(30000),
                 5,
                 10 * 1024 * 1024L,
                 1,

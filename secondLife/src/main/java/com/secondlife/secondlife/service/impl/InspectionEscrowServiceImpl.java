@@ -18,6 +18,7 @@ import com.secondlife.secondlife.service.InspectionEscrowService;
 import com.secondlife.secondlife.service.InspectionFeeSettlementService;
 import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.WalletService;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -107,7 +108,9 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
             order.setSellerPaidAt(Instant.now());
         }
 
-        boolean buyerDone = (order.getBuyerFeeShare() == null || order.getBuyerFeeShare().compareTo(BigDecimal.ZERO) == 0) || order.getBuyerPaidAt() != null;
+        BigDecimal buyerDue = order.getBuyerFeeShare() == null ? BigDecimal.ZERO : order.getBuyerFeeShare();
+        if (order.getBuyerCommitmentDeposit() != null) buyerDue = buyerDue.add(order.getBuyerCommitmentDeposit());
+        boolean buyerDone = buyerDue.signum() == 0 || order.getBuyerPaidAt() != null;
         boolean sellerDone = (order.getSellerFeeShare() == null || order.getSellerFeeShare().compareTo(BigDecimal.ZERO) == 0) || order.getSellerPaidAt() != null;
 
         if (buyerDone && sellerDone) {
@@ -116,7 +119,9 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
 
             if (notificationService != null && userRepository != null) {
                 String postTitle = order.getPost() != null && order.getPost().getTitle() != null ? order.getPost().getTitle() : "";
-                List<UUID> centerManagerIds = userRepository.findActiveInspectionCenterUserIds();
+                List<UUID> centerManagerIds = order.getInspectionCenter() == null
+                        ? userRepository.findActiveInspectionCenterUserIds()
+                        : List.of(order.getInspectionCenter().getId());
                 for (UUID centerId : centerManagerIds) {
                     notificationService.notify(
                         centerId,

@@ -1,14 +1,21 @@
 package com.secondlife.secondlife.service.impl;
 
-import com.secondlife.secondlife.dto.request.*;
-import com.secondlife.secondlife.dto.response.*;
-import com.secondlife.secondlife.entity.*;
-import com.secondlife.secondlife.exception.*;
+import com.secondlife.secondlife.dto.request.CategoryRequest;
+import com.secondlife.secondlife.dto.request.ItemRequest;
+import com.secondlife.secondlife.dto.response.CategoryResponse;
+import com.secondlife.secondlife.dto.response.ItemResponse;
+import com.secondlife.secondlife.entity.Category;
+import com.secondlife.secondlife.entity.Item;
+import com.secondlife.secondlife.exception.BadRequestException;
+import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.CatalogMapper;
-import com.secondlife.secondlife.repository.*;
+import com.secondlife.secondlife.repository.CategoryRepository;
+import com.secondlife.secondlife.repository.ItemRepository;
 import com.secondlife.secondlife.service.CatalogService;
-import org.springframework.cache.annotation.CacheEvict;
+
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -44,7 +51,7 @@ public class CatalogServiceImpl implements CatalogService {
     public List<ItemResponse> items(UUID categoryId) {
         if (categoryId != null) requireCategory(categoryId);
         var found = categoryId == null ? items.findAll(Sort.by("name", "id")) : items.findByCategoryId(categoryId);
-        return found.stream().sorted(Comparator.comparing(Item::getName).thenComparing(Item::getId))
+        return found.stream().filter(Item::isSelectable).sorted(Comparator.comparing(Item::getName).thenComparing(Item::getId))
                 .map(catalogMapper::toItemResponse).toList();
     }
     @Transactional(readOnly = true)

@@ -4,8 +4,9 @@ import com.secondlife.secondlife.entity.Category;
 import com.secondlife.secondlife.entity.Item;
 import com.secondlife.secondlife.repository.CategoryRepository;
 import com.secondlife.secondlife.repository.ItemRepository;
-import lombok.RequiredArgsConstructor;
+
 import lombok.extern.slf4j.Slf4j;
+import lombok.RequiredArgsConstructor;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -157,6 +158,7 @@ public class CatalogDataSeeder implements ApplicationRunner {
 
             log.info("Tạo xong bộ Category và Item tiếng Việt.");
         }
+        itemRepository.splitInspectionVariants();
     }
 
     private void ensureItemExists(Category cat, String itemName) {

@@ -4,10 +4,13 @@ import com.secondlife.secondlife.config.MapStructConfiguration;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.User;
+
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.Named;
 import org.springframework.stereotype.Component;
+
+import java.math.BigDecimal;
 
 @Component
 public class InspectionOrderMapper {
@@ -44,6 +47,9 @@ public class InspectionOrderMapper {
         @Mapping(target = "sellerName", expression = "java(partyName(order.getSeller()))")
         @Mapping(target = "sellerEmail", source = "seller.email")
         @Mapping(target = "inspectorId", source = "inspector.id")
+        @Mapping(target = "inspectionCenterId", source = "inspectionCenter.id")
+        @Mapping(target = "checklistTemplateId", source = "checklistTemplate.id")
+        @Mapping(target = "feeProposalId", source = "feeProposal.id")
         @Mapping(target = "inspectorName", expression = "java(inspectorName(order.getInspector()))")
         @Mapping(target = "postId", source = "post.id")
         @Mapping(target = "postTitle", source = "post.title")
@@ -58,10 +64,10 @@ public class InspectionOrderMapper {
         @Mapping(target = "videoCleanedMessage", expression = "java(cleanedMessage(order.getVideoCleanupStatus()))")
         InspectionOrderResponse toResponse(InspectionOrder order);
 
-        default java.math.BigDecimal resolveInitialDepositPaid(InspectionOrder order) {
-            if (order == null) return java.math.BigDecimal.ZERO;
-            java.math.BigDecimal feeShare = order.getBuyerFeeShare() != null ? order.getBuyerFeeShare() : java.math.BigDecimal.ZERO;
-            java.math.BigDecimal commitment = order.getBuyerCommitmentDeposit() != null ? order.getBuyerCommitmentDeposit() : java.math.BigDecimal.ZERO;
+        default BigDecimal resolveInitialDepositPaid(InspectionOrder order) {
+            if (order == null) return BigDecimal.ZERO;
+            BigDecimal feeShare = order.getBuyerFeeShare() != null ? order.getBuyerFeeShare() : BigDecimal.ZERO;
+            BigDecimal commitment = order.getBuyerCommitmentDeposit() != null ? order.getBuyerCommitmentDeposit() : BigDecimal.ZERO;
             return feeShare.add(commitment);
         }
 

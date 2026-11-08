@@ -31,6 +31,8 @@ import com.secondlife.secondlife.repository.ShipmentEventRepository;
 import com.secondlife.secondlife.repository.ShipmentRepository;
 import com.secondlife.secondlife.repository.ShippingQuoteRepository;
 import com.secondlife.secondlife.service.ListingFingerprint;
+import com.secondlife.secondlife.service.InspectionCenterProfileService;
+import com.secondlife.secondlife.service.InspectionShippingQuoteService;
 import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.OrderDisputeService;
 import com.secondlife.secondlife.service.ReverseGeocodingService;
@@ -85,13 +87,16 @@ public class ShipmentServiceImpl implements ShipmentService {
     private final ListingFingerprint listingFingerprint;
     private final NotificationService notificationService;
     private final InspectionSealLogRepository sealLogs;
+    private final InspectionCenterProfileService centerProfiles;
+    private final InspectionShippingQuoteService inspectionShipping;
 
     public ShipmentServiceImpl(ShipmentRepository shipments, ShipmentEventRepository events, OrderRepository orders,
                            InspectionOrderRepository inspections, ShippingQuoteRepository quotes, ShippingQuoteService quoteService,
                            ReverseGeocodingService geocoding, ShippingProvider provider, ObjectMapper mapper,
                            WalletService wallets, PlatformTransactionManager transactions,
-                           SystemWalletService systemWallet, SellerReputationService reputation, ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes, ReturnShippingFeeService returnShippingFees) {
-        this(shipments, events, orders, inspections, quotes, quoteService, geocoding, provider, mapper, wallets, transactions, systemWallet, reputation, null, null, listingFingerprint, shipmentMapper, disputes, returnShippingFees);
+                           SystemWalletService systemWallet, SellerReputationService reputation, ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes, ReturnShippingFeeService returnShippingFees,
+                           InspectionCenterProfileService centerProfiles, InspectionShippingQuoteService inspectionShipping) {
+        this(shipments, events, orders, inspections, quotes, quoteService, geocoding, provider, mapper, wallets, transactions, systemWallet, reputation, null, null, listingFingerprint, shipmentMapper, disputes, returnShippingFees, centerProfiles, inspectionShipping);
     }
 
     @Autowired
@@ -102,7 +107,8 @@ public class ShipmentServiceImpl implements ShipmentService {
                            SystemWalletService systemWallet, SellerReputationService reputation,
                            @Autowired(required = false) NotificationService notificationService,
                            @Autowired(required = false) InspectionSealLogRepository sealLogs,
-                           ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes, ReturnShippingFeeService returnShippingFees) {
+                           ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes, ReturnShippingFeeService returnShippingFees,
+                           InspectionCenterProfileService centerProfiles, InspectionShippingQuoteService inspectionShipping) {
         this.shipmentMapper = shipmentMapper;
         this.disputes = Objects.requireNonNull(disputes, "OrderDisputeService is required");
         this.returnShippingFees = Objects.requireNonNull(returnShippingFees, "ReturnShippingFeeService is required");
@@ -122,6 +128,8 @@ public class ShipmentServiceImpl implements ShipmentService {
         this.reputation = Objects.requireNonNull(reputation, "SellerReputationService is required");
         this.notificationService = notificationService;
         this.sealLogs = sealLogs;
+        this.centerProfiles = centerProfiles;
+        this.inspectionShipping = inspectionShipping;
         this.listingFingerprint = listingFingerprint;
     }
 
@@ -283,26 +291,52 @@ public class ShipmentServiceImpl implements ShipmentService {
             }
             fee = inspection.getShippingFee();
         } else {
-            if (request.toAddress() == null) throw new BadRequestException("SELLER_TO_CENTER requires an inspection center destination address");
-            if (!staff && !"SELLER_TO_CENTER".equals(request.leg())) throw new ForbiddenException("STAFF/ADMIN assigns the verified inspection center destination");
+            if (inspection.getOrderType() != InspectionOrderType.AT_CENTER) {
+                throw new ConflictException("Only AT_CENTER inspections support shipments to an inspection center");
+            }
             if (Set.of("CANCELLED", "FAILED", "PAYMENT_EXPIRED", "COMPLETED").contains(inspection.getStatus())) {
                 throw new ConflictException("Inspection order is not eligible for center shipment");
             }
             if (saved.isPresent()) {
                 var original=saved.get();
-                if (!Objects.equals(original.getReason(),request.reason())
-                        || !matchesAddress(request.toAddress(),ShippingPayloads.storedAddress(mapper.readTree(original.getPayload()),"to")))
+                var originalPayload = mapper.readTree(original.getPayload());
+                if (!Objects.equals(original.getReason(), request.reason())
+                        || (request.toAddress() != null && !matchesAddress(request.toAddress(), ShippingPayloads.storedAddress(originalPayload, "to")))
+                        || (request.fromAddress() != null && !matchesAddress(request.fromAddress(), ShippingPayloads.storedAddress(originalPayload, "from"))))
                     throw new ConflictException("requestId was already used with different shipment details");
                 payload=readMap(original.getPayload());
             } else {
-                ShippingAddress from = request.fromAddress() != null ? geocoding.shipping(request.fromAddress()) : quoteService.pickup(seller);
-                ShippingAddress to = geocoding.shipping(request.toAddress());
-                if (from == null) from = to;
-                payload=ShippingPayloads.create(from,to,ShippingPayloads.parcel(post),post.getTitle(),post.getPrice());
+                ShippingAddress destination;
+                if (inspection.getInspectionCenter() != null) {
+                    destination = centerProfiles.requireShippingAddress(inspection.getInspectionCenter().getId());
+                    if (request.toAddress() != null && !matchesAddress(request.toAddress(), destination)) {
+                        throw new ConflictException("Điểm đến phải khớp hồ sơ trung tâm của đơn kiểm định; tải lại thông tin trung tâm hoặc bỏ toAddress");
+                    }
+                } else {
+                    // Legacy orders have no assigned center; use the explicit destination.
+                    if (request.toAddress() == null) {
+                        throw new BadRequestException("Đơn kiểm định cũ chưa gắn trung tâm; cần cung cấp toAddress đã xác minh");
+                    }
+                    destination = geocoding.shipping(request.toAddress());
+                }
+                if (inspection.getInspectionShippingQuoteId() != null) {
+                    payload = inspectionShipping.outboundPayload(inspection);
+                    if (request.fromAddress() != null && !matchesAddress(request.fromAddress(),
+                            ShippingPayloads.storedAddress(mapper.valueToTree(payload), "from"))) {
+                        throw new ConflictException("Điểm lấy hàng phải khớp báo giá vận chuyển đã chốt");
+                    }
+                    fee = inspection.getShippingFee();
+                } else {
+                    ShippingAddress origin = request.fromAddress() != null
+                            ? geocoding.shipping(request.fromAddress()) : quoteService.pickup(seller);
+                    payload = ShippingPayloads.create(origin, destination,
+                            ShippingPayloads.parcel(post), post.getTitle(), post.getPrice());
+                }
             }
         }
 
-        return prepare(actor,null,inspectionId,seller,null,request,payload,fee,saved.map(Shipment::getProvider).orElse(activeCarrier()));
+        UUID buyer = inspection.getBuyer() == null ? null : inspection.getBuyer().getId();
+        return prepare(actor,null,inspectionId,seller,buyer,request,payload,fee,saved.map(Shipment::getProvider).orElse(activeCarrier()));
     }
 
     private Prepared prepare(UUID actor,UUID orderId,UUID inspectionId,UUID seller,UUID buyer,CreateShipmentRequest request,Map<String,Object> payload,BigDecimal fee,String carrierCode) {
@@ -332,7 +366,9 @@ public class ShipmentServiceImpl implements ShipmentService {
                 if (total==null || !total.isNumber() || total.decimalValue().signum()<0 || total.decimalValue().compareTo(BigDecimal.valueOf(1000000000))>0)
                     throw new ShippingProviderException("Carrier returned an invalid shipping fee");
                 if (fee!=null && total.decimalValue().compareTo(fee)>0)
-                    throw new ConflictException("The current Lalamove fee exceeds the paid shipping fee; cancel the unshipped order and checkout with a new quote");
+                    throw new ConflictException(inspectionId != null
+                            ? "Phí Lalamove hiện tại vượt ngân sách vận chuyển của đơn kiểm định; cần xử lý hủy/hoàn phí đơn chưa gửi và xác nhận lại báo giá mới trước khi đặt chuyến"
+                            : "The current Lalamove fee exceeds the paid shipping fee; cancel the unshipped order and checkout with a new quote");
                 if (fee==null) fee=total.decimalValue();
                 if ("LALAMOVE".equals(carrierCode)) {
                     if (!preview.hasNonNull("provider_quote")) throw new ShippingProviderException("Lalamove returned no quotation context");
@@ -430,7 +466,8 @@ public class ShipmentServiceImpl implements ShipmentService {
         if (!staff) {
             UUID sellerId = inspection.getSeller() != null ? inspection.getSeller().getId() : (inspection.getPost() != null && inspection.getPost().getUser() != null ? inspection.getPost().getUser().getId() : null);
             UUID buyerId = inspection.getBuyer() != null ? inspection.getBuyer().getId() : (inspection.getOrder() != null && inspection.getOrder().getBuyer() != null ? inspection.getOrder().getBuyer().getId() : null);
-            if ((sellerId != null || buyerId != null) && !actor.equals(sellerId) && !actor.equals(buyerId)) {
+            UUID centerId = inspection.getInspectionCenter() == null ? null : inspection.getInspectionCenter().getId();
+            if (!actor.equals(sellerId) && !actor.equals(buyerId) && !actor.equals(centerId)) {
                 throw new ForbiddenException("Inspection belongs to another user");
             }
         }
@@ -779,7 +816,13 @@ public class ShipmentServiceImpl implements ShipmentService {
         return UUID.nameUUIDFromBytes((parent+":"+request.leg()+":"+request.requestId()).getBytes(StandardCharsets.UTF_8));
     }
     private void requireRead(UUID actor,boolean staff,Shipment shipment) {
-        if (!staff && !actor.equals(shipment.getSellerId()) && !actor.equals(shipment.getBuyerId())) throw new ForbiddenException("Shipment belongs to another user");
+        if (staff || actor.equals(shipment.getSellerId()) || actor.equals(shipment.getBuyerId())) return;
+        if (shipment.getInspectionOrderId() != null) {
+            var inspection = inspections.findById(shipment.getInspectionOrderId()).orElse(null);
+            if (inspection != null && ((inspection.getInspectionCenter() != null && actor.equals(inspection.getInspectionCenter().getId()))
+                    || (inspection.getBuyer() != null && actor.equals(inspection.getBuyer().getId())))) return;
+        }
+        throw new ForbiddenException("Shipment belongs to another user");
     }
     private void requireOrderActor(UUID actor,boolean staff,Order order) {
         if (!staff && !actor.equals(order.getBuyer().getId()) && !actor.equals(order.getSeller().getId())) throw new ForbiddenException("Order belongs to another user");

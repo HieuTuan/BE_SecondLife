@@ -6,11 +6,13 @@ import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionSettlementOutcome;
 import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
+import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.repository.InspectionFeeSettlementRepository;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.InspectionFeeSettlementService;
 import com.secondlife.secondlife.service.WalletService;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -87,13 +89,13 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
                 sellerRefund = sellerFee;
             }
             case FAILED_INSPECTION -> {
-                centerPayout = computeCenterPayout(serviceFee);
+                centerPayout = computeCenterPayout(inspectionOrder, serviceFee);
                 outboundShipping = shippingFee;
                 returnReserve = returnReserveFee;
                 buyerRefund = buyerDeposit;
             }
             case PASSED_PURCHASED -> {
-                centerPayout = computeCenterPayout(serviceFee);
+                centerPayout = computeCenterPayout(inspectionOrder, serviceFee);
                 outboundShipping = shippingFee;
                 returnReserve = BigDecimal.ZERO;
 
@@ -114,7 +116,7 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
                 sellerRefund = sellerReserveShare;
             }
             case PASSED_BUYER_DEFAULTED -> {
-                centerPayout = computeCenterPayout(serviceFee);
+                centerPayout = computeCenterPayout(inspectionOrder, serviceFee);
                 outboundShipping = shippingFee;
                 returnReserve = returnReserveFee;
                 sellerCompensation = buyerDeposit;
@@ -129,59 +131,27 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
                 .add(sellerCompensation);
 
         BigDecimal platformRetained = totalCollected.subtract(allocatedBeforePlatform);
-        if (platformRetained.compareTo(BigDecimal.ZERO) < 0) {
-            log.warn("Total collected {} is less than allocated {} for inspection order {}. Adjusting platform retained to 0.",
-                    totalCollected, allocatedBeforePlatform, inspectionOrder.getId());
-            platformRetained = BigDecimal.ZERO;
+        if (platformRetained.signum() < 0) {
+            throw new ConflictException("Phí đã thu không đủ để quyết toán kiểm định; cần kiểm tra giao dịch trước khi xử lý");
         }
 
-        // Ledger operations:
-        if (centerPayout.compareTo(BigDecimal.ZERO) > 0 && centerRecipient != null) {
-            try {
-                walletService.processEarning(centerRecipient.getId(), centerPayout, inspectionOrder.getId(),
-                        WalletTransactionReferenceType.INSPECTION_ORDER);
-                log.info("Paid inspection service fee {} to center recipient {} for order {}",
-                        centerPayout, centerRecipient.getId(), inspectionOrder.getId());
-            } catch (Exception ex) {
-                log.error("Failed to pay center recipient {} for inspection order {}: {}",
-                        centerRecipient.getId(), inspectionOrder.getId(), ex.getMessage());
-            }
+        // A failed wallet operation must roll back the entire settlement.
+        if (centerPayout.signum() > 0) {
+            if (centerRecipient == null) throw new ConflictException("Chưa xác định được trung tâm nhận tiền kiểm định");
+            walletService.processEarning(centerRecipient.getId(), centerPayout, inspectionOrder.getId(),
+                    WalletTransactionReferenceType.INSPECTION_ORDER);
         }
-
-        if (buyerRefund.compareTo(BigDecimal.ZERO) > 0 && inspectionOrder.getBuyer() != null) {
-            try {
-                walletService.processRefund(inspectionOrder.getBuyer().getId(), buyerRefund, inspectionOrder.getId(),
-                        WalletTransactionReferenceType.INSPECTION_ORDER);
-                log.info("Refunded {} to buyer {} for inspection order {}",
-                        buyerRefund, inspectionOrder.getBuyer().getId(), inspectionOrder.getId());
-            } catch (Exception ex) {
-                log.error("Failed to refund buyer {} for inspection order {}: {}",
-                        inspectionOrder.getBuyer().getId(), inspectionOrder.getId(), ex.getMessage());
-            }
+        if (buyerRefund.signum() > 0 && inspectionOrder.getBuyer() != null) {
+            walletService.processRefund(inspectionOrder.getBuyer().getId(), buyerRefund, inspectionOrder.getId(),
+                    WalletTransactionReferenceType.INSPECTION_ORDER);
         }
-
-        if (sellerRefund.compareTo(BigDecimal.ZERO) > 0 && inspectionOrder.getSeller() != null) {
-            try {
-                walletService.processRefund(inspectionOrder.getSeller().getId(), sellerRefund, inspectionOrder.getId(),
-                        WalletTransactionReferenceType.INSPECTION_ORDER);
-                log.info("Refunded unused fee/reserve {} to seller {} for inspection order {}",
-                        sellerRefund, inspectionOrder.getSeller().getId(), inspectionOrder.getId());
-            } catch (Exception ex) {
-                log.error("Failed to refund seller {} for inspection order {}: {}",
-                        inspectionOrder.getSeller().getId(), inspectionOrder.getId(), ex.getMessage());
-            }
+        if (sellerRefund.signum() > 0 && inspectionOrder.getSeller() != null) {
+            walletService.processRefund(inspectionOrder.getSeller().getId(), sellerRefund, inspectionOrder.getId(),
+                    WalletTransactionReferenceType.INSPECTION_ORDER);
         }
-
-        if (sellerCompensation.compareTo(BigDecimal.ZERO) > 0 && inspectionOrder.getSeller() != null) {
-            try {
-                walletService.processEarning(inspectionOrder.getSeller().getId(), sellerCompensation, inspectionOrder.getId(),
-                        WalletTransactionReferenceType.INSPECTION_ORDER);
-                log.info("Compensated seller {} amount {} for inspection order {}",
-                        inspectionOrder.getSeller().getId(), sellerCompensation, inspectionOrder.getId());
-            } catch (Exception ex) {
-                log.error("Failed to compensate seller {} for inspection order {}: {}",
-                        inspectionOrder.getSeller().getId(), inspectionOrder.getId(), ex.getMessage());
-            }
+        if (sellerCompensation.signum() > 0 && inspectionOrder.getSeller() != null) {
+            walletService.processEarning(inspectionOrder.getSeller().getId(), sellerCompensation, inspectionOrder.getId(),
+                    WalletTransactionReferenceType.INSPECTION_ORDER);
         }
 
         var settlement = new InspectionFeeSettlement();
@@ -206,13 +176,16 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
         return settlement;
     }
 
-    private BigDecimal computeCenterPayout(BigDecimal serviceFee) {
+    private BigDecimal computeCenterPayout(InspectionOrder order, BigDecimal serviceFee) {
         if (serviceFee.compareTo(BigDecimal.ZERO) <= 0) return BigDecimal.ZERO;
-        BigDecimal platformCut = serviceFee.multiply(platformFeeRate).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal rate = order.getPlatformFeeRateSnapshot() == null ? platformFeeRate : order.getPlatformFeeRateSnapshot();
+        BigDecimal commissionBase = order.getPlatformFeeRateSnapshot() == null ? serviceFee : order.getInspectionFee();
+        BigDecimal platformCut = commissionBase.multiply(rate).setScale(2, RoundingMode.HALF_UP);
         return serviceFee.subtract(platformCut).max(BigDecimal.ZERO);
     }
 
     private User resolveCenterRecipient(InspectionOrder order) {
+        if (order.getInspectionCenter() != null) return order.getInspectionCenter();
         if (order.getInspector() != null) {
             User inspector = order.getInspector();
             if (inspector.getManager() != null) {

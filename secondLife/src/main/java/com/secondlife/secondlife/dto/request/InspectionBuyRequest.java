@@ -1,12 +1,13 @@
 package com.secondlife.secondlife.dto.request;
 
-import com.fasterxml.jackson.annotation.JsonAlias;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionOrderType;
-import jakarta.validation.Valid;
+
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.Valid;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -26,8 +27,27 @@ public record InspectionBuyRequest(
     String note,
     BigDecimal buyerLatitude,
     BigDecimal buyerLongitude,
-    UUID negotiationId
+    UUID negotiationId,
+    UUID inspectionCenterId,
+    UUID expectedFeeProposalId,
+    UUID expectedChecklistTemplateId,
+    UUID inspectionShippingQuoteId
 ) {
+    public InspectionBuyRequest(UUID postId, InspectionOrderType orderType, InspectionFeePayer feePayer,
+                                boolean buyerConsentZin, ShippingAddressRequest buyerDeliveryAddress,
+                                String note, BigDecimal buyerLatitude, BigDecimal buyerLongitude, UUID negotiationId) {
+        this(postId, orderType, feePayer, buyerConsentZin, buyerDeliveryAddress, note,
+                buyerLatitude, buyerLongitude, negotiationId, null, null, null, null);
+    }
+
+    public InspectionBuyRequest(UUID postId, InspectionOrderType orderType, InspectionFeePayer feePayer,
+            boolean buyerConsentZin, ShippingAddressRequest buyerDeliveryAddress, String note,
+            BigDecimal buyerLatitude, BigDecimal buyerLongitude, UUID negotiationId, UUID inspectionCenterId,
+            UUID expectedFeeProposalId, UUID expectedChecklistTemplateId) {
+        this(postId, orderType, feePayer, buyerConsentZin, buyerDeliveryAddress, note, buyerLatitude,
+                buyerLongitude, negotiationId, inspectionCenterId, expectedFeeProposalId, expectedChecklistTemplateId, null);
+    }
+
     public BigDecimal buyerLatitude() {
         if (buyerLatitude != null) return buyerLatitude;
         return buyerDeliveryAddress != null ? buyerDeliveryAddress.latitude() : null;

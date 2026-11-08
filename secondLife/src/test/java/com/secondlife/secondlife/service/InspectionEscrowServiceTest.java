@@ -7,17 +7,22 @@ import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionOrderStatus;
 import com.secondlife.secondlife.enums.InspectionOrderType;
 import com.secondlife.secondlife.enums.InspectionSettlementOutcome;
+import com.secondlife.secondlife.enums.NotificationType;
 import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
 import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.mapper.InspectionOrderMapper;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
+import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.service.impl.InspectionEscrowServiceImpl;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
-import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.Mock;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -42,19 +47,19 @@ class InspectionEscrowServiceTest {
     private PostRepository postRepository;
 
     @Mock
-    private com.secondlife.secondlife.mapper.InspectionOrderMapper inspectionOrderMapper;
+    private InspectionOrderMapper inspectionOrderMapper;
 
     @Mock
     private NotificationService notificationService;
 
     @Mock
-    private com.secondlife.secondlife.repository.UserRepository userRepository;
+    private UserRepository userRepository;
 
     @Mock
     private InspectionFeeSettlementService feeSettlementService;
 
     @InjectMocks
-    private com.secondlife.secondlife.service.impl.InspectionEscrowServiceImpl escrowService;
+    private InspectionEscrowServiceImpl escrowService;
 
     private UUID buyerId;
     private UUID sellerId;
@@ -85,6 +90,35 @@ class InspectionEscrowServiceTest {
         order.setBuyerFeeShare(BigDecimal.valueOf(100000));
         order.setSellerFeeShare(BigDecimal.valueOf(100000));
         order.setPaymentDeadline(Instant.now().plus(6, ChronoUnit.HOURS));
+    }
+
+    @Test
+    void fundedOrderNotifiesOnlyItsSelectedCenter() {
+        User center = new User();
+        center.setId(UUID.randomUUID());
+        order.setInspectionCenter(center);
+        order.setBuyerPaidAt(Instant.now());
+        when(inspectionOrderRepository.findByIdForUpdate(orderId)).thenReturn(Optional.of(order));
+        when(inspectionOrderRepository.save(any(InspectionOrder.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        escrowService.payInspectionFee(sellerId, orderId);
+
+        verify(notificationService).notify(eq(center.getId()), anyString(), anyString(), eq(NotificationType.INSPECTION),
+                eq(orderId), eq("INSPECTION_ORDER"), anyString());
+        verifyNoMoreInteractions(notificationService);
+        verify(userRepository, never()).findActiveInspectionCenterUserIds();
+    }
+
+    @Test
+    void sellerPaysServiceButBuyerMustStillFundTheirCommitmentDeposit() {
+        order.setBuyerFeeShare(BigDecimal.ZERO);
+        order.setBuyerCommitmentDeposit(new BigDecimal("5000"));
+        when(inspectionOrderRepository.findByIdForUpdate(orderId)).thenReturn(Optional.of(order));
+        when(inspectionOrderRepository.save(any(InspectionOrder.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        escrowService.payInspectionFee(sellerId, orderId);
+        assertEquals("WAITING_FEE_PAYMENT", order.getStatus());
+        escrowService.payInspectionFee(buyerId, orderId);
+        assertEquals("CONFIRMED_PENDING_DISPATCH", order.getStatus());
     }
 
     @Test

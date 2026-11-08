@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.repository;
 
 import com.secondlife.secondlife.entity.User;
+
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -75,6 +76,14 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
         WHERE r.code = 'INSPECTION_CENTER' AND u.accountStatus = 'ACTIVE'
         """)
     List<UUID> findActiveInspectionCenterUserIds();
+
+    @EntityGraph(attributePaths = "profile")
+    @Query("""
+            select distinct u from User u join u.userRoles ur join ur.role r
+            where r.code='INSPECTION_CENTER' and u.accountStatus='ACTIVE'
+            order by u.id
+            """)
+    List<User> findActiveInspectionCentersWithProfile();
 
     @Query("""
         SELECT DISTINCT u.id FROM User u JOIN u.userRoles ur JOIN ur.role r

@@ -10,6 +10,7 @@ import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.InspectionOrderChecklistService;
 import com.secondlife.secondlife.service.InspectionService;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -17,7 +18,13 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.UUID;
@@ -52,10 +59,11 @@ public class InspectorController {
     @PreAuthorize("hasAuthority('INSPECTION_ORDER_READ_ANY') or hasAuthority('INSPECTION_ORDER_READ_SELF')")
     @Operation(summary = "Xem danh sách tất cả các đơn kiểm định (hỗ trợ lọc status và phân trang)")
     public ResponseEntity<ApiResponse<PageResponse<InspectionOrderResponse>>> getAllOrders(
+            @AuthenticationPrincipal CustomUserDetails principal,
             @RequestParam(required = false) String status,
             Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success(
-                PageResponse.from(inspectionService.getAllOrders(status, pageable))));
+                PageResponse.from(inspectionService.getAllOrders(currentUserProvider.resolveUserId(principal), status, pageable))));
     }
 
     @PostMapping("/orders/{orderId}/assign")
@@ -80,10 +88,11 @@ public class InspectorController {
     }
 
     @GetMapping("/orders/{orderId}/checklist")
-    @Operation(summary = "Lấy biểu mẫu checklist theo danh mục của sản phẩm trong đơn để KTV thực hiện chấm điểm")
+    @Operation(summary = "Lấy checklist theo phiên bản đã chốt trong đơn, có kiểm tra quyền truy cập")
     public ResponseEntity<InspectionChecklistResponse> getChecklistForOrder(
+            @AuthenticationPrincipal CustomUserDetails principal,
             @PathVariable UUID orderId) {
-        return ResponseEntity.ok(orderChecklistService.getForOrder(orderId));
+        return ResponseEntity.ok(orderChecklistService.getForOrder(currentUserProvider.resolveUserId(principal), orderId));
     }
 
     @PostMapping("/orders/{orderId}/start")

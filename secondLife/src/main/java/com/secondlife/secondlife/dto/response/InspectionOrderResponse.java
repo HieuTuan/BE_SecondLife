@@ -1,7 +1,9 @@
 package com.secondlife.secondlife.dto.response;
 
+import com.secondlife.secondlife.enums.InspectionComplexityLevel;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionOrderType;
+
 import lombok.Builder;
 
 import java.math.BigDecimal;
@@ -70,6 +72,12 @@ public record InspectionOrderResponse(
     boolean reputationPenaltyApplied,
     BigDecimal reputationPenaltyPoints,
     Instant createdAt,
-    Instant updatedAt
+    Instant updatedAt,
+    UUID inspectionCenterId,
+    UUID checklistTemplateId,
+    UUID feeProposalId,
+    InspectionComplexityLevel complexityLevel,
+    BigDecimal platformFeeRateSnapshot,
+    UUID inspectionShippingQuoteId
 ) {
 }

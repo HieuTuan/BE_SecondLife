@@ -5,6 +5,7 @@ import com.secondlife.secondlife.repository.CategoryRepository.CategorySeed;
 import com.secondlife.secondlife.repository.ItemRepository;
 import com.secondlife.secondlife.repository.ItemRepository.ItemSeed;
 import com.secondlife.secondlife.service.CatalogSeedService;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,5 +52,6 @@ public class CatalogSeedServiceImpl implements CatalogSeedService {
         }
         categories.seedCategories(categorySeeds);
         items.seedItems(itemSeeds);
+        items.splitInspectionVariants();
     }
 }

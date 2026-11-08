@@ -1,19 +1,31 @@
 package com.secondlife.secondlife.repository;
 
 import com.secondlife.secondlife.entity.Item;
+
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
 public interface ItemRepository extends JpaRepository<Item, UUID> {
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select i from Item i where i.id = :id")
+    Optional<Item> findByIdForUpdate(@Param("id") UUID id);
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Query(value = "SELECT secondlife_split_inspection_catalog_items_v71()", nativeQuery = true)
+    int splitInspectionVariants();
     List<Item> findByCategoryId(UUID categoryId);
     boolean existsByCategory_Id(UUID categoryId);
     @Query("select (count(i) > 0) from Item i where i.category.id = :categoryId and lower(trim(i.name)) = lower(:name) and (:excludedId is null or i.id <> :excludedId)")
@@ -30,6 +42,8 @@ public interface ItemRepository extends JpaRepository<Item, UUID> {
     @Query(value = """
             SELECT EXISTS(SELECT 1 FROM posts WHERE item_id = :itemId)
                 OR EXISTS(SELECT 1 FROM category_question_templates WHERE item_id = :itemId)
+                 OR EXISTS(SELECT 1 FROM inspection_checklist_templates WHERE catalog_item_id = :itemId)
+                 OR EXISTS(SELECT 1 FROM items WHERE replacement_for_item_id = :itemId)
             """, nativeQuery = true)
     boolean isItemReferenced(@Param("itemId") UUID itemId);
 

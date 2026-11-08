@@ -54,7 +54,7 @@ class SellerListingDetailServiceTest {
                 mock(AiChatMessageRepository.class), mock(CategoryRepository.class), mock(ItemRepository.class),
                 mock(AiChatGateway.class), cloud, mock(InspectionOrderRepository.class), mock(AiChatGateway.class),
                 publication, reviews, mock(ListingImageSimilarity.class), mock(ListingFingerprint.class),
-                BigDecimal.ZERO, BigDecimal.ZERO, 30, 10485760, 3, 6,
+                30, 10485760, 3, 6,
                 MapperTestSupport.mapper(PostMapper.class), null, mock(ImageUploadValidator.class));
     }
 

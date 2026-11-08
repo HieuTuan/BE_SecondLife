@@ -5,26 +5,39 @@ import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.dto.request.CreateInspectorRequest;
 import com.secondlife.secondlife.dto.request.InspectionChecklistTemplateRequest;
 import com.secondlife.secondlife.dto.request.InspectionFeeProposalRequest;
+import com.secondlife.secondlife.dto.request.InspectionLevelFeeRequest;
 import com.secondlife.secondlife.dto.request.ReviewInspectionAppealRequest;
 import com.secondlife.secondlife.dto.response.InspectionChecklistResponse;
 import com.secondlife.secondlife.dto.response.InspectionFeeProposalResponse;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.dto.response.InspectionTravelTierDto;
+import com.secondlife.secondlife.enums.InspectionChecklistStatus;
 import com.secondlife.secondlife.enums.InspectionFeeProposalStatus;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.InspectionChecklistService;
 import com.secondlife.secondlife.service.InspectionPricingService;
 import com.secondlife.secondlife.service.InspectionService;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.UUID;
@@ -55,10 +68,11 @@ public class InspectionCenterController {
     @PreAuthorize("hasAuthority('INSPECTION_ORDER_READ_ANY')")
     @Operation(summary = "Xem danh sách tất cả các đơn kiểm định (hỗ trợ lọc status và phân trang)")
     public ResponseEntity<ApiResponse<PageResponse<InspectionOrderResponse>>> getAllOrders(
+            @AuthenticationPrincipal CustomUserDetails principal,
             @RequestParam(required = false) String status,
             Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success(
-                PageResponse.from(inspectionService.getAllOrders(status, pageable))));
+                PageResponse.from(inspectionService.getAllOrders(currentUserProvider.resolveUserId(principal), status, pageable))));
     }
 
     @PostMapping("/orders/{orderId}/assign")
@@ -88,20 +102,22 @@ public class InspectionCenterController {
     @GetMapping("/checklists")
     @PreAuthorize("hasAuthority('INSPECTION_CHECKLIST_MANAGE')")
     @Operation(summary = "Xem danh sách các bộ checklist kiểm định đang kích hoạt")
-    public ResponseEntity<List<InspectionChecklistResponse>> getAllChecklists() {
-        return ResponseEntity.ok(checklistService.getAllTemplates());
+    public ResponseEntity<List<InspectionChecklistResponse>> getAllChecklists(
+            @AuthenticationPrincipal CustomUserDetails principal) {
+        return ResponseEntity.ok(checklistService.getTemplatesForCenter(currentUserProvider.resolveUserId(principal)));
     }
 
     @GetMapping("/checklists/{id}")
     @PreAuthorize("hasAuthority('INSPECTION_CHECKLIST_MANAGE')")
     @Operation(summary = "Xem chi tiết một bộ checklist kiểm định theo ID")
-    public ResponseEntity<InspectionChecklistResponse> getChecklistById(@PathVariable UUID id) {
-        return ResponseEntity.ok(checklistService.getById(id));
+    public ResponseEntity<InspectionChecklistResponse> getChecklistById(
+            @AuthenticationPrincipal CustomUserDetails principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(checklistService.getById(currentUserProvider.resolveUserId(principal), id));
     }
 
     @PostMapping("/checklists")
     @PreAuthorize("hasAuthority('INSPECTION_CHECKLIST_MANAGE')")
-    @Operation(summary = "Tạo mới bộ checklist kiểm định theo danh mục sản phẩm")
+    @Operation(summary = "Trung tâm gửi đề xuất checklist theo Item và cấp L1-L4; chờ Admin duyệt")
     public ResponseEntity<InspectionChecklistResponse> createChecklist(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @Valid @RequestBody InspectionChecklistTemplateRequest request) {
@@ -113,17 +129,28 @@ public class InspectionCenterController {
     @PreAuthorize("hasAuthority('INSPECTION_CHECKLIST_MANAGE')")
     @Operation(summary = "Cập nhật bộ checklist kiểm định")
     public ResponseEntity<InspectionChecklistResponse> updateChecklist(
+            @AuthenticationPrincipal CustomUserDetails principal,
             @PathVariable UUID id,
             @Valid @RequestBody InspectionChecklistTemplateRequest request) {
-        return ResponseEntity.ok(checklistService.updateTemplate(id, request));
+        return ResponseEntity.ok(checklistService.updateTemplate(currentUserProvider.resolveUserId(principal), id, request));
     }
 
     @DeleteMapping("/checklists/{id}")
     @PreAuthorize("hasAuthority('INSPECTION_CHECKLIST_MANAGE')")
     @Operation(summary = "Vô hiệu hóa hoặc xóa bộ checklist kiểm định")
-    public ResponseEntity<Void> deleteChecklist(@PathVariable UUID id) {
-        checklistService.deleteTemplate(id);
+    public ResponseEntity<Void> deleteChecklist(@AuthenticationPrincipal CustomUserDetails principal, @PathVariable UUID id) {
+        checklistService.deleteTemplate(currentUserProvider.resolveUserId(principal), id);
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/checklists/proposals")
+    @PreAuthorize("hasRole('INSPECTION_CENTER') and hasAuthority('INSPECTION_CHECKLIST_MANAGE')")
+    public ApiResponse<PageResponse<InspectionChecklistResponse>> checklistProposals(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @RequestParam(required = false) InspectionChecklistStatus status,
+            @PageableDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+        return ApiResponse.success(PageResponse.from(checklistService.getProposals(
+                currentUserProvider.resolveUserId(principal), status, pageable)));
     }
 
     // --- 3. ĐỀ XUẤT BIỂU PHÍ & BẬC THANG DI CHUYỂN ---
@@ -144,13 +171,29 @@ public class InspectionCenterController {
         return ResponseEntity.ok(pricingService.proposeFee(proposerId, request));
     }
 
-    @GetMapping("/travel-tiers/proposals")
+    @PostMapping("/level-fees/propose")
+    @PreAuthorize("hasRole('INSPECTION_CENTER') and hasAuthority('INSPECTION_FEE_MANAGE')")
+    @Operation(summary = "Gửi đề xuất giá cho một cấp L1-L4 của trung tâm; chờ Admin duyệt")
+    public InspectionFeeProposalResponse proposeLevelFee(@AuthenticationPrincipal CustomUserDetails principal,
+            @Valid @RequestBody InspectionLevelFeeRequest request) {
+        return pricingService.proposeFee(currentUserProvider.resolveUserId(principal),
+                new InspectionFeeProposalRequest(null, request.baseInspectionFee(), List.of(), request.complexityLevel()));
+    }
+
+    @GetMapping("/level-fees")
+    @PreAuthorize("hasRole('INSPECTION_CENTER') and hasAuthority('INSPECTION_FEE_MANAGE')")
+    public List<InspectionFeeProposalResponse> currentLevelFees(@AuthenticationPrincipal CustomUserDetails principal) {
+        return pricingService.getCenterLevelFees(currentUserProvider.resolveUserId(principal));
+    }
+
+    @GetMapping({"/travel-tiers/proposals", "/level-fees/proposals"})
     @PreAuthorize("hasAuthority('INSPECTION_FEE_MANAGE')")
     @Operation(summary = "Xem danh sách các đề xuất biểu phí đã gửi")
     public ResponseEntity<Page<InspectionFeeProposalResponse>> getFeeProposals(
+            @AuthenticationPrincipal CustomUserDetails principal,
             @RequestParam(required = false) InspectionFeeProposalStatus status,
-            Pageable pageable) {
-        return ResponseEntity.ok(pricingService.getProposals(status, pageable));
+            @PageableDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+        return ResponseEntity.ok(pricingService.getCenterProposals(currentUserProvider.resolveUserId(principal), status, pageable));
     }
 
     // --- 4. QUẢN LÝ TÀI KHOẢN KỸ THUẬT VIÊN (STAFF) ---

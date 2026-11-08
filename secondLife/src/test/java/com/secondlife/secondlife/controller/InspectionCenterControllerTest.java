@@ -10,13 +10,14 @@ import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.service.InspectionChecklistService;
 import com.secondlife.secondlife.service.InspectionPricingService;
 import com.secondlife.secondlife.service.InspectionService;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
-import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.Mock;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.http.MediaType;
 import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
@@ -76,7 +77,7 @@ class InspectionCenterControllerTest {
                 .status("CONFIRMED_PENDING_DISPATCH")
                 .build();
 
-        when(inspectionService.getAllOrders(any(), any()))
+        when(inspectionService.getAllOrders(any(), any(), any()))
                 .thenReturn(new PageImpl<>(List.of(order)));
 
         mockMvc.perform(get("/api/v1/inspector-center/orders"))
@@ -115,7 +116,9 @@ class InspectionCenterControllerTest {
                 .title("Checklist Đồ gia dụng")
                 .build();
 
-        when(checklistService.getAllTemplates()).thenReturn(List.of(item));
+        UUID actorId = UUID.randomUUID();
+        when(currentUserProvider.resolveUserId(any())).thenReturn(actorId);
+        when(checklistService.getTemplatesForCenter(actorId)).thenReturn(List.of(item));
 
         mockMvc.perform(get("/api/v1/inspector-center/checklists"))
                 .andExpect(status().isOk())

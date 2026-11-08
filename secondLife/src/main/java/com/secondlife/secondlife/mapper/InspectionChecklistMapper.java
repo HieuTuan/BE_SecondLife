@@ -2,9 +2,11 @@ package com.secondlife.secondlife.mapper;
 
 import com.secondlife.secondlife.config.MapStructConfiguration;
 import com.secondlife.secondlife.dto.response.InspectionChecklistItemResponse;
+import com.secondlife.secondlife.dto.response.InspectionChecklistPricingResponse;
 import com.secondlife.secondlife.dto.response.InspectionChecklistResponse;
 import com.secondlife.secondlife.entity.InspectionChecklistItem;
 import com.secondlife.secondlife.entity.InspectionChecklistTemplate;
+
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.springframework.stereotype.Component;
@@ -27,6 +29,10 @@ public class InspectionChecklistMapper {
         return delegate.toItemResponse(item);
     }
 
+    public InspectionChecklistResponse withPricing(InspectionChecklistResponse response, InspectionChecklistPricingResponse pricing) {
+        return delegate.withPricing(response, pricing);
+    }
+
     protected List<InspectionChecklistItemResponse> toItemResponses(List<InspectionChecklistItem> items) {
         return delegate.toItemResponses(items);
     }
@@ -39,8 +45,17 @@ public class InspectionChecklistMapper {
     public interface Delegate {
         @Mapping(target = "categoryId", source = "category.id")
         @Mapping(target = "categoryName", source = "category.name")
+        @Mapping(target = "itemId", source = "catalogItem.id")
+        @Mapping(target = "itemName", source = "catalogItem.name")
+        @Mapping(target = "createdById", source = "createdBy.id")
+        @Mapping(target = "reviewedById", source = "reviewedBy.id")
         @Mapping(target = "items", expression = "java(itemsOrEmpty(template.getItems()))")
+        @Mapping(target = "pricing", ignore = true) // Live management prices must not enter order snapshots.
         InspectionChecklistResponse toResponse(InspectionChecklistTemplate template);
+
+        @Mapping(target = "pricing", source = "pricing")
+        @Mapping(target = "complexityLevel", source = "response.complexityLevel")
+        InspectionChecklistResponse withPricing(InspectionChecklistResponse response, InspectionChecklistPricingResponse pricing);
 
         InspectionChecklistItemResponse toItemResponse(InspectionChecklistItem item);
 

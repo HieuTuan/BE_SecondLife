@@ -11,12 +11,13 @@ import com.secondlife.secondlife.repository.InspectionFeeSettlementRepository;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.WalletService;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
+import org.junit.jupiter.api.Test;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.Mock;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -96,6 +97,21 @@ class InspectionFeeSettlementServiceImplTest {
         order.setSellerPaidAt(Instant.now());
 
         lenient().when(settlements.saveAndFlush(any(InspectionFeeSettlement.class))).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    @Test
+    void newOrderUsesItsStoredRateAndDoesNotChargeCommissionOnTravel() {
+        order.setPlatformFeeRateSnapshot(new BigDecimal("0.20"));
+        order.setTravelFee(new BigDecimal("20000"));
+        order.setShippingFee(BigDecimal.ZERO);
+        order.setReturnShippingReserveFee(BigDecimal.ZERO);
+        order.setBuyerCommitmentDeposit(BigDecimal.ZERO);
+        order.setBuyerFeeShare(new BigDecimal("120000"));
+        order.setSellerFeeShare(BigDecimal.ZERO);
+        order.setInspectionCenter(manager);
+        var settlement = settlementService.settle(order, InspectionSettlementOutcome.PASSED_PURCHASED, "Completed");
+        assertEquals(0, new BigDecimal("100000").compareTo(settlement.getCenterPayoutAmount()));
+        assertEquals(0, new BigDecimal("20000").compareTo(settlement.getPlatformRetainedAmount()));
     }
 
     @Test

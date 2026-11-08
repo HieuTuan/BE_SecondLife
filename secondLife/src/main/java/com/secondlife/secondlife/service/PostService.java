@@ -9,6 +9,7 @@ import com.secondlife.secondlife.dto.response.PostDto;
 import com.secondlife.secondlife.dto.response.PostFinalizeResponse;
 import com.secondlife.secondlife.dto.response.PostInitResponse;
 import com.secondlife.secondlife.dto.response.PostSubmitResponse;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -43,6 +44,8 @@ public interface PostService {
     PostDto getPostDetail(UUID postId);
 
     PostDto getMyPostDetail(UUID userId, UUID postId);
+
+    PostDto reclassifyItem(UUID userId, UUID postId, UUID itemId);
 
     Page<PostDto> getMyPosts(UUID userId, Pageable pageable);
 }

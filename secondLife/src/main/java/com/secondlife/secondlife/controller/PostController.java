@@ -4,6 +4,7 @@ import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.dto.request.PostInitRequest;
 import com.secondlife.secondlife.dto.request.PostSubmitRequest;
+import com.secondlife.secondlife.dto.request.ReclassifyListingItemRequest;
 import com.secondlife.secondlife.dto.request.UpdateDraftRequest;
 import com.secondlife.secondlife.dto.response.MarketplaceListingResponse;
 import com.secondlife.secondlife.dto.response.PostDto;
@@ -14,17 +15,19 @@ import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.MarketplaceListingService;
 import com.secondlife.secondlife.service.PostService;
+
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -142,6 +145,14 @@ public class PostController {
             @PathVariable UUID postId) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(postService.getMyPostDetail(userId, postId));
+    }
+
+    @PatchMapping("/my-posts/{postId}/item")
+    @PreAuthorize("hasAuthority('LISTING_CREATE_SELF')")
+    @Operation(summary = "Chọn lại loại cụ thể cho bài có Item cũ đã được tách; không đổi đơn đang giao dịch")
+    public ResponseEntity<PostDto> reclassifyItem(@AuthenticationPrincipal CustomUserDetails principal,
+            @PathVariable UUID postId, @Valid @RequestBody ReclassifyListingItemRequest request) {
+        return ResponseEntity.ok(postService.reclassifyItem(currentUserProvider.resolveUserId(principal), postId, request.itemId()));
     }
 
     @PutMapping("/{postId}/draft")

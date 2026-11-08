@@ -3,8 +3,8 @@ package com.secondlife.secondlife.service;
 import com.secondlife.secondlife.dto.request.ConfirmInspectionPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionAppealRequest;
 import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
-import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyerRespondRequest;
+import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
 import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
 import com.secondlife.secondlife.dto.request.InspectionSealScanRequest;
@@ -13,6 +13,7 @@ import com.secondlife.secondlife.dto.request.ReviewInspectionAppealRequest;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.dto.response.InspectionSealLogResponse;
 import com.secondlife.secondlife.dto.response.InspectionSealVerificationResponse;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -79,6 +80,7 @@ public interface InspectionService {
      * Quản trị viên/Trung tâm xem toàn bộ đơn kiểm định
      */
     Page<InspectionOrderResponse> getAllOrders(String status, Pageable pageable);
+    Page<InspectionOrderResponse> getAllOrders(UUID actorId, String status, Pageable pageable);
 
     /**
      * Phân công KTV cho đơn kiểm định
