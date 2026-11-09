@@ -1,5 +1,7 @@
 package com.secondlife.secondlife.integration.shipping;
 
+import com.secondlife.secondlife.common.VietnameseAdministrativeAreas;
+import com.secondlife.secondlife.config.ShippingCatalogProperties.City;
 import com.secondlife.secondlife.config.LalamoveProperties;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
@@ -357,8 +359,13 @@ public class LalamoveShippingProvider implements ShippingProvider {
             String part = string(payload.get(prefix + "_" + suffix));
             if (!part.isBlank()) address.add(part);
         }
-        return Map.of("coordinates", Map.of("lat", coordinate(payload.get(prefix + "_latitude"), 90),
-                "lng", coordinate(payload.get(prefix + "_longitude"), 180)), "address", String.join(", ", address));
+        String latitude = coordinate(payload.get(prefix + "_latitude"), 90);
+        String longitude = coordinate(payload.get(prefix + "_longitude"), 180);
+        var division = VietnameseAdministrativeAreas.locate(Double.parseDouble(latitude), Double.parseDouble(longitude));
+        if (division == null || division.city() == City.DANANG) {
+            throw new BadRequestException("Địa chỉ nằm ngoài khu vực phục vụ Hà Nội và Thành phố Hồ Chí Minh");
+        }
+        return Map.of("coordinates", Map.of("lat", latitude, "lng", longitude), "address", String.join(", ", address));
     }
 
     private String coordinate(Object value, int limit) {

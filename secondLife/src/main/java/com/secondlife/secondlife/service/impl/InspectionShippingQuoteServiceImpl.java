@@ -1,8 +1,11 @@
 package com.secondlife.secondlife.service.impl;
 
+import com.secondlife.secondlife.dto.request.InspectionReturnShippingPolicyRequest;
 import com.secondlife.secondlife.dto.request.ShippingAddress;
+import com.secondlife.secondlife.dto.response.InspectionReturnShippingPolicyResponse;
 import com.secondlife.secondlife.dto.response.InspectionShippingQuoteResponse;
 import com.secondlife.secondlife.entity.InspectionOrder;
+import com.secondlife.secondlife.entity.InspectionReturnShippingPolicy;
 import com.secondlife.secondlife.entity.InspectionShippingQuote;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.NotFoundException;
@@ -12,8 +15,9 @@ import com.secondlife.secondlife.integration.shipping.ShippingProvider;
 import com.secondlife.secondlife.mapper.InspectionShippingQuoteMapper;
 import com.secondlife.secondlife.mapper.ShippingPayloads;
 import com.secondlife.secondlife.mapper.ShippingVehicleSelectionMapper;
-import com.secondlife.secondlife.repository.InspectionShippingQuoteRepository;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
+import com.secondlife.secondlife.repository.InspectionReturnShippingPolicyRepository;
+import com.secondlife.secondlife.repository.InspectionShippingQuoteRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.service.InspectionCenterProfileService;
 import com.secondlife.secondlife.service.InspectionShippingQuoteService;
@@ -28,6 +32,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -36,7 +41,10 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class InspectionShippingQuoteServiceImpl implements InspectionShippingQuoteService {
+    private static final short RETURN_POLICY_ID = 1;
+
     private final InspectionShippingQuoteRepository quotes;
+    private final InspectionReturnShippingPolicyRepository returnPolicies;
     private final InspectionOrderRepository orders;
     private final PostRepository posts;
     private final InspectionCenterProfileService centers;
@@ -66,8 +74,11 @@ public class InspectionShippingQuoteServiceImpl implements InspectionShippingQuo
         // Buyer request creation reuses this snapshot without another carrier request.
         JsonNode outbound = preview(context.outbound(), context.from(), context.to());
         InspectionShippingQuoteResponse.Leg outboundLeg = leg(outbound, "SELLER_TO_CENTER", context.from(), context.to());
-        JsonNode reverse = preview(context.reverse(), context.to(), context.from());
-        InspectionShippingQuoteResponse.Leg returnLeg = leg(reverse, "CENTER_TO_SELLER", context.to(), context.from());
+        BigDecimal markup = returnPolicy().getMarkupPercentage().movePointLeft(2);
+        BigDecimal reserve = outboundLeg.shippingFee().multiply(BigDecimal.ONE.add(markup))
+                .setScale(0, RoundingMode.HALF_UP);
+        InspectionShippingQuoteResponse.Leg returnLeg = mapper.toLeg(
+                "CENTER_TO_SELLER", reserve, null, null, outboundLeg.expiresAt(), null);
         InspectionShippingQuote row = new InspectionShippingQuote();
         row.setPostId(postId);
         row.setInspectionCenterId(centerId);
@@ -77,10 +88,29 @@ public class InspectionShippingQuoteServiceImpl implements InspectionShippingQuo
         row.setReturnResponse(json.writeValueAsString(returnLeg));
         row.setOutboundFee(outboundLeg.shippingFee());
         row.setReturnFee(returnLeg.shippingFee());
-        row.setExpiresAt(outboundLeg.expiresAt().isBefore(returnLeg.expiresAt()) ? outboundLeg.expiresAt() : returnLeg.expiresAt());
+        row.setExpiresAt(outboundLeg.expiresAt());
         if (!row.getExpiresAt().isAfter(Instant.now())) throw new ConflictException("Báo giá Lalamove đã hết hạn; vui lòng thử lại");
         InspectionShippingQuote saved = quotes.saveAndFlush(row);
         return response(saved);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public InspectionReturnShippingPolicyResponse getReturnPolicy() {
+        return new InspectionReturnShippingPolicyResponse(returnPolicy().getMarkupPercentage());
+    }
+
+    @Override
+    @Transactional
+    public InspectionReturnShippingPolicyResponse updateReturnPolicy(InspectionReturnShippingPolicyRequest request) {
+        InspectionReturnShippingPolicy policy = returnPolicy();
+        policy.setMarkupPercentage(request.markupPercentage());
+        return new InspectionReturnShippingPolicyResponse(policy.getMarkupPercentage());
+    }
+
+    private InspectionReturnShippingPolicy returnPolicy() {
+        return returnPolicies.findById(RETURN_POLICY_ID)
+                .orElseThrow(() -> new ConflictException("Chưa cấu hình tỷ lệ dự phòng vận chuyển kiểm định"));
     }
 
     @Override

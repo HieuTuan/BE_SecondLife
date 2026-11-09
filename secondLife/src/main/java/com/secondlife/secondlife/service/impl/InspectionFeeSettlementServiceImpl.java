@@ -97,23 +97,9 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
             case PASSED_PURCHASED -> {
                 centerPayout = computeCenterPayout(inspectionOrder, serviceFee);
                 outboundShipping = shippingFee;
-                returnReserve = BigDecimal.ZERO;
-
-                BigDecimal buyerReserveShare = BigDecimal.ZERO;
-                BigDecimal sellerReserveShare = BigDecimal.ZERO;
-                if (returnReserveFee.compareTo(BigDecimal.ZERO) > 0) {
-                    InspectionFeePayer payer = inspectionOrder.getFeePayer() != null ? inspectionOrder.getFeePayer() : InspectionFeePayer.BUYER_PAYS;
-                    switch (payer) {
-                        case BUYER_PAYS -> buyerReserveShare = returnReserveFee;
-                        case SELLER_PAYS -> sellerReserveShare = returnReserveFee;
-                        case SPLIT_50_50 -> {
-                            buyerReserveShare = returnReserveFee.divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
-                            sellerReserveShare = returnReserveFee.subtract(buyerReserveShare);
-                        }
-                    }
-                }
+                BigDecimal buyerReserveShare = buyerShare(inspectionOrder, returnReserveFee);
                 buyerRefund = buyerDeposit.add(buyerReserveShare);
-                sellerRefund = sellerReserveShare;
+                sellerRefund = returnReserveFee.subtract(buyerReserveShare);
             }
             case PASSED_BUYER_DEFAULTED -> {
                 centerPayout = computeCenterPayout(inspectionOrder, serviceFee);
@@ -174,6 +160,49 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
         inspectionOrders.save(inspectionOrder);
 
         return settlement;
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void settleReturnShipping(InspectionOrder order, BigDecimal actualFee) {
+        // The shipment workflow locks the inspection before changing its settlement.
+        var settlement = settlements.findByInspectionOrderId(order.getId()).orElse(null);
+        if (settlement == null || settlement.getReturnShippingSettledAt() != null
+                || (settlement.getOutcome() != InspectionSettlementOutcome.FAILED_INSPECTION
+                    && settlement.getOutcome() != InspectionSettlementOutcome.PASSED_BUYER_DEFAULTED)) {
+            return;
+        }
+
+        BigDecimal reserve = settlement.getReturnReserveAllocated();
+        BigDecimal remainder = reserve.subtract(actualFee);
+        if (remainder.signum() < 0) {
+            log.warn("Inspection {} return shipping fee {} exceeds reserve {}", order.getId(), actualFee, reserve);
+            return;
+        }
+
+        BigDecimal buyerRefund = buyerShare(order, reserve).subtract(buyerShare(order, actualFee));
+        BigDecimal sellerRefund = remainder.subtract(buyerRefund);
+        if (buyerRefund.signum() > 0) {
+            walletService.processRefund(order.getBuyer().getId(), buyerRefund, order.getId(),
+                    WalletTransactionReferenceType.INSPECTION_ORDER);
+        }
+        if (sellerRefund.signum() > 0) {
+            walletService.processRefund(order.getSeller().getId(), sellerRefund, order.getId(),
+                    WalletTransactionReferenceType.INSPECTION_ORDER);
+        }
+        settlement.setReturnReserveAllocated(actualFee);
+        settlement.setBuyerRefundAmount(settlement.getBuyerRefundAmount().add(buyerRefund));
+        settlement.setSellerRefundAmount(settlement.getSellerRefundAmount().add(sellerRefund));
+        settlement.setReturnShippingSettledAt(Instant.now());
+    }
+
+    private BigDecimal buyerShare(InspectionOrder order, BigDecimal amount) {
+        InspectionFeePayer payer = order.getFeePayer() == null ? InspectionFeePayer.BUYER_PAYS : order.getFeePayer();
+        return switch (payer) {
+            case BUYER_PAYS -> amount;
+            case SELLER_PAYS -> BigDecimal.ZERO;
+            case SPLIT_50_50 -> amount.divide(BigDecimal.TWO, 2, RoundingMode.HALF_UP);
+        };
     }
 
     private BigDecimal computeCenterPayout(InspectionOrder order, BigDecimal serviceFee) {

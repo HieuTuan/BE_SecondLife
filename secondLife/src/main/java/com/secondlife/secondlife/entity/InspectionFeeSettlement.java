@@ -57,6 +57,9 @@ public class InspectionFeeSettlement {
     @Column(name = "platform_retained_amount", precision = 18, scale = 2, nullable = false)
     private BigDecimal platformRetainedAmount = BigDecimal.ZERO;
 
+    @Column(name = "return_shipping_settled_at")
+    private Instant returnShippingSettledAt;
+
     @Column(name = "settled_at", nullable = false)
     private Instant settledAt = Instant.now();
 }

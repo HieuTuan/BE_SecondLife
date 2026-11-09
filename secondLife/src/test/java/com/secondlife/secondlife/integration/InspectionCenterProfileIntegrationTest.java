@@ -337,28 +337,28 @@ class InspectionCenterProfileIntegrationTest {
     }
 
     @Test
-    void roundTripQuotesUseActualDifferentFeesAndSavedCoordinatesWithoutBooking() throws Exception {
+    void quotesUseActualOutboundAndEstimatedReturnWithoutBooking() throws Exception {
         update(center, profileBody()).andExpect(status().isOk());
         InspectionOrder order = inspection(center);
         liveQuotes();
         var quote = inspectionShipping.quote(order.getPost().getId(), center.getId(), null);
         assertEquals(0, new BigDecimal("27000").compareTo(quote.outbound().shippingFee()));
-        assertEquals(0, new BigDecimal("39000").compareTo(quote.returnReserve().shippingFee()));
+        assertEquals(0, new BigDecimal("32400").compareTo(quote.returnReserve().shippingFee()));
         assertEquals("SELLER_TO_CENTER", quote.outbound().leg());
         assertEquals("CENTER_TO_SELLER", quote.returnReserve().leg());
+        assertNull(quote.returnReserve().providerQuotationId());
         assertTrue(quote.expiresAt().isAfter(Instant.now()));
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.captor();
-        verify(carrier, times(2)).preview(payloads.capture());
+        verify(carrier, times(1)).preview(payloads.capture());
         assertEquals(new BigDecimal("10.77"), payloads.getAllValues().getFirst().get("from_latitude"));
         assertEquals(new BigDecimal("10.73"), payloads.getAllValues().getFirst().get("to_latitude"));
-        assertEquals(new BigDecimal("10.73"), payloads.getAllValues().getLast().get("from_latitude"));
         assertEquals(1700, payloads.getValue().get("weight"));
         verify(carrier, never()).create(anyMap());
         var row = inspectionQuotes.findById(quote.id()).orElseThrow();
         assertEquals(order.getPost().getId(), row.getPostId());
         var reused = inspectionShipping.quote(order.getPost().getId(), center.getId(), quote.id());
         assertEquals(quote.id(), reused.id());
-        verify(carrier, times(2)).preview(anyMap());
+        verify(carrier, times(1)).preview(anyMap());
     }
 
     @ParameterizedTest
@@ -376,7 +376,7 @@ class InspectionCenterProfileIntegrationTest {
                 new ShippingAddress("Seller", "0912345678", "Changed pickup", new BigDecimal("10.771"), new BigDecimal("106.69"))));
         entityManager.flush();
         assertThrows(ConflictException.class, () -> inspectionShipping.quote(order.getPost().getId(), center.getId(), quote.id()));
-        verify(carrier, times(2)).preview(anyMap());
+        verify(carrier, times(1)).preview(anyMap());
     }
 
     @Test
@@ -387,7 +387,7 @@ class InspectionCenterProfileIntegrationTest {
         liveQuotes();
         var quote = inspectionShipping.quote(order.getPost().getId(), center.getId(), null);
         assertThrows(ConflictException.class, () -> inspectionShipping.quote(order.getPost().getId(), otherCenter.getId(), quote.id()));
-        verify(carrier, times(2)).preview(anyMap());
+        verify(carrier, times(1)).preview(anyMap());
     }
 
     @Test
@@ -460,7 +460,7 @@ class InspectionCenterProfileIntegrationTest {
         another.setShippingFee(order.getShippingFee());
         another.setReturnShippingReserveFee(order.getReturnShippingReserveFee());
         assertThrows(ConflictException.class, () -> inspectionShipping.bind(another, quote));
-        verify(carrier, times(2)).preview(anyMap());
+        verify(carrier, times(1)).preview(anyMap());
     }
 
     private void liveQuotes() {

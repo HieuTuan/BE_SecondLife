@@ -32,6 +32,7 @@ import com.secondlife.secondlife.repository.ShipmentRepository;
 import com.secondlife.secondlife.repository.ShippingQuoteRepository;
 import com.secondlife.secondlife.service.ListingFingerprint;
 import com.secondlife.secondlife.service.InspectionCenterProfileService;
+import com.secondlife.secondlife.service.InspectionFeeSettlementService;
 import com.secondlife.secondlife.service.InspectionShippingQuoteService;
 import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.OrderDisputeService;
@@ -89,14 +90,16 @@ public class ShipmentServiceImpl implements ShipmentService {
     private final InspectionSealLogRepository sealLogs;
     private final InspectionCenterProfileService centerProfiles;
     private final InspectionShippingQuoteService inspectionShipping;
+    private final InspectionFeeSettlementService inspectionFeeSettlement;
 
     public ShipmentServiceImpl(ShipmentRepository shipments, ShipmentEventRepository events, OrderRepository orders,
                            InspectionOrderRepository inspections, ShippingQuoteRepository quotes, ShippingQuoteService quoteService,
                            ReverseGeocodingService geocoding, ShippingProvider provider, ObjectMapper mapper,
                            WalletService wallets, PlatformTransactionManager transactions,
                            SystemWalletService systemWallet, SellerReputationService reputation, ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes, ReturnShippingFeeService returnShippingFees,
-                           InspectionCenterProfileService centerProfiles, InspectionShippingQuoteService inspectionShipping) {
-        this(shipments, events, orders, inspections, quotes, quoteService, geocoding, provider, mapper, wallets, transactions, systemWallet, reputation, null, null, listingFingerprint, shipmentMapper, disputes, returnShippingFees, centerProfiles, inspectionShipping);
+                           InspectionCenterProfileService centerProfiles, InspectionShippingQuoteService inspectionShipping,
+                           InspectionFeeSettlementService inspectionFeeSettlement) {
+        this(shipments, events, orders, inspections, quotes, quoteService, geocoding, provider, mapper, wallets, transactions, systemWallet, reputation, null, null, listingFingerprint, shipmentMapper, disputes, returnShippingFees, centerProfiles, inspectionShipping, inspectionFeeSettlement);
     }
 
     @Autowired
@@ -108,7 +111,8 @@ public class ShipmentServiceImpl implements ShipmentService {
                            @Autowired(required = false) NotificationService notificationService,
                            @Autowired(required = false) InspectionSealLogRepository sealLogs,
                            ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes, ReturnShippingFeeService returnShippingFees,
-                           InspectionCenterProfileService centerProfiles, InspectionShippingQuoteService inspectionShipping) {
+                           InspectionCenterProfileService centerProfiles, InspectionShippingQuoteService inspectionShipping,
+                           InspectionFeeSettlementService inspectionFeeSettlement) {
         this.shipmentMapper = shipmentMapper;
         this.disputes = Objects.requireNonNull(disputes, "OrderDisputeService is required");
         this.returnShippingFees = Objects.requireNonNull(returnShippingFees, "ReturnShippingFeeService is required");
@@ -130,6 +134,7 @@ public class ShipmentServiceImpl implements ShipmentService {
         this.sealLogs = sealLogs;
         this.centerProfiles = centerProfiles;
         this.inspectionShipping = inspectionShipping;
+        this.inspectionFeeSettlement = inspectionFeeSettlement;
         this.listingFingerprint = listingFingerprint;
     }
 
@@ -145,8 +150,14 @@ public class ShipmentServiceImpl implements ShipmentService {
         return submit(prepared);
     }
     private Prepared prepareForOrder(UUID actor,boolean staff,UUID orderId,CreateShipmentRequest request) {
+        return prepareForOrder(actor, staff, orderId, request, null);
+    }
+
+    private Prepared prepareForOrder(UUID actor, boolean staff, UUID orderId, CreateShipmentRequest request,
+            InspectionOrder centerDelivery) {
         var order=orders.findByIdForUpdate(orderId).orElseThrow(() -> new NotFoundException("Order not found"));
-        if (!staff && !actor.equals(order.getSeller().getId())) throw new ForbiddenException("Only the seller can create an outbound shipment");
+        if (!staff && centerDelivery == null && !actor.equals(order.getSeller().getId()))
+            throw new ForbiddenException("Only the seller can create an outbound shipment");
         if (order.getShippingQuoteId()==null) throw new ConflictException("Order has no paid shipping quote");
         if (order.getStatus()==OrderStatus.CANCELLED || order.getStatus()==OrderStatus.COMPLETED) throw new ConflictException("Order is already closed");
         if (!Set.of("SELLER_TO_BUYER","CENTER_TO_BUYER","BUYER_TO_SELLER").contains(request.leg())) throw new BadRequestException("Invalid order shipment leg");
@@ -175,8 +186,9 @@ public class ShipmentServiceImpl implements ShipmentService {
                 throw new ConflictException("SELLER must confirm the order before creating an outbound shipment");
             if (order.getEscrowStatus()!=EscrowStatus.HELD || order.getShippingDeliveredAt()!=null) throw new ConflictException("Order is not eligible for outbound shipping");
             if ("CENTER_TO_BUYER".equals(request.leg())) {
-                if (!staff) throw new ForbiddenException("STAFF/ADMIN creates shipments from the inspection center");
-                var inspection = inspections.findByOrderId(order.getId())
+                if (!staff && centerDelivery == null)
+                    throw new ForbiddenException("Only the assigned inspection center or STAFF/ADMIN can create this shipment");
+                var inspection = centerDelivery != null ? centerDelivery : inspections.findByOrderId(order.getId())
                         .or(() -> inspections.findFirstByPostIdAndStatusOrderByCreatedAtDesc(order.getPost().getId(), "PASSED"))
                         .or(() -> inspections.findActiveByPostId(order.getPost().getId()))
                         .orElseThrow(() -> new ConflictException("Inspection is required for the center leg"));
@@ -194,6 +206,27 @@ public class ShipmentServiceImpl implements ShipmentService {
         var prepared=prepare(actor,orderId,linkedInspectionId,order.getSeller().getId(),order.getBuyer().getId(),request,payload,quotedFee,quote.getProvider());
         if (returnDecision!=null) disputes.bindReturn(order,returnDecision,shipments.findById(prepared.id()).orElseThrow());
         return prepared;
+    }
+
+    @Override
+    public ShipmentResponse createCenterDelivery(UUID centerId, UUID inspectionId, CreateShipmentRequest request) {
+        if (!"CENTER_TO_BUYER".equals(request.leg()))
+            throw new ForbiddenException("An inspection center can only create the delivery to the buyer here");
+        if (request.fromAddress() != null || request.toAddress() != null)
+            throw new BadRequestException("Use the addresses from the paid shipping quote");
+
+        Prepared prepared = new TransactionTemplate(transactions).execute(tx -> {
+            var inspection = inspections.findById(inspectionId)
+                    .orElseThrow(() -> new NotFoundException("Inspection order not found"));
+            if (inspection.getInspectionCenter() == null || !centerId.equals(inspection.getInspectionCenter().getId()))
+                throw new ForbiddenException("This inspection belongs to another center");
+            if (inspection.getOrderType() != InspectionOrderType.AT_CENTER
+                    || !"DELIVERING_TO_BUYER".equals(inspection.getStatus())
+                    || inspection.getFinalPaymentPaidAt() == null || inspection.getOrder() == null)
+                throw new ConflictException("Người mua phải hoàn tất thanh toán đơn kiểm định tại trung tâm trước khi tạo chuyến");
+            return prepareForOrder(centerId, false, inspection.getOrder().getId(), request, inspection);
+        });
+        return submit(prepared);
     }
 
     public ShipmentResponse createForInspection(UUID actor,boolean staff,UUID inspectionId,CreateShipmentRequest request) {
@@ -226,6 +259,15 @@ public class ShipmentServiceImpl implements ShipmentService {
         if (!staff && !"SELLER_TO_CENTER".equals(request.leg())) {
             throw new ForbiddenException("STAFF/ADMIN initiates shipments from inspection center");
         }
+        if ("CENTER_TO_BUYER".equals(request.leg())) {
+            var inspection = inspections.findById(inspectionId).orElseThrow();
+            if (inspection.getInspectionShippingQuoteId() != null) {
+                if (inspection.getOrder() == null || inspection.getFinalPaymentPaidAt() == null) {
+                    throw new ConflictException("Người mua phải thanh toán tiền hàng và cước giao từ trung tâm trước khi tạo chuyến");
+                }
+                return prepareForOrder(actor, staff, inspection.getOrder().getId(), request);
+            }
+        }
         var inspection=inspections.findByIdForUpdate(inspectionId).orElseThrow();
         var post=inspection.getPost();
         var saved=shipments.findById(shipmentId(inspectionId,request));
@@ -236,11 +278,17 @@ public class ShipmentServiceImpl implements ShipmentService {
             if (inspection.getOrderType() != InspectionOrderType.AT_CENTER) {
                 throw new ConflictException("Only AT_CENTER inspections support return shipments");
             }
-            if (!Set.of("FAILED", "CANCELLED", "PASSED").contains(inspection.getStatus())) {
+            if (inspection.getFinalPaymentPaidAt() != null
+                    || !Set.of("FAILED", "CANCELLED", "PASSED").contains(inspection.getStatus())) {
                 throw new ConflictException("Inspection is not eligible for return shipping");
             }
             var centerLegs = shipments.findByInspectionOrderIdOrderByCreatedAtAsc(inspectionId).stream()
                     .filter(s -> "SELLER_TO_CENTER".equals(s.getLeg()) && "DELIVERED".equals(s.getStatus())).toList();
+            if (inspection.getInspectionShippingQuoteId() != null
+                    && (inspection.getFeeSettledAt() == null || centerLegs.isEmpty()
+                        || "PASSED".equals(inspection.getStatus()))) {
+                throw new ConflictException("Chỉ đặt chuyến hoàn khi hàng đã đến trung tâm và đơn kiểm định đã chốt trả hàng");
+            }
             if (centerLegs.isEmpty() && !staff && !"PASSED".equals(inspection.getStatus())) {
                 throw new ConflictException("The package was never delivered to the center; return shipment cannot be created");
             }
@@ -297,6 +345,10 @@ public class ShipmentServiceImpl implements ShipmentService {
             if (Set.of("CANCELLED", "FAILED", "PAYMENT_EXPIRED", "COMPLETED").contains(inspection.getStatus())) {
                 throw new ConflictException("Inspection order is not eligible for center shipment");
             }
+            if (saved.isEmpty() && inspection.getInspectionShippingQuoteId() != null
+                    && !Set.of("CONFIRMED_PENDING_DISPATCH", "DISPATCHED", "SCHEDULED").contains(inspection.getStatus())) {
+                throw new ConflictException("Đơn kiểm định phải được xác nhận và thanh toán đủ trước khi gửi hàng đến trung tâm");
+            }
             if (saved.isPresent()) {
                 var original=saved.get();
                 var originalPayload = mapper.readTree(original.getPayload());
@@ -352,6 +404,11 @@ public class ShipmentServiceImpl implements ShipmentService {
             if (shipment.getOrderCode()!=null || "LALAMOVE".equals(shipment.getProvider())) return new Prepared(id,false);
         } else {
             var siblings=orderId!=null?shipments.findByOrderIdOrderByCreatedAtAsc(orderId):shipments.findByInspectionOrderIdOrderByCreatedAtAsc(inspectionId);
+            if (orderId != null && inspectionId != null && "CENTER_TO_BUYER".equals(request.leg())
+                    && shipments.findByInspectionOrderIdOrderByCreatedAtAsc(inspectionId).stream()
+                        .anyMatch(s -> s.getOrderId() == null && request.leg().equals(s.getLeg()) && !"CANCELLED".equals(s.getStatus()))) {
+                throw new ConflictException("A shipment is already active or uncertain for this inspection");
+            }
             boolean outbound=!"BUYER_TO_SELLER".equals(request.leg());
             if (siblings.stream().anyMatch(s -> !"CANCELLED".equals(s.getStatus())
                     && !("RETURNED".equals(s.getStatus()) && Set.of("BUYER_TO_SELLER","SELLER_TO_CENTER").contains(s.getLeg()))
@@ -365,10 +422,14 @@ public class ShipmentServiceImpl implements ShipmentService {
                 var total=preview.get("total_fee");
                 if (total==null || !total.isNumber() || total.decimalValue().signum()<0 || total.decimalValue().compareTo(BigDecimal.valueOf(1000000000))>0)
                     throw new ShippingProviderException("Carrier returned an invalid shipping fee");
-                if (fee!=null && total.decimalValue().compareTo(fee)>0)
+                if (fee != null && total.decimalValue().compareTo(fee) > 0) {
+                    if ("CENTER_TO_SELLER".equals(request.leg())) {
+                        throw new ConflictException("Cước Lalamove chiều về vượt khoản dự phòng đã thu; cần xử lý chênh lệch trước khi đặt chuyến");
+                    }
                     throw new ConflictException(inspectionId != null
                             ? "Phí Lalamove hiện tại vượt ngân sách vận chuyển của đơn kiểm định; cần xử lý hủy/hoàn phí đơn chưa gửi và xác nhận lại báo giá mới trước khi đặt chuyến"
                             : "The current Lalamove fee exceeds the paid shipping fee; cancel the unshipped order and checkout with a new quote");
+                }
                 if (fee==null) fee=total.decimalValue();
                 if ("LALAMOVE".equals(carrierCode)) {
                     if (!preview.hasNonNull("provider_quote")) throw new ShippingProviderException("Lalamove returned no quotation context");
@@ -402,7 +463,7 @@ public class ShipmentServiceImpl implements ShipmentService {
             applyCarrierLinks(shipment,result);
             if ("LALAMOVE".equals(shipment.getProvider())) {
                 Instant delivered=parseProviderTime(result.get("delivered_at"));
-                applyLalamoveStatus(shipment,status,delivered!=null?delivered:Instant.now());
+                applyLalamoveStatus(shipment,status,delivered!=null?delivered:Instant.now(), null);
                 // The HTTP response has no carrier update timestamp. Do not use its receipt time to discard delayed callbacks.
                 if (Set.of("ASSIGNING_DRIVER","ON_GOING").contains(status)) shipment.setLastEventAt(null);
             }
@@ -553,7 +614,9 @@ public class ShipmentServiceImpl implements ShipmentService {
             shipment.setOrderCode(replacement); reconcileLalamove(shipment,detail); return;
         }
         var fee=body.get("fee");
-        if (fee!=null && !fee.isNull() && (shipment.getLastFeeEventAt()==null || !time.isBefore(shipment.getLastFeeEventAt()))) {
+        boolean currentFee = fee != null && !fee.isNull()
+                && (shipment.getLastFeeEventAt() == null || !time.isBefore(shipment.getLastFeeEventAt()));
+        if (currentFee) {
             requireFee(fee); shipment.setActualFee(fee.decimalValue()); shipment.setLastFeeEventAt(time);
         }
         if (shipment.getLastEventAt()!=null && time.isBefore(shipment.getLastEventAt())) return;
@@ -561,7 +624,7 @@ public class ShipmentServiceImpl implements ShipmentService {
         if (body.hasNonNull("share_link") && body.path("share_link").asText().startsWith("https://")) shipment.setShareLink(body.path("share_link").asText());
         if (body.hasNonNull("pod_url") && body.path("pod_url").asText().startsWith("https://")) shipment.setPodUrl(body.path("pod_url").asText());
         if ("FAILED".equals(body.path("pod_status").asText())) freeze(shipment);
-        if (!status.isBlank()) applyLalamoveStatus(shipment,status,time);
+        if (!status.isBlank()) applyLalamoveStatus(shipment,status,time,currentFee ? fee.decimalValue() : null);
         shipment.setUpdatedAt(Instant.now()); shipments.save(shipment);
     }
 
@@ -616,7 +679,8 @@ public class ShipmentServiceImpl implements ShipmentService {
         Instant observedAt=Instant.now();
         applyFeeAndEta(shipment,data); applyCarrierLinks(shipment,data);
         Instant delivered=parseProviderTime(data.get("delivered_at"));
-        applyLalamoveStatus(shipment,status,delivered!=null?delivered:observedAt);
+        BigDecimal observedFee = data.hasNonNull("total_fee") ? shipment.getActualFee() : null;
+        applyLalamoveStatus(shipment,status,delivered!=null?delivered:observedAt,observedFee);
         shipment.setLastReconciledAt(observedAt); shipment.setUpdatedAt(observedAt); shipment.setLastError(null); shipments.save(shipment);
         var event=new ShipmentEvent(); event.setShipmentId(shipment.getId()); event.setEventKey(listingFingerprint.sha256("LALAMOVE|sync|"+shipment.getId()+"|"+observedAt));
         event.setType("RECONCILIATION"); event.setStatus(status); event.setOccurredAt(observedAt); event.setPayload(mapper.writeValueAsString(data)); events.save(event);
@@ -625,7 +689,7 @@ public class ShipmentServiceImpl implements ShipmentService {
         if (!code.equals(data.path("order_code").asText()) || !shipment.getClientOrderCode().equals(data.path("raw").path("metadata").path("secondlifeClientOrderCode").asText()))
             throw new ConflictException("Carrier order does not contain this shipment's verified client reference");
     }
-    private void applyLalamoveStatus(Shipment shipment,String status,Instant time) {
+    private void applyLalamoveStatus(Shipment shipment,String status,Instant time,BigDecimal observedFee) {
         if (Set.of("DELIVERED","CANCELLED").contains(shipment.getStatus()) && !Objects.equals(shipment.getProviderStatus(),status)) {
             if (Set.of("REJECTED","EXPIRED").contains(status)) freeze(shipment);
             return;
@@ -689,11 +753,11 @@ public class ShipmentServiceImpl implements ShipmentService {
         }
 
         if (shipment.getInspectionOrderId() != null) {
-            applyLalamoveInspectionStatus(shipment, status, time);
+            applyLalamoveInspectionStatus(shipment, status, observedFee);
         }
     }
 
-    private void applyLalamoveInspectionStatus(Shipment shipment, String status, Instant time) {
+    private void applyLalamoveInspectionStatus(Shipment shipment, String status, BigDecimal observedFee) {
         var inspectionOpt = inspections.findByIdForUpdate(shipment.getInspectionOrderId());
         if (inspectionOpt.isEmpty()) return;
         var inspection = inspectionOpt.get();
@@ -716,7 +780,11 @@ public class ShipmentServiceImpl implements ShipmentService {
                 }
             } else if ("COMPLETED".equals(status)) {
                 if (!Set.of("PASSED", "FAILED", "COMPLETED").contains(inspection.getStatus())) {
-                    inspection.setStatus("INSPECTING");
+                    if (inspection.getInspector() == null) {
+                        inspection.setStatus("CONFIRMED_PENDING_DISPATCH");
+                    } else {
+                        inspection.setStatus("INSPECTING");
+                    }
                 }
             }
         } else if (Set.of("CENTER_TO_BUYER", "SELLER_TO_BUYER").contains(shipment.getLeg())) {
@@ -750,9 +818,10 @@ public class ShipmentServiceImpl implements ShipmentService {
                     sealLogs.save(sealLog);
                 }
             }
-        } else if ("CENTER_TO_SELLER".equals(shipment.getLeg())) {
-            if ("COMPLETED".equals(status)) {
-                inspection.setStatus("CANCELLED");
+        } else if ("CENTER_TO_SELLER".equals(shipment.getLeg()) && "COMPLETED".equals(status)) {
+            inspection.setStatus("CANCELLED");
+            if (observedFee != null) {
+                inspectionFeeSettlement.settleReturnShipping(inspection, observedFee);
             }
         }
         inspections.save(inspection);

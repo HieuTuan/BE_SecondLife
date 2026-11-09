@@ -58,7 +58,14 @@ public class ShipmentController {
     }
     @PostMapping("/inspection-orders/{inspectionId}/shipments") @PreAuthorize("isAuthenticated()")
     public ApiResponse<ShipmentResponse> inspectionCreate(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID inspectionId,@Valid @RequestBody CreateShipmentRequest body) {
-        return ApiResponse.success(shipments.createForInspection(actor(user),staff(),inspectionId,body));
+        UUID actorId = actor(user);
+        boolean operator = staff();
+        boolean center = SecurityContextHolder.getContext().getAuthentication().getAuthorities().stream()
+                .anyMatch(a -> "ROLE_INSPECTION_CENTER".equals(a.getAuthority()));
+        if (!operator && center && "CENTER_TO_BUYER".equals(body.leg())) {
+            return ApiResponse.success(shipments.createCenterDelivery(actorId, inspectionId, body));
+        }
+        return ApiResponse.success(shipments.createForInspection(actorId, operator, inspectionId, body));
     }
     @GetMapping("/inspection-orders/{inspectionId}/shipments")
     public ApiResponse<List<ShipmentResponse>> inspection(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID inspectionId) {

@@ -326,8 +326,8 @@ class InspectionGovernanceIntegrationTest {
                 .andExpect(jsonPath("$.checklistTemplateId").value(template.toString()))
                 .andExpect(jsonPath("$.complexityLevel").value("L2"))
                 .andExpect(jsonPath("$.inspectionFee").value(50000))
-                .andExpect(jsonPath("$.buyerFeeShare").value(75000))
-                .andExpect(jsonPath("$.sellerFeeShare").value(75000));
+                .andExpect(jsonPath("$.buyerFeeShare").value(80000))
+                .andExpect(jsonPath("$.sellerFeeShare").value(80000));
         assertTrue(orders.findActiveByPostId(product.getId()).orElseThrow().getChecklistSnapshotJson().contains("Check heating"));
     }
 
@@ -671,9 +671,9 @@ class InspectionGovernanceIntegrationTest {
         approveFee(center, "L2", 50001);
         Post product = listing(riceCooker);
         JsonNode quote = json.readTree(quote(product, center).andExpect(status().isOk())
-                .andExpect(jsonPath("$.atCenterTotalFee").value(150001))
-                .andExpect(jsonPath("$.atCenterSplitOptions.SPLIT_50_50").value(75000.5))
-                .andExpect(jsonPath("$.atCenterPackage.suggestedSplit50").value(75000.5))
+                .andExpect(jsonPath("$.atCenterTotalFee").value(160001))
+                .andExpect(jsonPath("$.atCenterSplitOptions.SPLIT_50_50").value(80000.5))
+                .andExpect(jsonPath("$.atCenterPackage.suggestedSplit50").value(80000.5))
                 .andReturn().getResponse().getContentAsString());
         mvc.perform(post("/api/v1/inspection/requests").header("Authorization", auth(buyer))
                         .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of(
@@ -681,8 +681,8 @@ class InspectionGovernanceIntegrationTest {
                                 "feePayer", "SPLIT_50_50", "buyerConsentZin", true,
                                 "inspectionShippingQuoteId", quote.path("shippingQuote").path("id").asText()))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.buyerFeeShare").value(75000.5))
-                .andExpect(jsonPath("$.sellerFeeShare").value(75000.5));
+                .andExpect(jsonPath("$.buyerFeeShare").value(80000.5))
+                .andExpect(jsonPath("$.sellerFeeShare").value(80000.5));
     }
 
     private InspectionOrder snapshotOrder(Post post) {

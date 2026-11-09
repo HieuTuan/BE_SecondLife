@@ -18,7 +18,7 @@ import java.util.Set;
 public final class LalamoveVehicleCatalog {
     private static final int MIN_WEIGHT_GRAM = 1;
     private static final int MIN_DIMENSION_CM = 1;
-    private static final Set<String> SUPPORTED_LOCODES = Set.of("VN HAN", "VN DAD", "VN SGN");
+    private static final Set<String> SUPPORTED_LOCODES = Set.of("VN HAN", "VN SGN");
 
     private LalamoveVehicleCatalog() { }
 
@@ -38,7 +38,7 @@ public final class LalamoveVehicleCatalog {
         }
         return switch (division.city()) {
             case HANOI -> "VN HAN";
-            case DANANG -> "VN DAD";
+            case DANANG -> throw new BadRequestException("Điểm lấy hàng nằm ngoài khu vực vận chuyển được hỗ trợ");
             case HO_CHI_MINH -> "VN SGN";
         };
     }

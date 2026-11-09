@@ -166,6 +166,18 @@ class LalamoveShippingProviderTest {
         module.server().verify();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"from", "to"})
+    void daNangStopsAreRejectedBeforeCarrierRequests(String stop) {
+        Module module = module(properties());
+        Map<String, Object> route = payload();
+        route.put(stop + "_latitude", new BigDecimal("16.0544"));
+        route.put(stop + "_longitude", new BigDecimal("108.2022"));
+
+        assertThrows(BadRequestException.class, () -> module.provider().preview(route));
+        module.server().verify();
+    }
+
     @Test void missingCoordinatesAndUnsafeIdentifiersAreRejectedBeforeRequests() {
         Module module = module(properties());
         Map<String, Object> route = payload(); route.remove("from_latitude");

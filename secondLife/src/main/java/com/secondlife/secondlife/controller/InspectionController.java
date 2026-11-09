@@ -97,7 +97,7 @@ public class InspectionController {
     }
 
     @PostMapping("/orders/{orderId}/pay-fee")
-    @Operation(summary = "Người mua hoặc Người bán nộp phần phí kiểm định ký quỹ từ ví SecondLife (trong vòng 6h)")
+    @Operation(summary = "Người mua hoặc Người bán nộp phần phí kiểm định ký quỹ từ ví SecondLife trước paymentDeadline")
     public ResponseEntity<InspectionOrderResponse> payInspectionFee(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID orderId) {

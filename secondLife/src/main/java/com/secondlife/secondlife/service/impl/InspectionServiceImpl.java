@@ -100,6 +100,8 @@ import java.util.UUID;
 @Service
 public class InspectionServiceImpl implements InspectionService {
 
+    private static final Duration INSPECTION_FEE_PAYMENT_WINDOW = Duration.ofHours(12);
+
     private final InspectionOrderRepository inspectionOrderRepository;
     private final PostRepository postRepository;
     private final OrderRepository orderRepository;
@@ -487,7 +489,7 @@ public class InspectionServiceImpl implements InspectionService {
             }
             order.setSellerConsentZin(true);
             order.setStatus(InspectionOrderStatus.WAITING_FEE_PAYMENT.name());
-            order.setPaymentDeadline(Instant.now().plus(Duration.ofHours(6)));
+            order.setPaymentDeadline(Instant.now().plus(INSPECTION_FEE_PAYMENT_WINDOW));
             order.setApprovalDeadline(null);
 
             // Nếu bên nào có phí = 0 thì coi như đã thanh toán
@@ -518,7 +520,7 @@ public class InspectionServiceImpl implements InspectionService {
                         "Người bán đã đồng ý kiểm định",
                         "Người bán đã đồng ý yêu cầu kiểm định cho sản phẩm \""
                                 + (order.getPost() != null ? order.getPost().getTitle() : "")
-                                + "\". Vui lòng thanh toán phí trong vòng 6 giờ.",
+                                + "\". Vui lòng thanh toán phí trong vòng " + INSPECTION_FEE_PAYMENT_WINDOW.toHours() + " giờ.",
                         NotificationType.INSPECTION,
                         order.getId(),
                         "INSPECTION_ORDER",
@@ -583,7 +585,7 @@ public class InspectionServiceImpl implements InspectionService {
                 order.setBuyerConsentZin(request.buyerConsentZin());
             }
             order.setStatus(InspectionOrderStatus.WAITING_FEE_PAYMENT.name());
-            order.setPaymentDeadline(Instant.now().plus(Duration.ofHours(6)));
+            order.setPaymentDeadline(Instant.now().plus(INSPECTION_FEE_PAYMENT_WINDOW));
             order.setApprovalDeadline(null);
 
             boolean buyerZeroFee = (order.getBuyerFeeShare() == null
@@ -797,6 +799,9 @@ public class InspectionServiceImpl implements InspectionService {
 
         commissions.capture(newOrder, buyerId, "Inspection PASSED purchase confirmed");
         ShippingQuote quote = shippingQuoteService.consume(buyerId, post.getId(), quoteId, newOrder.getId(), itemPrice);
+        if (order.getInspectionShippingQuoteId() != null && !"CENTER_TO_BUYER".equals(quote.getLeg())) {
+            throw new ConflictException("Cần báo giá giao hàng từ trung tâm đến người mua để thanh toán");
+        }
         newOrder.setShippingQuoteId(quote.getId());
         newOrder.setShippingFee(quote.getFee());
         newOrder.setDeliveryAddress(quote.getDeliveryAddress());
@@ -975,7 +980,7 @@ public class InspectionServiceImpl implements InspectionService {
         }
         requireFundedConfiguredRequest(order);
         if (order.getChecklistSnapshotJson() != null && order.getInspectionScope() == InspectionScope.BUYER_REQUEST
-                && !Set.of("CONFIRMED_PENDING_DISPATCH", "DISPATCHED").contains(order.getStatus())) {
+                && !Set.of("CONFIRMED_PENDING_DISPATCH", "DISPATCHED", "SCHEDULED", "SHIPPING_TO_CENTER", "INSPECTING").contains(order.getStatus())) {
             throw new ConflictException("Đơn chưa sẵn sàng để phân công kiểm định");
         }
 
@@ -1012,7 +1017,7 @@ public class InspectionServiceImpl implements InspectionService {
             return inspectionOrderMapper.toResponse(order);
         }
         assignActorForInspectionWork(order, actorId);
-        if (order.getChecklistSnapshotJson() != null && !Set.of("DISPATCHED", "SCHEDULED").contains(order.getStatus())) {
+        if (order.getChecklistSnapshotJson() != null && !Set.of("DISPATCHED", "SCHEDULED", "INSPECTING").contains(order.getStatus())) {
             throw new ConflictException("Đơn chưa được phân công hoặc đã kết thúc kiểm định");
         }
 

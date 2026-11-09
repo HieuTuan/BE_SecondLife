@@ -70,13 +70,40 @@ class LalamoveShipmentServiceTest {
         service = new ShipmentServiceImpl(shipments, events, orders, inspections, quotes, quoteService,
                 mock(ReverseGeocodingService.class), router, mapper, wallets, transactions,
                 mock(SystemWalletService.class), mock(SellerReputationService.class), new ListingFingerprintImpl(),
-                MapperTestSupport.mapper(ShipmentMapper.class), mock(OrderDisputeService.class), mock(ReturnShippingFeeService.class), mock(InspectionCenterProfileService.class), mock(InspectionShippingQuoteService.class));
+                MapperTestSupport.mapper(ShipmentMapper.class), mock(OrderDisputeService.class), mock(ReturnShippingFeeService.class), mock(InspectionCenterProfileService.class), mock(InspectionShippingQuoteService.class), mock(InspectionFeeSettlementService.class));
     }
     private CreateShipmentRequest request(UUID id) { return new CreateShipmentRequest(id,"SELLER_TO_BUYER",null,null,null); }
     private Shipment booked() { service.createForOrder(seller,false,order.getId(),request(UUID.randomUUID())); return rows.values().iterator().next(); }
     private void event(Shipment s,String eventId,String status,Instant time) {
         service.receiveLalamove(mapper.valueToTree(Map.of("event_id",eventId,"event_type","ORDER_STATUS_CHANGED","order_code",s.getOrderCode(),"occurred_at",time.toString(),"status",status)));
     }
+    @Test void onlyAssignedCenterCanBookPaidBuyerDeliveryAndReplayIsSafe() {
+        UUID centerId = UUID.randomUUID();
+        User center = new User();
+        center.setId(centerId);
+        InspectionOrder inspection = new InspectionOrder();
+        inspection.setId(UUID.randomUUID());
+        inspection.setInspectionCenter(center);
+        inspection.setOrderType(InspectionOrderType.AT_CENTER);
+        inspection.setStatus("DELIVERING_TO_BUYER");
+        inspection.setOrder(order);
+        quote.setLeg("CENTER_TO_BUYER");
+        when(inspections.findById(inspection.getId())).thenReturn(Optional.of(inspection));
+        var request = new CreateShipmentRequest(UUID.randomUUID(), "CENTER_TO_BUYER", null, null, null);
+
+        assertThrows(ForbiddenException.class, () -> service.createCenterDelivery(UUID.randomUUID(), inspection.getId(), request));
+        assertThrows(ConflictException.class, () -> service.createCenterDelivery(centerId, inspection.getId(), request));
+        verify(lala, never()).create(anyMap());
+
+        inspection.setFinalPaymentPaidAt(Instant.now());
+        var first = service.createCenterDelivery(centerId, inspection.getId(), request);
+        var replay = service.createCenterDelivery(centerId, inspection.getId(), request);
+        assertEquals(first.shipmentId(), replay.shipmentId());
+        assertEquals("CENTER_TO_BUYER", first.leg());
+        assertEquals(inspection.getId(), first.inspectionOrderId());
+        verify(lala, times(1)).create(anyMap());
+    }
+
     @Test void carrierIdentityPersistsAndReplayDoesNotCreateTwice() {
         var request=request(UUID.randomUUID());
         var first=service.createForOrder(seller,false,order.getId(),request);

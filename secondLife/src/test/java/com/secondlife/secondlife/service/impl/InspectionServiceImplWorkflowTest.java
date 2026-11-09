@@ -293,7 +293,21 @@ class InspectionServiceImplWorkflowTest {
     }
 
     @Test
-    @DisplayName("WP-3: Người mua phản hồi ACCEPT -> Chuyển WAITING_FEE_PAYMENT với hạn thanh toán 6 giờ")
+    @DisplayName("Người bán đồng ý kiểm định -> Hạn đóng phí 12 giờ")
+    void sellerAcceptSetsTwelveHourFeeDeadline() {
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+        when(inspectionOrderRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        var request = new InspectionSellerRespondRequest("ACCEPT", null, null, true, null);
+
+        Instant startedAt = Instant.now();
+        service.respondInspection(seller.getId(), order.getId(), request);
+
+        assertEquals(InspectionOrderStatus.WAITING_FEE_PAYMENT.name(), order.getStatus());
+        assertFeePaymentDeadline(startedAt);
+    }
+
+    @Test
+    @DisplayName("WP-3: Người mua phản hồi ACCEPT -> Chuyển WAITING_FEE_PAYMENT với hạn đóng phí 12 giờ")
     void testBuyerAcceptCounterTransitionsToWaitingFeePayment() {
         order.setStatus(InspectionOrderStatus.WAITING_BUYER_APPROVAL.name());
         order.setApprovalDeadline(Instant.now().plus(12, ChronoUnit.HOURS));
@@ -303,11 +317,19 @@ class InspectionServiceImplWorkflowTest {
 
         InspectionBuyerRespondRequest acceptReq = new InspectionBuyerRespondRequest("ACCEPT", true, null);
 
+        Instant startedAt = Instant.now();
         service.respondInspectionByBuyer(buyer.getId(), order.getId(), acceptReq);
 
         assertEquals(InspectionOrderStatus.WAITING_FEE_PAYMENT.name(), order.getStatus());
-        assertNotNull(order.getPaymentDeadline());
+        assertFeePaymentDeadline(startedAt);
         assertNull(order.getApprovalDeadline());
+    }
+
+    private void assertFeePaymentDeadline(Instant startedAt) {
+        Instant deadline = order.getPaymentDeadline();
+        assertNotNull(deadline);
+        assertFalse(deadline.isBefore(startedAt.plus(12, ChronoUnit.HOURS)));
+        assertFalse(deadline.isAfter(Instant.now().plus(12, ChronoUnit.HOURS)));
     }
 
     @Test

@@ -74,7 +74,7 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
 
         if (order.getPaymentDeadline() != null && order.getPaymentDeadline().isBefore(Instant.now())) {
             refundExpiredOrder(order);
-            throw new ConflictException("Thời hạn thanh toán phí kiểm định (6 giờ) đã hết");
+            throw new ConflictException("Thời hạn thanh toán phí kiểm định đã hết");
         }
 
         boolean isBuyer = order.getBuyer() != null && order.getBuyer().getId().equals(userId);

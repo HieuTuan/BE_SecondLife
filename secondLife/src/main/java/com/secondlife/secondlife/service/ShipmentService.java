@@ -14,6 +14,8 @@ public interface ShipmentService {
 
     ShipmentResponse createForInspection(UUID actor, boolean staff, UUID inspectionId, CreateShipmentRequest request);
 
+    ShipmentResponse createCenterDelivery(UUID centerId, UUID inspectionId, CreateShipmentRequest request);
+
     List<ShipmentResponse> orderShipments(UUID actor, boolean staff, UUID id);
 
     List<ShipmentResponse> inspectionShipments(UUID actor, boolean staff, UUID id);

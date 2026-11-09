@@ -95,7 +95,7 @@ public class GeoapifyGeocodingClient {
             String country = fields.path("country_code").asText("vn").strip().toUpperCase(Locale.ROOT);
             if (!"VN".equals(country) || division == null || policy.allowedCity(division.city().name()) == null) {
                 throw new BadRequestException(
-                        "Địa chỉ nằm ngoài khu vực phục vụ Hà Nội, Đà Nẵng và Thành phố Hồ Chí Minh");
+                        "Địa chỉ nằm ngoài khu vực phục vụ Hà Nội và Thành phố Hồ Chí Minh");
             }
             String formatted = fields.path("formatted").asText("").strip();
             if (formatted.isBlank()) formatted = query;
@@ -201,7 +201,7 @@ public class GeoapifyGeocodingClient {
                 if (!Set.of("street", "building", "amenity").contains(result.path("result_type").asText())) continue;
                 String country = result.path("country_code").asText().strip().toUpperCase(Locale.ROOT);
                 if (!"VN".equals(country) || division == null || policy.allowedCity(division.city().name()) == null)
-                    throw new BadRequestException("Địa chỉ nằm ngoài khu vực phục vụ Hà Nội, Đà Nẵng và Thành phố Hồ Chí Minh");
+                    throw new BadRequestException("Địa chỉ nằm ngoài khu vực phục vụ Hà Nội và Thành phố Hồ Chí Minh");
                 String original = result.path("formatted").asText();
                 if (original.isBlank() || original.length() > 500) throw malformed();
                 String address = CurrentVietnameseAddress.format(result, division);

@@ -47,7 +47,7 @@ public class InspectionEscrowExpiryScheduler {
     }
 
     /**
-     * Quét định kỳ mỗi 60 giây các đơn kiểm định quá hạn phản hồi (24h), quá hạn đóng phí (6h), hoặc quá hạn mua hàng (6h).
+     * Quét định kỳ mỗi 60 giây các đơn kiểm định quá hạn phản hồi (24h), quá hạn đóng phí theo paymentDeadline, hoặc quá hạn mua hàng (6h).
      */
     @Scheduled(fixedRate = 60000)
     public void sweepExpiredInspectionOrders() {
@@ -59,7 +59,7 @@ public class InspectionEscrowExpiryScheduler {
         }
 
         Instant now = Instant.now();
-        // 2. Quét các đơn kiểm định quá hạn 6 giờ chưa đủ tiền thanh toán
+        // 2. Quét các đơn kiểm định đã qua paymentDeadline mà chưa đóng đủ phí
         List<InspectionOrder> expiredOrders = inspectionOrderRepository.findExpiredUnpaidOrders(now);
         if (!expiredOrders.isEmpty()) {
             log.info("Found {} expired unpaid inspection orders to process", expiredOrders.size());
