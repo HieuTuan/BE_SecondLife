@@ -37,6 +37,7 @@ class LalamoveShipmentServiceTest {
     private final ShippingQuoteService quoteService=mock(ShippingQuoteService.class);
     private final ShippingProvider router=mock(ShippingProvider.class), lala=mock(ShippingProvider.class), ghn=mock(ShippingProvider.class);
     private final WalletService wallets=mock(WalletService.class);
+    private final InspectionFeeSettlementService inspectionFeeSettlement = mock(InspectionFeeSettlementService.class);
     private final PlatformTransactionManager transactions=mock(PlatformTransactionManager.class);
     private final UUID seller=UUID.randomUUID(), buyer=UUID.randomUUID();
     private ShipmentService service;
@@ -70,7 +71,7 @@ class LalamoveShipmentServiceTest {
         service = new ShipmentServiceImpl(shipments, events, orders, inspections, quotes, quoteService,
                 mock(ReverseGeocodingService.class), router, mapper, wallets, transactions,
                 mock(SystemWalletService.class), mock(SellerReputationService.class), new ListingFingerprintImpl(),
-                MapperTestSupport.mapper(ShipmentMapper.class), mock(OrderDisputeService.class), mock(ReturnShippingFeeService.class), mock(InspectionCenterProfileService.class), mock(InspectionShippingQuoteService.class), mock(InspectionFeeSettlementService.class));
+                MapperTestSupport.mapper(ShipmentMapper.class), mock(OrderDisputeService.class), mock(ReturnShippingFeeService.class), mock(InspectionCenterProfileService.class), mock(InspectionShippingQuoteService.class), inspectionFeeSettlement);
     }
     private CreateShipmentRequest request(UUID id) { return new CreateShipmentRequest(id,"SELLER_TO_BUYER",null,null,null); }
     private Shipment booked() { service.createForOrder(seller,false,order.getId(),request(UUID.randomUUID())); return rows.values().iterator().next(); }
@@ -88,6 +89,14 @@ class LalamoveShipmentServiceTest {
         inspection.setStatus("DELIVERING_TO_BUYER");
         inspection.setOrder(order);
         quote.setLeg("CENTER_TO_BUYER");
+        var route = (tools.jackson.databind.node.ObjectNode) mapper.readTree(quote.getPayload());
+        route.put("from_name", "Hub Lab");
+        route.put("from_phone", "0922222222");
+        route.put("from_address", "Hub pickup");
+        route.put("to_name", "Buyer");
+        route.put("to_phone", "0933333333");
+        route.put("to_address", "Buyer delivery");
+        quote.setPayload(mapper.writeValueAsString(route));
         when(inspections.findById(inspection.getId())).thenReturn(Optional.of(inspection));
         var request = new CreateShipmentRequest(UUID.randomUUID(), "CENTER_TO_BUYER", null, null, null);
 
@@ -101,7 +110,86 @@ class LalamoveShipmentServiceTest {
         assertEquals(first.shipmentId(), replay.shipmentId());
         assertEquals("CENTER_TO_BUYER", first.leg());
         assertEquals(inspection.getId(), first.inspectionOrderId());
+        assertEquals(first.shipmentId(), first.id());
+        assertEquals("Hub Lab", first.senderName());
+        assertEquals("0922222222", first.senderPhone());
+        assertEquals("Hub pickup", first.senderAddress());
+        assertEquals("Buyer", first.receiverName());
+        assertEquals("0933333333", first.receiverPhone());
+        assertEquals("Buyer delivery", first.receiverAddress());
+        assertEquals(first.shareLink(), first.trackingUrl());
+        assertEquals(first, replay);
         verify(lala, times(1)).create(anyMap());
+    }
+
+    @Test void assignedCenterCanReturnFailedGoodsWithoutClosingAppealWindow() {
+        User center = new User();
+        center.setId(UUID.randomUUID());
+        InspectionOrder inspection = new InspectionOrder();
+        inspection.setId(UUID.randomUUID());
+        inspection.setInspectionCenter(center);
+        inspection.setSeller(order.getSeller());
+        inspection.setBuyer(order.getBuyer());
+        inspection.setPost(order.getPost());
+        order.getPost().setPrice(order.getFinalPrice());
+        inspection.setOrderType(InspectionOrderType.AT_CENTER);
+        inspection.setStatus("FAILED");
+        inspection.setFeeSettledAt(Instant.now());
+        inspection.setReturnShippingReserveFee(new BigDecimal("36000"));
+        Instant appealDeadline = Instant.now().plusSeconds(3600);
+        inspection.setAppealDeadline(appealDeadline);
+
+        Shipment inbound = new Shipment();
+        inbound.setLeg("SELLER_TO_CENTER");
+        inbound.setStatus("DELIVERED");
+        inbound.setPayload(quote.getPayload());
+        when(inspections.findByIdForUpdate(inspection.getId())).thenReturn(Optional.of(inspection));
+        var request = new CreateShipmentRequest(UUID.randomUUID(), "CENTER_TO_SELLER", null, null, null);
+        when(inspections.findOwnerId(inspection.getId())).thenReturn(Optional.of(seller));
+
+        assertThrows(ForbiddenException.class, () -> service.createForInspection(UUID.randomUUID(), true, inspection.getId(), request));
+
+        assertThrows(ForbiddenException.class, () -> service.createCenterDelivery(UUID.randomUUID(), inspection.getId(), request));
+        assertThrows(ConflictException.class, () -> service.createCenterDelivery(center.getId(), inspection.getId(), request));
+        verify(lala, never()).create(anyMap());
+
+        when(shipments.findByInspectionOrderIdOrderByCreatedAtAsc(inspection.getId())).thenReturn(List.of(inbound));
+        when(inspections.findById(inspection.getId())).thenReturn(Optional.of(inspection));
+        var route = (tools.jackson.databind.node.ObjectNode) mapper.readTree(inbound.getPayload());
+        route.put("to_address", "Inspection Hub");
+        inbound.setPayload(mapper.writeValueAsString(route));
+
+        assertThrows(ForbiddenException.class, () -> service.quoteCenterReturn(UUID.randomUUID(), inspection.getId()));
+        var returnQuote = service.quoteCenterReturn(center.getId(), inspection.getId());
+        assertEquals("Inspection Hub", returnQuote.from().address());
+        assertEquals("123 Street", returnQuote.to().address());
+        assertEquals(new BigDecimal("27000"), returnQuote.shippingFee());
+        assertEquals(new BigDecimal("36000"), returnQuote.reserveFee());
+        assertEquals("MOTORCYCLE", returnQuote.serviceType());
+        assertTrue(rows.isEmpty());
+        verify(lala, never()).create(anyMap());
+
+        var priceIncreased = new CreateShipmentRequest(UUID.randomUUID(), "CENTER_TO_SELLER",
+                null, null, null, null, new BigDecimal("26000"));
+        assertThrows(ConflictException.class,
+                () -> service.createCenterDelivery(center.getId(), inspection.getId(), priceIncreased));
+        assertTrue(rows.isEmpty());
+        verify(lala, never()).create(anyMap());
+
+        var result = service.createCenterDelivery(center.getId(), inspection.getId(), request);
+        assertEquals("Inspection Hub", result.senderAddress());
+        assertEquals("123 Street", result.receiverAddress());
+        assertEquals(result.shipmentId(), service.createCenterDelivery(center.getId(), inspection.getId(), request).shipmentId());
+        verify(lala, times(1)).create(anyMap());
+
+        service.receiveLalamove(mapper.valueToTree(Map.of("event_id", "return-completed",
+                "event_type", "ORDER_STATUS_CHANGED", "order_code", result.orderCode(),
+                "occurred_at", Instant.now().plusSeconds(1).toString(), "status", "COMPLETED", "fee", 32000)));
+
+        assertEquals("FAILED", inspection.getStatus());
+        assertEquals(appealDeadline, inspection.getAppealDeadline());
+        assertEquals("DELIVERED", rows.get(result.shipmentId()).getStatus());
+        verify(inspectionFeeSettlement).settleReturnShipping(inspection, new BigDecimal("32000"));
     }
 
     @Test void carrierIdentityPersistsAndReplayDoesNotCreateTwice() {

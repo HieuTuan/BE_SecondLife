@@ -11,6 +11,7 @@ import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionSealScanRequest;
 import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
 import com.secondlife.secondlife.dto.response.InspectionCenterOptionResponse;
+import com.secondlife.secondlife.dto.response.InspectionCheckInCodeResponse;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.dto.response.InspectionQuoteResponse;
 import com.secondlife.secondlife.dto.response.InspectionSealLogResponse;
@@ -24,7 +25,9 @@ import com.secondlife.secondlife.service.InspectionService;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -103,6 +106,16 @@ public class InspectionController {
             @PathVariable UUID orderId) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(escrowService.payInspectionFeeResponse(userId, orderId));
+    }
+
+    @PostMapping("/orders/{orderId}/check-in-code")
+    @PreAuthorize("hasRole('SELLER')")
+    @Operation(summary = "Người bán lấy mã check-in kiểm định tại nhà để KTV quét")
+    public ResponseEntity<ApiResponse<InspectionCheckInCodeResponse>> homeCheckInCode(
+            @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID orderId) {
+        UUID sellerId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(ApiResponse.success(inspectionService.getOrCreateHomeCheckInCode(sellerId, orderId)));
     }
 
     @GetMapping("/orders/{orderId}")

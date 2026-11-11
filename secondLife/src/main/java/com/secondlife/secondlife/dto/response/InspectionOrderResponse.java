@@ -1,7 +1,9 @@
 package com.secondlife.secondlife.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.secondlife.secondlife.enums.InspectionComplexityLevel;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
+import com.secondlife.secondlife.enums.InspectionOrderStatus;
 import com.secondlife.secondlife.enums.InspectionOrderType;
 
 import lombok.Builder;
@@ -49,6 +51,8 @@ public record InspectionOrderResponse(
     Instant sellerPaidAt,
     Instant feeSettledAt,
     Instant appointmentScheduledAt,
+    Instant homeCheckedInAt,
+    List<String> evidencePhotoUrls,
     String checklistResultJson,
     String videoProofUrl,
     String unboxingVideoUrl,
@@ -78,6 +82,21 @@ public record InspectionOrderResponse(
     UUID feeProposalId,
     InspectionComplexityLevel complexityLevel,
     BigDecimal platformFeeRateSnapshot,
-    UUID inspectionShippingQuoteId
+    UUID inspectionShippingQuoteId,
+    String sellerPhone,
+    String sellerAddress,
+    String buyerPhone,
+    String buyerAddress,
+    String inspectionCenterName,
+    String inspectionCenterAddress,
+    String inspectionCenterPhone
 ) {
+    @JsonProperty("customerStatus")
+    public String customerStatus() {
+        if (orderType != InspectionOrderType.AT_HOME && inspectorId != null && (InspectionOrderStatus.DISPATCHED.name().equals(status)
+                || InspectionOrderStatus.SCHEDULED.name().equals(status))) {
+            return InspectionOrderStatus.INSPECTING.name();
+        }
+        return status;
+    }
 }

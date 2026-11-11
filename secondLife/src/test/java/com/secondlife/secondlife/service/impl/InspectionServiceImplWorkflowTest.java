@@ -4,12 +4,16 @@ import com.secondlife.secondlife.dto.request.InspectionAppealRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyerRespondRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
 import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
+import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
+import com.secondlife.secondlife.dto.request.InspectionStartRequest;
 import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
+import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.dto.response.InspectionQuoteResponse;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Negotiation;
 import com.secondlife.secondlife.entity.Post;
+import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.InspectionAppealStatus;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
@@ -18,13 +22,18 @@ import com.secondlife.secondlife.enums.InspectionOrderType;
 import com.secondlife.secondlife.enums.InspectionScope;
 import com.secondlife.secondlife.enums.InspectionSettlementOutcome;
 import com.secondlife.secondlife.enums.NegotiationStatus;
+import com.secondlife.secondlife.enums.NotificationType;
+import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.integration.ai.AiChatGateway;
+import com.secondlife.secondlife.mapper.InspectionCenterProfileMapper;
 import com.secondlife.secondlife.mapper.InspectionOrderMapper;
 import com.secondlife.secondlife.mapper.InspectionSealLogMapper;
 import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.InspectionSealLogRepository;
+import com.secondlife.secondlife.repository.InspectionShippingQuoteRepository;
 import com.secondlife.secondlife.repository.NegotiationRepository;
 import com.secondlife.secondlife.repository.OrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
@@ -81,6 +90,9 @@ class InspectionServiceImplWorkflowTest {
 
     @Mock
     private ShipmentRepository shipments;
+
+    @Mock
+    private InspectionShippingQuoteRepository inspectionShippingQuotes;
 
     @Mock
     private UserRepository userRepository;
@@ -154,6 +166,7 @@ class InspectionServiceImplWorkflowTest {
                 orderRepository,
                 negotiationRepository,
                 shipments,
+                inspectionShippingQuotes,
                 userRepository,
                 roleRepository,
                 passwordEncoder,
@@ -171,12 +184,14 @@ class InspectionServiceImplWorkflowTest {
                 inspectionSealLogRepository,
                 tamperSealService,
                 googleChatGateway,
+                mock(InspectionCenterProfileMapper.class),
                 inspectionOrderMapper,
                 inspectionSealLogMapper,
                 24,
                 new BigDecimal("0.05"), // 5% commitment deposit
                 new BigDecimal("500000"),
-                mock(InspectionOrderChecklistService.class)
+                mock(InspectionOrderChecklistService.class),
+                "test-cloud"
         );
 
         buyer = new User();
@@ -214,6 +229,66 @@ class InspectionServiceImplWorkflowTest {
         order.setBuyerFeeShare(new BigDecimal("260000"));
         order.setSellerFeeShare(BigDecimal.ZERO);
         order.setFinalItemPrice(new BigDecimal("10000000"));
+    }
+
+    @Test
+    void assignmentExposesCustomerStatusAndNotifiesBothParties() {
+        order.setInspector(null);
+        order.setStatus("CONFIRMED_PENDING_DISPATCH");
+        User center = new User();
+        center.setId(UUID.randomUUID());
+        center.addRole(new Role("INSPECTION_CENTER", "Center", null));
+        order.setInspectionCenter(center);
+        inspector.setManager(center);
+        inspector.addRole(new Role("INSPECTOR", "Inspector", null));
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+        when(inspectionOrderRepository.save(order)).thenReturn(order);
+        when(userRepository.findById(inspector.getId())).thenReturn(Optional.of(inspector));
+        when(userRepository.findById(center.getId())).thenReturn(Optional.of(center));
+        when(inspectionOrderMapper.toResponse(order)).thenAnswer(invocation ->
+                InspectionOrderResponse.builder().status(order.getStatus()).inspectorId(order.getInspector().getId()).build());
+
+        InspectionOrderResponse result = service.assignInspector(order.getId(), inspector.getId(), center.getId());
+
+        assertEquals("DISPATCHED", order.getStatus());
+        assertEquals("INSPECTING", objectMapper.valueToTree(result).get("customerStatus").asText());
+        verify(notificationService).notifyInApp(eq(buyer.getId()), any(), any(), eq(NotificationType.INSPECTION),
+                eq(order.getId()), eq("INSPECTION_ORDER"), eq("/buyer/inspections/" + order.getId()));
+        verify(notificationService).notifyInApp(eq(seller.getId()), any(), any(), eq(NotificationType.INSPECTION),
+                eq(order.getId()), eq("INSPECTION_ORDER"), eq("/seller/inspections/" + order.getId()));
+
+        order.setStatus("INSPECTING");
+        service.assignInspector(order.getId(), inspector.getId(), center.getId());
+
+        assertEquals("INSPECTING", order.getStatus());
+        verify(notificationService, times(2)).notifyInApp(any(), any(), any(), eq(NotificationType.INSPECTION), any(), any(), any());
+    }
+
+    @Test
+    void customerStatusKeepsUnassignedAppointmentsAndTerminalResults() {
+        assertEquals("SCHEDULED", InspectionOrderResponse.builder().status("SCHEDULED").build().customerStatus());
+        assertEquals("SCHEDULED", InspectionOrderResponse.builder().orderType(InspectionOrderType.AT_HOME)
+                .status("SCHEDULED").inspectorId(inspector.getId()).build().customerStatus());
+        assertEquals("INSPECTING", InspectionOrderResponse.builder().status("SCHEDULED").inspectorId(inspector.getId()).build().customerStatus());
+        assertEquals("PASSED", InspectionOrderResponse.builder().status("PASSED").inspectorId(inspector.getId()).build().customerStatus());
+    }
+
+    @Test
+    void finalizedLegacyInspectionCannotBeRestartedReassignedOrGivenANewSeal() {
+        order.setStatus("FAILED");
+        order.setChecklistSnapshotJson(null);
+        inspector.addRole(new Role("INSPECTOR", "Inspector", null));
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+        when(userRepository.findById(inspector.getId())).thenReturn(Optional.of(inspector));
+
+        assertThrows(ConflictException.class, () -> service.startInspection(inspector.getId(), order.getId(), null));
+        assertThrows(ConflictException.class, () -> service.assignInspector(order.getId(), inspector.getId()));
+        order.setOrderType(InspectionOrderType.AT_HOME);
+        assertThrows(ConflictException.class, () -> service.generateSealForOrder(inspector.getId(), order.getId()));
+        assertThrows(ConflictException.class, () -> service.scheduleAppointment(seller.getId(), order.getId(), null));
+
+        assertEquals("FAILED", order.getStatus());
+        verify(inspectionOrderRepository, never()).save(any(InspectionOrder.class));
     }
 
     @Test
@@ -256,19 +331,97 @@ class InspectionServiceImplWorkflowTest {
                 null,
                 70,
                 "POOR",
+                "unused-tem",
+                "unused-barcode",
                 null,
-                null,
-                null
+                List.of(proofPhoto())
         );
 
         service.submitResult(order.getId(), inspector.getId(), resultReq);
 
         assertEquals("FAILED", order.getStatus());
         assertEquals("REJECTED", post.getStatus());
+        assertEquals(List.of(proofPhoto()), order.getEvidencePhotoUrls());
+        assertNull(order.getTamperSealId());
+        assertNull(order.getBarcode());
         assertNotNull(order.getAppealDeadline());
         assertEquals(InspectionAppealStatus.NONE, order.getAppealStatus());
         assertFalse(order.isReputationPenaltyApplied());
         verify(postRepository, times(1)).save(post);
+    }
+
+    @Test
+    void homeCheckInRequiresFundedAppointmentAndAssignedTechnician() {
+        order.setOrderType(InspectionOrderType.AT_HOME);
+        order.setStatus("SCHEDULED");
+        order.setAppointmentScheduledAt(Instant.now().plusSeconds(60));
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+
+        assertThrows(ForbiddenException.class, () -> service.getOrCreateHomeCheckInCode(buyer.getId(), order.getId()));
+        assertThrows(ConflictException.class, () -> service.getOrCreateHomeCheckInCode(seller.getId(), order.getId()));
+
+        order.setBuyerPaidAt(Instant.now());
+        var code = service.getOrCreateHomeCheckInCode(seller.getId(), order.getId()).code();
+        assertEquals(code, service.getOrCreateHomeCheckInCode(seller.getId(), order.getId()).code());
+        assertThrows(ForbiddenException.class, () -> service.startInspection(buyer.getId(), order.getId(),
+                new InspectionStartRequest(code)));
+        assertThrows(BadRequestException.class, () -> service.startInspection(inspector.getId(), order.getId(),
+                new InspectionStartRequest(UUID.randomUUID())));
+        assertThrows(ConflictException.class, () -> service.submitResult(order.getId(), inspector.getId(),
+                resultWithPhotos(null)));
+
+        when(inspectionOrderRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        service.startInspection(inspector.getId(), order.getId(), new InspectionStartRequest(code));
+        Instant checkedInAt = order.getHomeCheckedInAt();
+        service.startInspection(inspector.getId(), order.getId(), new InspectionStartRequest(code));
+
+        assertNotNull(checkedInAt);
+        assertEquals(checkedInAt, order.getHomeCheckedInAt());
+        assertEquals("INSPECTING", order.getStatus());
+        assertNull(order.getHomeCheckInCode());
+        verify(inspectionOrderRepository).save(order);
+    }
+
+    @Test
+    void reschedulingInvalidatesTheOldCheckInCode() {
+        order.setOrderType(InspectionOrderType.AT_HOME);
+        order.setStatus("SCHEDULED");
+        order.setAppointmentScheduledAt(Instant.now().plusSeconds(60));
+        order.setBuyerPaidAt(Instant.now());
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+        when(inspectionOrderRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var oldCode = service.getOrCreateHomeCheckInCode(seller.getId(), order.getId()).code();
+        service.scheduleAppointment(seller.getId(), order.getId(),
+                new InspectionAppointmentRequest(Instant.now().plusSeconds(3600), null));
+        var newCode = service.getOrCreateHomeCheckInCode(seller.getId(), order.getId()).code();
+
+        assertNotEquals(oldCode, newCode);
+        assertThrows(BadRequestException.class, () -> service.startInspection(inspector.getId(), order.getId(),
+                new InspectionStartRequest(oldCode)));
+    }
+
+    @Test
+    void centerResultRequiresUploadedPhotosAndDoesNotGenerateSeal() {
+        order.setStatus("INSPECTING");
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+
+        assertThrows(BadRequestException.class, () -> service.submitResult(order.getId(), inspector.getId(),
+                resultWithPhotos(null)));
+        assertThrows(BadRequestException.class, () -> service.submitResult(order.getId(), inspector.getId(),
+                resultWithPhotos(List.of("https://example.com/photo.jpg"))));
+        assertThrows(ConflictException.class, () -> service.generateSealForOrder(inspector.getId(), order.getId()));
+        verifyNoInteractions(tamperSealService);
+    }
+
+    private InspectionResultRequest resultWithPhotos(List<String> photos) {
+        return new InspectionResultRequest("FAILED", "Kiểm tra thực tế", null, null, null, null,
+                null, null, null, null, null, photos);
+    }
+
+    private String proofPhoto() {
+        return "https://res.cloudinary.com/test-cloud/image/upload/v123/secondlife/inspections/proofs/"
+                + "781527ed-cfd8-4573-bb08-ad981683c50e.jpg";
     }
 
     @Test
@@ -315,7 +468,7 @@ class InspectionServiceImplWorkflowTest {
         when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
         when(inspectionOrderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        InspectionBuyerRespondRequest acceptReq = new InspectionBuyerRespondRequest("ACCEPT", true, null);
+        InspectionBuyerRespondRequest acceptReq = new InspectionBuyerRespondRequest("ACCEPT", null, true, null);
 
         Instant startedAt = Instant.now();
         service.respondInspectionByBuyer(buyer.getId(), order.getId(), acceptReq);
@@ -399,6 +552,8 @@ class InspectionServiceImplWorkflowTest {
     @DisplayName("WP-7: Người mua từ chối mua tiếp -> settle với PASSED_BUYER_DEFAULTED và hủy đơn")
     void testRejectFinalPurchaseSettlesDefaultAndCancels() {
         order.setStatus(InspectionOrderStatus.PASSED.name());
+        when(inspectionOrderRepository.findPostId(order.getId())).thenReturn(Optional.of(post.getId()));
+        when(postRepository.findByIdForUpdate(post.getId())).thenReturn(Optional.of(post));
 
         when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
         when(inspectionOrderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -409,6 +564,39 @@ class InspectionServiceImplWorkflowTest {
 
         assertEquals(InspectionOrderStatus.CANCELLED.name(), order.getStatus());
         verify(feeSettlementService, times(1)).settle(eq(order), eq(InspectionSettlementOutcome.PASSED_BUYER_DEFAULTED), contains("Tôi đổi ý"));
+    }
+
+    @Test
+    void expiredFinalPaymentSettlesOnlyOnce() {
+        order.setStatus(InspectionOrderStatus.PASSED.name());
+        order.setFinalPaymentDeadline(Instant.now().minusSeconds(30));
+        post.setStatus("RESERVED");
+        when(inspectionOrderRepository.findPostId(order.getId())).thenReturn(Optional.of(post.getId()));
+        when(postRepository.findByIdForUpdate(post.getId())).thenReturn(Optional.of(post));
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+
+        service.processExpiredFinalPayment(order.getId());
+        service.processExpiredFinalPayment(order.getId());
+
+        assertEquals(InspectionOrderStatus.CANCELLED.name(), order.getStatus());
+        assertEquals("ACTIVE", post.getStatus());
+        verify(feeSettlementService).settle(eq(order), eq(InspectionSettlementOutcome.PASSED_BUYER_DEFAULTED), any());
+        verify(inspectionOrderRepository).save(order);
+    }
+
+    @Test
+    void expiredFinalPaymentSkipsAnOrderAlreadyPaid() {
+        order.setStatus(InspectionOrderStatus.PASSED.name());
+        order.setFinalPaymentDeadline(Instant.now().minusSeconds(30));
+        order.setFinalPaymentPaidAt(Instant.now());
+        when(inspectionOrderRepository.findPostId(order.getId())).thenReturn(Optional.of(post.getId()));
+        when(postRepository.findByIdForUpdate(post.getId())).thenReturn(Optional.of(post));
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+
+        service.processExpiredFinalPayment(order.getId());
+
+        verifyNoInteractions(feeSettlementService);
+        verify(inspectionOrderRepository, never()).save(any());
     }
 
     @Test

@@ -11,9 +11,12 @@ import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
 import com.secondlife.secondlife.dto.request.InspectionSealScanRequest;
 import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
+import com.secondlife.secondlife.dto.request.InspectionStartRequest;
 import com.secondlife.secondlife.dto.request.ReviewInspectionAppealRequest;
+import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.request.ShippingAddressRequest;
 import com.secondlife.secondlife.dto.request.ShippingQuoteRequest;
+import com.secondlife.secondlife.dto.response.InspectionCheckInCodeResponse;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.dto.response.InspectionQuoteResponse;
 import com.secondlife.secondlife.dto.response.InspectionSealLogResponse;
@@ -25,6 +28,7 @@ import com.secondlife.secondlife.entity.Negotiation;
 import com.secondlife.secondlife.entity.Order;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.Role;
+import com.secondlife.secondlife.entity.Shipment;
 import com.secondlife.secondlife.entity.ShippingQuote;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.entity.UserProfile;
@@ -47,11 +51,14 @@ import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.integration.ai.AiChatGateway;
+import com.secondlife.secondlife.mapper.InspectionCenterProfileMapper;
 import com.secondlife.secondlife.mapper.InspectionOrderMapper;
 import com.secondlife.secondlife.mapper.InspectionSealLogMapper;
+import com.secondlife.secondlife.mapper.ShippingPayloads;
 import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.InspectionSealLogRepository;
+import com.secondlife.secondlife.repository.InspectionShippingQuoteRepository;
 import com.secondlife.secondlife.repository.NegotiationRepository;
 import com.secondlife.secondlife.repository.OrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
@@ -81,6 +88,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+import tools.jackson.core.JacksonException;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
@@ -93,8 +102,9 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.UUID;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -107,6 +117,7 @@ public class InspectionServiceImpl implements InspectionService {
     private final OrderRepository orderRepository;
     private final NegotiationRepository negotiationRepository;
     private final ShipmentRepository shipments;
+    private final InspectionShippingQuoteRepository inspectionShippingQuotes;
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
@@ -127,10 +138,12 @@ public class InspectionServiceImpl implements InspectionService {
 
     @Qualifier("googleChatGateway")
     private final AiChatGateway googleChatGateway;
+    private final InspectionCenterProfileMapper inspectionCenterProfileMapper;
     private final InspectionOrderMapper inspectionOrderMapper;
     private final InspectionSealLogMapper inspectionSealLogMapper;
 
     private final int approvalTtlHours;
+    private final Pattern evidencePhotoUrl;
     private final BigDecimal buyerCommitmentDepositRate;
     private final BigDecimal buyerCommitmentDepositMax;
 
@@ -140,6 +153,7 @@ public class InspectionServiceImpl implements InspectionService {
             OrderRepository orderRepository,
             NegotiationRepository negotiationRepository,
             ShipmentRepository shipments,
+            InspectionShippingQuoteRepository inspectionShippingQuotes,
             UserRepository userRepository,
             RoleRepository roleRepository,
             PasswordEncoder passwordEncoder,
@@ -157,17 +171,20 @@ public class InspectionServiceImpl implements InspectionService {
             InspectionSealLogRepository inspectionSealLogRepository,
             TamperSealService tamperSealService,
             @Qualifier("googleChatGateway") AiChatGateway googleChatGateway,
+            InspectionCenterProfileMapper inspectionCenterProfileMapper,
             InspectionOrderMapper inspectionOrderMapper,
             InspectionSealLogMapper inspectionSealLogMapper,
             @Value("${app.inspection.approval-ttl-hours:24}") int approvalTtlHours,
             @Value("${app.inspection.buyer-commitment-deposit-rate:0.00}") BigDecimal buyerCommitmentDepositRate,
             @Value("${app.inspection.buyer-commitment-deposit-max:500000}") BigDecimal buyerCommitmentDepositMax,
-            InspectionOrderChecklistService orderChecklists) {
+            InspectionOrderChecklistService orderChecklists,
+            @Value("${app.cloudinary.cloud-name}") String cloudName) {
         this.inspectionOrderRepository = inspectionOrderRepository;
         this.postRepository = postRepository;
         this.orderRepository = orderRepository;
         this.negotiationRepository = negotiationRepository;
         this.shipments = shipments;
+        this.inspectionShippingQuotes = inspectionShippingQuotes;
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
@@ -175,6 +192,8 @@ public class InspectionServiceImpl implements InspectionService {
         this.publication = publication;
         this.inspectionPricingService = inspectionPricingService;
         this.orderChecklists = orderChecklists;
+        this.evidencePhotoUrl = Pattern.compile("https://res\\.cloudinary\\.com/" + Pattern.quote(cloudName)
+                + "/image/upload/(?:v[0-9]+/)?secondlife/inspections/proofs/[0-9a-fA-F-]{36}\\.(?:jpg|jpeg|png|webp)");
         this.walletService = walletService;
         this.commissions = commissions;
         this.shippingQuoteService = shippingQuoteService;
@@ -186,6 +205,7 @@ public class InspectionServiceImpl implements InspectionService {
         this.inspectionSealLogRepository = inspectionSealLogRepository;
         this.tamperSealService = tamperSealService;
         this.googleChatGateway = googleChatGateway;
+        this.inspectionCenterProfileMapper = inspectionCenterProfileMapper;
         this.inspectionOrderMapper = inspectionOrderMapper;
         this.inspectionSealLogMapper = inspectionSealLogMapper;
         this.approvalTtlHours = approvalTtlHours > 0 ? approvalTtlHours : 24;
@@ -577,6 +597,51 @@ public class InspectionServiceImpl implements InspectionService {
             return inspectionOrderMapper.toResponse(saved);
         }
 
+        if ("COUNTER".equals(action)) {
+            if (request.counterFeePayer() == null) {
+                throw new BadRequestException("Cần chỉ định phương án phí đề xuất lại (counterFeePayer)");
+            }
+
+            order.setFeePayer(request.counterFeePayer());
+            BigDecimal totalFee = order.getOrderType() == InspectionOrderType.AT_HOME
+                    ? order.getInspectionFee().add(order.getTravelFee())
+                    : order.getInspectionFee().add(order.getShippingFee()).add(order.getReturnShippingReserveFee());
+
+            switch (request.counterFeePayer()) {
+                case BUYER_PAYS -> {
+                    order.setBuyerFeeShare(totalFee);
+                    order.setSellerFeeShare(BigDecimal.ZERO);
+                }
+                case SELLER_PAYS -> {
+                    order.setBuyerFeeShare(BigDecimal.ZERO);
+                    order.setSellerFeeShare(totalFee);
+                }
+                case SPLIT_50_50 -> {
+                    BigDecimal half = totalFee.divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
+                    order.setBuyerFeeShare(half);
+                    order.setSellerFeeShare(totalFee.subtract(half));
+                }
+            }
+
+            order.setStatus(InspectionOrderStatus.WAITING_SELLER_APPROVAL.name());
+            order.setApprovalDeadline(Instant.now().plus(Duration.ofHours(approvalTtlHours)));
+            order.setNote("Người mua đề xuất lại phương án chia phí: " + request.counterFeePayer());
+            InspectionOrder saved = inspectionOrderRepository.save(order);
+            if (notificationService != null && order.getSeller() != null) {
+                notificationService.notify(
+                        order.getSeller().getId(),
+                        "Người mua đề xuất lại phí kiểm định",
+                        "Người mua đã đề xuất lại phương án kiểm định cho sản phẩm \""
+                                + (order.getPost() != null ? order.getPost().getTitle() : "")
+                                + "\". Vui lòng phản hồi.",
+                        NotificationType.INSPECTION,
+                        order.getId(),
+                        "INSPECTION_ORDER",
+                        "/seller/inspections/" + order.getId());
+            }
+            return inspectionOrderMapper.toResponse(saved);
+        }
+
         if ("ACCEPT".equals(action)) {
             if (request.buyerConsentZin() != null && !request.buyerConsentZin()) {
                 throw new BadRequestException("Bạn cần đồng ý với điều khoản tháo máy kiểm định");
@@ -624,7 +689,7 @@ public class InspectionServiceImpl implements InspectionService {
             return inspectionOrderMapper.toResponse(saved);
         }
 
-        throw new BadRequestException("Hành động không hợp lệ. Phải là ACCEPT hoặc REJECT");
+        throw new BadRequestException("Hành động không hợp lệ. Phải là ACCEPT, REJECT hoặc COUNTER");
     }
 
     @Override
@@ -645,11 +710,18 @@ public class InspectionServiceImpl implements InspectionService {
             throw new ForbiddenException("Chỉ Kỹ thuật viên phụ trách hoặc Người bán mới có quyền đặt lịch hẹn");
         }
 
+        requireEditableInspectionOrder(order);
         requireFundedConfiguredRequest(order);
         if (order.getChecklistSnapshotJson() != null && !Set.of("CONFIRMED_PENDING_DISPATCH", "DISPATCHED", "SCHEDULED").contains(order.getStatus())) {
             throw new ConflictException("Đơn chưa sẵn sàng để đặt lịch kiểm định");
         }
 
+        if (InspectionOrderStatus.INSPECTING.name().equals(order.getStatus()) || order.getHomeCheckedInAt() != null) {
+            throw new ConflictException("Đơn đã bắt đầu kiểm định; không thể đổi lịch");
+        }
+        if (!request.appointmentTime().equals(order.getAppointmentScheduledAt())) {
+            order.setHomeCheckInCode(null);
+        }
         order.setAppointmentScheduledAt(request.appointmentTime());
         order.setStatus(InspectionOrderStatus.SCHEDULED.name());
 
@@ -697,7 +769,76 @@ public class InspectionServiceImpl implements InspectionService {
             throw new ForbiddenException("Bạn không có quyền xem thông tin đơn kiểm định này");
         }
 
-        return inspectionOrderMapper.toResponse(order);
+        return toOrderDetail(order);
+    }
+
+    private InspectionOrderResponse toOrderDetail(InspectionOrder inspection) {
+        Order purchase = inspection.getOrder();
+        List<Shipment> route = shipments.findInspectionRoute(inspection.getId(), purchase == null ? null : purchase.getId());
+        Shipment inbound = latestShipment(route, "SELLER_TO_CENTER");
+        Shipment delivery = latestShipment(route, "CENTER_TO_BUYER");
+        Shipment returning = latestShipment(route, "CENTER_TO_SELLER");
+
+        ShippingAddress sellerContact = shipmentContact(inbound, true);
+        if (sellerContact == null) sellerContact = shipmentContact(returning, false);
+
+        ShippingAddress centerContact = shipmentContact(inbound, false);
+        if (centerContact == null) centerContact = shipmentContact(delivery, true);
+        if (centerContact == null) centerContact = shipmentContact(returning, true);
+
+        if ((sellerContact == null || centerContact == null) && inspection.getInspectionShippingQuoteId() != null) {
+            var quote = inspectionShippingQuotes.findById(inspection.getInspectionShippingQuoteId()).orElse(null);
+            if (quote != null) {
+                var quotedRoute = objectMapper.readTree(quote.getOutboundPayload());
+                if (sellerContact == null) sellerContact = ShippingPayloads.storedAddress(quotedRoute, "from");
+                if (centerContact == null) centerContact = ShippingPayloads.storedAddress(quotedRoute, "to");
+            }
+        }
+
+        User seller = inspection.getSeller() != null ? inspection.getSeller() : inspection.getPost().getUser();
+        if (sellerContact == null && seller != null) sellerContact = shippingQuoteService.pickup(seller.getId());
+        if (centerContact == null && inspection.getInspectionCenter() != null) {
+            centerContact = inspectionCenterProfileMapper.toShippingAddress(inspection.getInspectionCenter().getProfile());
+        }
+
+        ShippingAddress buyerContact = shipmentContact(delivery, false);
+        if (buyerContact == null && purchase != null) buyerContact = readShippingContact(purchase.getDeliveryAddress());
+        if (buyerContact == null) buyerContact = readShippingContact(inspection.getBuyerDeliveryAddressJson());
+
+        return inspectionOrderMapper.toResponse(inspection, withProfilePhone(sellerContact, seller),
+                withProfilePhone(buyerContact, inspection.getBuyer()), centerContact);
+    }
+
+    private Shipment latestShipment(List<Shipment> route, String leg) {
+        return route.reversed().stream().filter(shipment -> leg.equals(shipment.getLeg())).findFirst().orElse(null);
+    }
+
+    private ShippingAddress shipmentContact(Shipment shipment, boolean sender) {
+        if (shipment == null) return null;
+        String address = sender ? shipment.getSenderAddress() : shipment.getReceiverAddress();
+        if (!StringUtils.hasText(address)) return null;
+        return sender
+                ? new ShippingAddress(shipment.getSenderName(), shipment.getSenderPhone(), address, null, null)
+                : new ShippingAddress(shipment.getReceiverName(), shipment.getReceiverPhone(), address, null, null);
+    }
+
+    private ShippingAddress readShippingContact(String json) {
+        if (!StringUtils.hasText(json)) return null;
+        try {
+            return objectMapper.readValue(json, ShippingAddress.class);
+        } catch (JacksonException exception) {
+            log.warn("Invalid stored inspection delivery address");
+            return null;
+        }
+    }
+
+    private ShippingAddress withProfilePhone(ShippingAddress contact, User user) {
+        if (user == null || user.getProfile() == null || (contact != null && StringUtils.hasText(contact.phone()))) {
+            return contact;
+        }
+        String phone = user.getProfile().getPhone();
+        if (contact == null) return new ShippingAddress(null, phone, null, null, null);
+        return new ShippingAddress(contact.name(), phone, contact.address(), contact.latitude(), contact.longitude());
     }
 
     @Override
@@ -724,11 +865,7 @@ public class InspectionServiceImpl implements InspectionService {
     @Transactional
     public InspectionOrderResponse confirmFinalPurchase(UUID buyerId, UUID orderId,
             ConfirmInspectionPurchaseRequest request) {
-        Post post = postRepository.findByIdForUpdate(
-                inspectionOrderRepository.findById(orderId)
-                        .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"))
-                        .getPost().getId())
-                .orElseThrow(() -> new NotFoundException("Bài đăng không tồn tại"));
+        Post post = lockPostForFinalDecision(orderId);
 
         InspectionOrder order = inspectionOrderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
@@ -851,6 +988,7 @@ public class InspectionServiceImpl implements InspectionService {
     @Transactional
     public InspectionOrderResponse rejectFinalPurchase(UUID buyerId, UUID orderId,
             InspectionRejectPurchaseRequest request) {
+        lockPostForFinalDecision(orderId);
         InspectionOrder order = inspectionOrderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
 
@@ -978,14 +1116,25 @@ public class InspectionServiceImpl implements InspectionService {
                 || !order.getInspectionCenter().getId().equals(inspector.getManager().getId()))) {
             throw new ForbiddenException("Kỹ thuật viên phải thuộc trung tâm đã chốt trong đơn");
         }
+        requireEditableInspectionOrder(order);
         requireFundedConfiguredRequest(order);
         if (order.getChecklistSnapshotJson() != null && order.getInspectionScope() == InspectionScope.BUYER_REQUEST
                 && !Set.of("CONFIRMED_PENDING_DISPATCH", "DISPATCHED", "SCHEDULED", "SHIPPING_TO_CENTER", "INSPECTING").contains(order.getStatus())) {
             throw new ConflictException("Đơn chưa sẵn sàng để phân công kiểm định");
         }
 
+        boolean firstAssignment = order.getInspector() == null;
+        if (order.getOrderType() == InspectionOrderType.AT_HOME
+                && (firstAssignment || !inspectorId.equals(order.getInspector().getId()))) {
+            if (order.getHomeCheckedInAt() != null) {
+                throw new ConflictException("Kỹ thuật viên đã check-in; không thể đổi người phụ trách");
+            }
+            order.setHomeCheckInCode(null);
+        }
         order.setInspector(inspector);
-        order.setStatus(InspectionOrderStatus.DISPATCHED.name());
+        if (!InspectionOrderStatus.INSPECTING.name().equals(order.getStatus())) {
+            order.setStatus(InspectionOrderStatus.DISPATCHED.name());
+        }
 
         InspectionOrder saved = inspectionOrderRepository.save(order);
         log.info("Assigned inspector {} to inspection order {}", inspectorId, orderId);
@@ -1000,6 +1149,22 @@ public class InspectionServiceImpl implements InspectionService {
                     order.getId(),
                     "INSPECTION_ORDER",
                     "/inspector/orders/" + order.getId());
+
+            if (firstAssignment) {
+                String title = order.getOrderType() == InspectionOrderType.AT_HOME
+                        ? "Đã phân công kỹ thuật viên kiểm định" : "Đơn đang kiểm định";
+                String message = "Trung tâm đã phân công kỹ thuật viên cho đơn kiểm định.";
+                if (order.getBuyer() != null) {
+                    notificationService.notifyInApp(order.getBuyer().getId(), title, message,
+                            NotificationType.INSPECTION, order.getId(), "INSPECTION_ORDER",
+                            "/buyer/inspections/" + order.getId());
+                }
+                if (order.getSeller() != null) {
+                    notificationService.notifyInApp(order.getSeller().getId(), title, message,
+                            NotificationType.INSPECTION, order.getId(), "INSPECTION_ORDER",
+                            "/seller/inspections/" + order.getId());
+                }
+            }
         }
 
         return inspectionOrderMapper.toResponse(saved);
@@ -1007,18 +1172,57 @@ public class InspectionServiceImpl implements InspectionService {
 
     @Override
     @Transactional
-    public InspectionOrderResponse startInspection(UUID actorId, UUID orderId) {
+    public InspectionCheckInCodeResponse getOrCreateHomeCheckInCode(UUID sellerId, UUID orderId) {
+        InspectionOrder order = inspectionOrderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
+        if (order.getSeller() == null || !sellerId.equals(order.getSeller().getId())) {
+            throw new ForbiddenException("Chỉ người bán của đơn kiểm định mới được lấy mã check-in");
+        }
+        requireHomeCheckInReady(order);
+        if (order.getHomeCheckInCode() == null) {
+            order.setHomeCheckInCode(UUID.randomUUID());
+        }
+        return new InspectionCheckInCodeResponse(order.getHomeCheckInCode(), order.getAppointmentScheduledAt());
+    }
+
+    private void requireHomeCheckInReady(InspectionOrder order) {
+        if (order.getOrderType() != InspectionOrderType.AT_HOME) {
+            throw new ConflictException("Mã check-in chỉ áp dụng cho kiểm định tại nhà");
+        }
+        if (!Set.of("SCHEDULED", "DISPATCHED").contains(order.getStatus())
+                || order.getAppointmentScheduledAt() == null || order.getInspector() == null) {
+            throw new ConflictException("Đơn cần có lịch hẹn và kỹ thuật viên được phân công để check-in");
+        }
+        requireInspectionFeesPaid(order);
+    }
+
+    @Override
+    @Transactional
+    public InspectionOrderResponse startInspection(UUID actorId, UUID orderId, InspectionStartRequest request) {
         InspectionOrder order = inspectionOrderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
 
+        requireEditableInspectionOrder(order);
         requireFundedConfiguredRequest(order);
         boolean alreadyStarted = InspectionOrderStatus.INSPECTING.name().equals(order.getStatus());
         if (alreadyStarted && order.getInspector() != null && actorId.equals(order.getInspector().getId())) {
             return inspectionOrderMapper.toResponse(order);
         }
-        assignActorForInspectionWork(order, actorId);
-        if (order.getChecklistSnapshotJson() != null && !Set.of("DISPATCHED", "SCHEDULED", "INSPECTING").contains(order.getStatus())) {
-            throw new ConflictException("Đơn chưa được phân công hoặc đã kết thúc kiểm định");
+        if (order.getOrderType() == InspectionOrderType.AT_HOME) {
+            requireAssignedHomeInspector(order, actorId);
+            requireHomeCheckInReady(order);
+            if (request == null || request.checkInCode() == null
+                    || !request.checkInCode().equals(order.getHomeCheckInCode())) {
+                throw new BadRequestException("Mã check-in của người bán không hợp lệ");
+            }
+            order.setHomeCheckedInAt(Instant.now());
+            order.setHomeCheckInCode(null);
+        } else {
+            assignActorForInspectionWork(order, actorId);
+            if (order.getChecklistSnapshotJson() != null
+                    && !Set.of("DISPATCHED", "SCHEDULED", "INSPECTING").contains(order.getStatus())) {
+                throw new ConflictException("Đơn chưa được phân công hoặc đã kết thúc kiểm định");
+            }
         }
 
         order.setStatus(InspectionOrderStatus.INSPECTING.name());
@@ -1052,6 +1256,13 @@ public class InspectionServiceImpl implements InspectionService {
         return inspectionOrderMapper.toResponse(saved);
     }
 
+    private void requireEditableInspectionOrder(InspectionOrder order) {
+        if (Set.of("PASSED", "FAILED", "COMPLETED", "DELIVERING_TO_BUYER", "DISPUTED",
+                "CANCELLED", "PAYMENT_EXPIRED").contains(order.getStatus())) {
+            throw new ConflictException("Đơn kiểm định đã kết thúc; không thể chỉnh sửa hồ sơ kiểm định");
+        }
+    }
+
     @Override
     @Transactional
     public InspectionOrderResponse submitResult(UUID orderId, UUID inspectorId, InspectionResultRequest request) {
@@ -1062,7 +1273,14 @@ public class InspectionServiceImpl implements InspectionService {
             requireInspectionWorkActor(order, inspectorId);
             return inspectionOrderMapper.toResponse(order);
         }
-        assignActorForInspectionWork(order, inspectorId);
+        if (order.getOrderType() == InspectionOrderType.AT_HOME) {
+            requireAssignedHomeInspector(order, inspectorId);
+            if (!InspectionOrderStatus.INSPECTING.name().equals(order.getStatus())) {
+                throw new ConflictException("Kỹ thuật viên cần quét mã check-in trước khi nộp biên bản tại nhà");
+            }
+        } else {
+            assignActorForInspectionWork(order, inspectorId);
+        }
 
         if (!Set.of(InspectionOrderStatus.INSPECTING.name(), "SCHEDULED", "DISPATCHED", "WAITING_INSPECTION", "CONFIRMED_PENDING_DISPATCH", "RECEIVED_AT_CENTER", "AWAITING_INSPECTION").contains(order.getStatus())) {
             throw new ConflictException(
@@ -1074,7 +1292,9 @@ public class InspectionServiceImpl implements InspectionService {
         order.setConditionScore(request.conditionScore());
         order.setConditionGrade(request.conditionGrade());
 
-        if (request.tamperSealId() != null && !request.tamperSealId().isBlank()) {
+        storeInspectionPhotos(order, request.evidencePhotoUrls());
+        if (order.getOrderType() != InspectionOrderType.AT_CENTER
+                && request.tamperSealId() != null && !request.tamperSealId().isBlank()) {
             order.setTamperSealId(request.tamperSealId().trim());
         }
 
@@ -1286,8 +1506,32 @@ public class InspectionServiceImpl implements InspectionService {
         throw new ForbiddenException("Đơn kiểm định không thuộc phạm vi của kỹ thuật viên");
     }
 
+    private void requireAssignedHomeInspector(InspectionOrder order, UUID actorId) {
+        if (order.getInspector() == null || !actorId.equals(order.getInspector().getId())) {
+            throw new ForbiddenException("Chỉ kỹ thuật viên được phân công mới có thể kiểm định tại nhà");
+        }
+    }
+
+    private void storeInspectionPhotos(InspectionOrder order, List<String> photos) {
+        if (photos == null || photos.isEmpty()) {
+            if (order.getOrderType() == InspectionOrderType.AT_CENTER) {
+                throw new BadRequestException("Cần ít nhất một ảnh bằng chứng đã tải lên để nộp biên bản tại trung tâm");
+            }
+            return;
+        }
+        if (photos.size() > 10 || photos.stream().anyMatch(url -> url == null || url.length() > 2048
+                || !evidencePhotoUrl.matcher(url).matches())) {
+            throw new BadRequestException("Chỉ chấp nhận tối đa 10 URL ảnh từ thư mục ảnh kiểm định đã tải lên");
+        }
+        order.setEvidencePhotoUrls(photos.stream().distinct().toList());
+    }
+
     private void requireFundedConfiguredRequest(InspectionOrder order) {
         if (order.getChecklistSnapshotJson() == null || order.getInspectionScope() != InspectionScope.BUYER_REQUEST) return;
+        requireInspectionFeesPaid(order);
+    }
+
+    private void requireInspectionFeesPaid(InspectionOrder order) {
         BigDecimal buyerFee = order.getBuyerFeeShare() == null ? BigDecimal.ZERO : order.getBuyerFeeShare();
         BigDecimal sellerFee = order.getSellerFeeShare() == null ? BigDecimal.ZERO : order.getSellerFeeShare();
         BigDecimal deposit = order.getBuyerCommitmentDeposit() == null ? BigDecimal.ZERO : order.getBuyerCommitmentDeposit();
@@ -1295,6 +1539,45 @@ public class InspectionServiceImpl implements InspectionService {
                 || (sellerFee.signum() > 0 && order.getSellerPaidAt() == null)) {
             throw new ConflictException("Cần hoàn tất thanh toán phí trước khi thực hiện kiểm định");
         }
+    }
+
+    @Override
+    @Transactional
+    public void processExpiredFinalPayment(UUID orderId) {
+        lockPostForFinalDecision(orderId);
+        InspectionOrder order = inspectionOrderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
+        Instant deadline = order.getFinalPaymentDeadline();
+        if (!InspectionOrderStatus.PASSED.name().equals(order.getStatus())
+                || order.getFinalPaymentPaidAt() != null || deadline == null || !deadline.isBefore(Instant.now())) {
+            return;
+        }
+
+        String reason = "Người mua không thanh toán tiền hàng trong vòng 6 giờ sau khi kiểm định đạt chuẩn.";
+        order.setStatus(InspectionOrderStatus.CANCELLED.name());
+        order.setNote((order.getNote() != null ? order.getNote() + " | " : "") + reason);
+        feeSettlementService.settle(order, InspectionSettlementOutcome.PASSED_BUYER_DEFAULTED, reason);
+        restorePostStatusAfterInspectionEnd(order);
+        inspectionOrderRepository.save(order);
+        log.info("Expired final payment for inspection order {}", orderId);
+
+        if (notificationService != null) {
+            if (order.getSeller() != null) {
+                notificationService.notify(order.getSeller().getId(), "Đơn kiểm định đã hủy do quá hạn thanh toán",
+                        reason, NotificationType.ORDER, orderId, "INSPECTION_ORDER", "/seller/inspections/" + orderId);
+            }
+            if (order.getBuyer() != null) {
+                notificationService.notify(order.getBuyer().getId(), "Đơn kiểm định đã bị hủy do quá hạn thanh toán",
+                        reason, NotificationType.ORDER, orderId, "INSPECTION_ORDER", "/buyer/inspections/" + orderId);
+            }
+        }
+    }
+
+    private Post lockPostForFinalDecision(UUID orderId) {
+        UUID postId = inspectionOrderRepository.findPostId(orderId)
+                .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
+        return postRepository.findByIdForUpdate(postId)
+                .orElseThrow(() -> new NotFoundException("Bài đăng không tồn tại"));
     }
 
     private void restorePostStatusAfterInspectionEnd(InspectionOrder order) {
@@ -1499,6 +1782,10 @@ public class InspectionServiceImpl implements InspectionService {
         if (order.getTamperSealId() != null && !order.getTamperSealId().isBlank()) {
             return order.getTamperSealId();
         }
+        if (order.getOrderType() == InspectionOrderType.AT_CENTER) {
+            throw new ConflictException("Biên bản kiểm định tại trung tâm sử dụng ảnh bằng chứng");
+        }
+        requireEditableInspectionOrder(order);
         String newSeal = tamperSealService.generateSealCode();
         order.setTamperSealId(newSeal);
         inspectionOrderRepository.save(order);

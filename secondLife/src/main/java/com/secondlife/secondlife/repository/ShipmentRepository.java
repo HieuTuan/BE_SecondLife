@@ -11,6 +11,14 @@ public interface ShipmentRepository extends JpaRepository<Shipment,UUID>, Refres
     Optional<Shipment> findByIdForUpdate(@Param("id") UUID id);
     List<Shipment> findByOrderIdOrderByCreatedAtAsc(UUID id);
     List<Shipment> findByInspectionOrderIdOrderByCreatedAtAsc(UUID id);
+    @Query("""
+            select s from Shipment s
+            where s.inspectionOrderId = :inspectionId
+               or (s.inspectionOrderId is null and s.orderId = :orderId and s.leg = 'CENTER_TO_BUYER')
+            order by s.createdAt, s.id
+            """)
+    List<Shipment> findInspectionRoute(@Param("inspectionId") UUID inspectionId, @Param("orderId") UUID orderId);
+
     Optional<Shipment> findByOrderCode(String code);
     Optional<Shipment> findByProviderAndOrderCode(String provider, String code);
     Optional<Shipment> findByClientOrderCode(String code);

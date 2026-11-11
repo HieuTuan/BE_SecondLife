@@ -201,7 +201,7 @@ class InspectorControllerTest {
                 .status("INSPECTING")
                 .build();
 
-        when(inspectionService.startInspection(eq(inspectorId), eq(orderId))).thenReturn(response);
+        when(inspectionService.startInspection(eq(inspectorId), eq(orderId), eq(null))).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/inspector/orders/" + orderId + "/start"))
                 .andExpect(status().isOk())

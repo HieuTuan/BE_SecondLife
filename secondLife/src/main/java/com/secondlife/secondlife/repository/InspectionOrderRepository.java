@@ -24,6 +24,9 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
     @Query("select o.post.user.id from InspectionOrder o where o.id = :id")
     Optional<UUID> findOwnerId(@Param("id") UUID id);
 
+    @Query("select o.post.id from InspectionOrder o where o.id = :id")
+    Optional<UUID> findPostId(@Param("id") UUID id);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from InspectionOrder o where o.id = :id")
     Optional<InspectionOrder> findByIdForUpdate(@Param("id") UUID id);
@@ -85,8 +88,8 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
     @Query("SELECT o FROM InspectionOrder o WHERE o.status = 'WAITING_FEE_PAYMENT' AND o.paymentDeadline IS NOT NULL AND o.paymentDeadline < :now")
     List<InspectionOrder> findExpiredUnpaidOrders(@Param("now") Instant now);
 
-    @Query("SELECT o FROM InspectionOrder o WHERE o.status = 'PASSED' AND o.finalPaymentDeadline IS NOT NULL AND o.finalPaymentDeadline < :now AND o.finalPaymentPaidAt IS NULL")
-    List<InspectionOrder> findExpiredFinalPaymentOrders(@Param("now") Instant now);
+    @Query("SELECT o.id FROM InspectionOrder o WHERE o.status = 'PASSED' AND o.finalPaymentDeadline IS NOT NULL AND o.finalPaymentDeadline < :now AND o.finalPaymentPaidAt IS NULL")
+    List<UUID> findExpiredFinalPaymentOrderIds(@Param("now") Instant now);
 
     @Query("SELECT o FROM InspectionOrder o WHERE o.status = 'FAILED' AND o.appealStatus = com.secondlife.secondlife.enums.InspectionAppealStatus.NONE AND o.reputationPenaltyApplied = false AND o.appealDeadline IS NOT NULL AND o.appealDeadline < :now")
     List<InspectionOrder> findExpiredAppeals(@Param("now") Instant now);

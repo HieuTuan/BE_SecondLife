@@ -46,6 +46,18 @@ public class Shipment {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String payload;
     @Column(columnDefinition = "TEXT")
+    private String senderName;
+    @Column(columnDefinition = "TEXT")
+    private String senderPhone;
+    @Column(columnDefinition = "TEXT")
+    private String senderAddress;
+    @Column(columnDefinition = "TEXT")
+    private String receiverName;
+    @Column(columnDefinition = "TEXT")
+    private String receiverPhone;
+    @Column(columnDefinition = "TEXT")
+    private String receiverAddress;
+    @Column(columnDefinition = "TEXT")
     private String reason;
     private UUID requestedBy;
     @Column(precision = 18, scale = 2)

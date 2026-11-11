@@ -7,6 +7,7 @@ import com.secondlife.secondlife.dto.request.ShippingDecisionRequest;
 import com.secondlife.secondlife.dto.request.ShippingParcel;
 import com.secondlife.secondlife.dto.response.ShipmentEventResponse;
 import com.secondlife.secondlife.dto.response.ShipmentResponse;
+import com.secondlife.secondlife.dto.response.InspectionReturnQuoteResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.ShipmentService;
@@ -62,14 +63,25 @@ public class ShipmentController {
         boolean operator = staff();
         boolean center = SecurityContextHolder.getContext().getAuthentication().getAuthorities().stream()
                 .anyMatch(a -> "ROLE_INSPECTION_CENTER".equals(a.getAuthority()));
-        if (!operator && center && "CENTER_TO_BUYER".equals(body.leg())) {
+        if (center && ("CENTER_TO_BUYER".equals(body.leg()) || "CENTER_TO_SELLER".equals(body.leg()))) {
             return ApiResponse.success(shipments.createCenterDelivery(actorId, inspectionId, body));
         }
         return ApiResponse.success(shipments.createForInspection(actorId, operator, inspectionId, body));
     }
+    @PostMapping("/inspection-orders/{inspectionId}/shipments/return-quote")
+    @PreAuthorize("hasRole('INSPECTION_CENTER')")
+    public ApiResponse<InspectionReturnQuoteResponse> returnQuote(@AuthenticationPrincipal CustomUserDetails user,
+                                                                  @PathVariable UUID inspectionId) {
+        return ApiResponse.success(shipments.quoteCenterReturn(actor(user), inspectionId));
+    }
+
     @GetMapping("/inspection-orders/{inspectionId}/shipments")
-    public ApiResponse<List<ShipmentResponse>> inspection(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID inspectionId) {
-        return ApiResponse.success(shipments.inspectionShipments(actor(user),staff(),inspectionId));
+    public ApiResponse<List<ShipmentResponse>> inspection(
+            @AuthenticationPrincipal CustomUserDetails user, @PathVariable UUID inspectionId) {
+        UUID actorId = actor(user);
+        boolean center = user.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_INSPECTION_CENTER".equals(authority.getAuthority()));
+        return ApiResponse.success(shipments.inspectionShipments(actorId, staff(), center, inspectionId));
     }
     @GetMapping("/shipments/{shipmentId}/events")
     public ApiResponse<List<ShipmentEventResponse>> events(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID shipmentId) {

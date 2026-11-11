@@ -9,6 +9,7 @@ import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.entity.UserProfile;
 import com.secondlife.secondlife.enums.AccountStatus;
 import com.secondlife.secondlife.enums.InspectionOrderType;
+import com.secondlife.secondlife.enums.InspectionScope;
 import com.secondlife.secondlife.integration.shipping.ShippingProviderRouter;
 import com.secondlife.secondlife.repository.CategoryRepository;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
@@ -52,6 +53,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -330,6 +332,115 @@ class InspectionCenterProfileIntegrationTest {
     }
 
     @Test
+    void homeCheckInPersistsOnceAndKeepsCodeOutOfOrderDetails() throws Exception {
+        InspectionOrder order = inspection(null);
+        order.setOrderType(InspectionOrderType.AT_HOME);
+        order.setStatus("SCHEDULED");
+        order.setAppointmentScheduledAt(Instant.now().plusSeconds(300));
+        User inspector = assignInspector(order, center);
+        String path = "/api/v1/inspection/orders/" + order.getId();
+        String start = "/api/v1/inspector/orders/" + order.getId() + "/start";
+
+        var issued = mvc.perform(post(path + "/check-in-code").header("Authorization", auth(seller)))
+                .andExpect(status().isOk()).andReturn();
+        UUID code = UUID.fromString(json.readTree(issued.getResponse().getContentAsString())
+                .path("data").path("code").asText());
+        entityManager.flush();
+        entityManager.clear();
+        assertEquals(code, inspections.findById(order.getId()).orElseThrow().getHomeCheckInCode());
+        mvc.perform(get(path).header("Authorization", auth(seller)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.homeCheckInCode").doesNotExist())
+                .andExpect(jsonPath("$.customerStatus").value("SCHEDULED"));
+        mvc.perform(post(start).header("Authorization", auth(inspector)))
+                .andExpect(status().isBadRequest());
+
+        var scan = json.writeValueAsString(Map.of("checkInCode", code));
+        mvc.perform(post(start).header("Authorization", auth(inspector))
+                        .contentType(MediaType.APPLICATION_JSON).content(scan))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("INSPECTING"))
+                .andExpect(jsonPath("$.homeCheckedInAt").isNotEmpty());
+        entityManager.flush();
+        entityManager.clear();
+        var checkedIn = inspections.findById(order.getId()).orElseThrow();
+        assertNotNull(checkedIn.getHomeCheckedInAt());
+        assertNull(checkedIn.getHomeCheckInCode());
+    }
+
+    @Test
+    void centerResultPersistsPhotosWithoutNewSeal() throws Exception {
+        InspectionOrder order = inspection(center);
+        order.setInspectionScope(InspectionScope.PRE_LISTING);
+        order.setStatus("INSPECTING");
+        User inspector = assignInspector(order, center);
+        String photo = "https://res.cloudinary.com/test-cloud/image/upload/v123/secondlife/inspections/proofs/"
+                + "781527ed-cfd8-4573-bb08-ad981683c50e.jpg";
+        var body = Map.of("status", "FAILED", "note", "Không đạt", "tamperSealId", "unused",
+                "evidencePhotoUrls", List.of(photo));
+
+        mvc.perform(post("/api/v1/inspector/orders/" + order.getId() + "/result")
+                        .header("Authorization", auth(inspector))
+                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.evidencePhotoUrls[0]").value(photo))
+                .andExpect(jsonPath("$.tamperSealId").doesNotExist());
+        entityManager.flush();
+        entityManager.clear();
+        assertEquals(List.of(photo), inspections.findById(order.getId()).orElseThrow().getEvidencePhotoUrls());
+    }
+
+    @Test
+    void assignedCenterCanReadSellerToCenterShipment() throws Exception {
+        update(center, profileBody()).andExpect(status().isOk());
+        InspectionOrder order = inspection(center);
+        mockCarrier();
+        book(order, seller, shipmentBody(UUID.randomUUID())).andExpect(status().isOk());
+
+        readShipments(order, center).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].leg").value("SELLER_TO_CENTER"))
+                .andExpect(jsonPath("$.data[0].providerStatus").value("ASSIGNING_DRIVER"));
+    }
+
+    @Test
+    void explicitCenterTakesPrecedenceOverAssignedInspectorsManager() throws Exception {
+        InspectionOrder order = inspection(otherCenter);
+        assignInspector(order, center);
+
+        readShipments(order, center).andExpect(status().isForbidden());
+        readShipments(order, otherCenter).andExpect(status().isOk());
+    }
+
+    @Test
+    void legacyInspectionShipmentIsReadableByAssignedInspectorsCenter() throws Exception {
+        InspectionOrder order = inspection(null);
+        assignInspector(order, center);
+        Map<String, Object> request = shipmentBody(UUID.randomUUID());
+        request.put("toAddress", Map.of("name", "Legacy center", "phone", "0912345678",
+                "latitude", 10.73, "longitude", 106.705));
+        when(geocoding.shipping(any())).thenReturn(new ShippingAddress("Legacy center", "0912345678", "Verified address",
+                new BigDecimal("10.73"), new BigDecimal("106.705")));
+        mockCarrier();
+        book(order, staff, request).andExpect(status().isOk());
+
+        readShipments(order, center).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].leg").value("SELLER_TO_CENTER"))
+                .andExpect(jsonPath("$.data[0].providerStatus").value("ASSIGNING_DRIVER"));
+        readShipments(order, otherCenter).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void legacyInspectionWithoutAnIdentifiedCenterIsForbiddenToCenter() throws Exception {
+        InspectionOrder order = inspection(null);
+        readShipments(order, center).andExpect(status().isForbidden());
+
+        assignInspector(order, null);
+        readShipments(order, center).andExpect(status().isForbidden());
+        readShipments(order, staff).andExpect(status().isOk());
+        readShipments(order, seller).andExpect(status().isOk());
+    }
+
+    @Test
     void centerProfileUpdateDoesNotGrantShipmentBookingPermissions() throws Exception {
         update(center, profileBody()).andExpect(status().isOk());
         book(inspection(center), center, shipmentBody(UUID.randomUUID())).andExpect(status().isForbidden());
@@ -481,6 +592,20 @@ class InspectionCenterProfileIntegrationTest {
     private ResultActions book(InspectionOrder inspection, User user, Map<String, Object> body) throws Exception {
         return mvc.perform(post("/api/v1/inspection-orders/" + inspection.getId() + "/shipments")
                 .header("Authorization", auth(user)).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body)));
+    }
+
+    private ResultActions readShipments(InspectionOrder inspection, User user) throws Exception {
+        return mvc.perform(get("/api/v1/inspection-orders/" + inspection.getId() + "/shipments")
+                .header("Authorization", auth(user)));
+    }
+
+    private User assignInspector(InspectionOrder order, User manager) {
+        User inspector = actor("INSPECTOR");
+        inspector.setManager(manager);
+        users.saveAndFlush(inspector);
+        order.setInspector(inspector);
+        inspections.saveAndFlush(order);
+        return inspector;
     }
 
     private Map<String, Object> profileBody() {

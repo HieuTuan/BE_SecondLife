@@ -121,6 +121,70 @@ class InspectionOrderListIntegrationTest {
         assertEquals(2, buyerRequest.postImageUrls().size());
     }
 
+    @Test
+    void detailAndShipmentsReturnTheBookedRouteIncludingLegacyBuyerDelivery() throws Exception {
+        UUID purchaseId = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO orders(id, post_id, buyer_id, seller_id, final_price, status, escrow_status,
+                                   delivery_address, created_at, updated_at)
+                SELECT ?, post_id, buyer_id, seller_id, 1000000, 'PROCESSING', 'HELD',
+                       '{"name":"Buyer","phone":"0933333333","address":"Checkout address"}', now(), now()
+                FROM inspection_orders WHERE id = ?
+                """, purchaseId, buyerRequestId);
+        jdbc.update("UPDATE inspection_orders SET order_id = ? WHERE id = ?", purchaseId, buyerRequestId);
+
+        UUID inboundId = UUID.randomUUID();
+        UUID deliveryId = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO shipments(id, inspection_order_id, seller_id, buyer_id, leg, request_id, client_order_code,
+                    order_code, status, provider_status, payload, actual_fee, share_link,
+                    sender_name, sender_phone, sender_address, receiver_name, receiver_phone, receiver_address,
+                    created_at, updated_at)
+                SELECT ?, id, seller_id, buyer_id, 'SELLER_TO_CENTER', ?, ?, '3625397522753344417',
+                    'DELIVERED', 'COMPLETED', '{}', 32000, 'https://example.test/track/inbound',
+                    'Seller', '0911111111', 'Seller pickup', 'Hub Lab', '0922222222', 'Hub address',
+                    now() - interval '1 hour', now()
+                FROM inspection_orders WHERE id = ?
+                """, inboundId, UUID.randomUUID(), "SL" + inboundId, buyerRequestId);
+        jdbc.update("""
+                INSERT INTO shipments(id, order_id, seller_id, buyer_id, leg, request_id, client_order_code,
+                    status, payload, sender_name, sender_phone, sender_address, receiver_name, receiver_phone,
+                    receiver_address, created_at, updated_at)
+                SELECT ?, id, seller_id, buyer_id, 'CENTER_TO_BUYER', ?, ?, 'ASSIGNED', '{}',
+                    'Hub Lab', '0922222222', 'Hub address', 'Buyer', '0933333333', 'Booked delivery', now(), now()
+                FROM orders WHERE id = ?
+                """, deliveryId, UUID.randomUUID(), "SL" + deliveryId, purchaseId);
+
+        mvc.perform(get("/api/v1/inspection/orders/{id}", buyerRequestId).header("Authorization", authorization))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sellerName").value("Seller"))
+                .andExpect(jsonPath("$.sellerPhone").value("0911111111"))
+                .andExpect(jsonPath("$.sellerAddress").value("Seller pickup"))
+                .andExpect(jsonPath("$.buyerName").value("Buyer"))
+                .andExpect(jsonPath("$.buyerPhone").value("0933333333"))
+                .andExpect(jsonPath("$.buyerAddress").value("Booked delivery"))
+                .andExpect(jsonPath("$.inspectionCenterId").value(centerId.toString()))
+                .andExpect(jsonPath("$.inspectionCenterName").value("Hub Lab"))
+                .andExpect(jsonPath("$.inspectionCenterPhone").value("0922222222"))
+                .andExpect(jsonPath("$.inspectionCenterAddress").value("Hub address"));
+
+        mvc.perform(get("/api/v1/inspection-orders/{id}/shipments", buyerRequestId)
+                        .header("Authorization", authorization))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].id").value(inboundId.toString()))
+                .andExpect(jsonPath("$.data[0].shipmentId").value(inboundId.toString()))
+                .andExpect(jsonPath("$.data[0].orderCode").value("3625397522753344417"))
+                .andExpect(jsonPath("$.data[0].senderAddress").value("Seller pickup"))
+                .andExpect(jsonPath("$.data[0].receiverAddress").value("Hub address"))
+                .andExpect(jsonPath("$.data[0].actualFee").value(32000))
+                .andExpect(jsonPath("$.data[0].providerStatus").value("COMPLETED"))
+                .andExpect(jsonPath("$.data[0].trackingUrl").value("https://example.test/track/inbound"))
+                .andExpect(jsonPath("$.data[1].id").value(deliveryId.toString()))
+                .andExpect(jsonPath("$.data[1].senderAddress").value("Hub address"))
+                .andExpect(jsonPath("$.data[1].receiverAddress").value("Booked delivery"));
+    }
+
     private UUID inspection(UUID seller, UUID buyer, String scope, String status) {
         UUID post = UUID.randomUUID();
         UUID order = UUID.randomUUID();

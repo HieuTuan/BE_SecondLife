@@ -4,6 +4,7 @@ import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
+import com.secondlife.secondlife.dto.request.InspectionStartRequest;
 import com.secondlife.secondlife.dto.response.InspectionChecklistResponse;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
@@ -100,9 +101,10 @@ public class InspectorController {
     @Operation(summary = "Kỹ thuật viên bắt đầu tiến hành kiểm định sản phẩm (chuyển trạng thái sang INSPECTING)")
     public ResponseEntity<InspectionOrderResponse> startInspection(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @PathVariable UUID orderId) {
+            @PathVariable UUID orderId,
+            @Valid @RequestBody(required = false) InspectionStartRequest request) {
         UUID inspectorId = currentUserProvider.resolveUserId(userDetails);
-        return ResponseEntity.ok(inspectionService.startInspection(inspectorId, orderId));
+        return ResponseEntity.ok(inspectionService.startInspection(inspectorId, orderId, request));
     }
 
     @PostMapping(value = {"/orders/{orderId}/result", "/orders/{orderId}/submit-report"})

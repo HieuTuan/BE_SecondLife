@@ -22,9 +22,12 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -146,6 +149,16 @@ public class InspectionOrder {
 
     @Column(name = "appointment_scheduled_at")
     private Instant appointmentScheduledAt;
+
+    @Column(name = "home_check_in_code")
+    private UUID homeCheckInCode;
+
+    @Column(name = "home_checked_in_at")
+    private Instant homeCheckedInAt;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "evidence_photo_urls", columnDefinition = "jsonb")
+    private List<String> evidencePhotoUrls;
 
     @Column(name = "buyer_delivery_address_json", columnDefinition = "TEXT")
     private String buyerDeliveryAddressJson;

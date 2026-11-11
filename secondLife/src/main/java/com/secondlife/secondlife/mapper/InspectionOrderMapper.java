@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.mapper;
 
 import com.secondlife.secondlife.config.MapStructConfiguration;
+import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.User;
@@ -21,7 +22,12 @@ public class InspectionOrderMapper {
     }
 
     public InspectionOrderResponse toResponse(InspectionOrder order) {
-        return delegate.toResponse(order);
+        return toResponse(order, null, null, null);
+    }
+
+    public InspectionOrderResponse toResponse(InspectionOrder order, ShippingAddress sellerContact,
+                                              ShippingAddress buyerContact, ShippingAddress centerContact) {
+        return delegate.toResponse(order, sellerContact, buyerContact, centerContact);
     }
 
     protected String partyName(User user) {
@@ -40,29 +46,42 @@ public class InspectionOrderMapper {
 
     @Mapper(config = MapStructConfiguration.class)
     public interface Delegate {
-        @Mapping(target = "buyerId", source = "buyer.id")
-        @Mapping(target = "buyerName", expression = "java(partyName(order.getBuyer()))")
-        @Mapping(target = "buyerEmail", source = "buyer.email")
-        @Mapping(target = "sellerId", source = "seller.id")
-        @Mapping(target = "sellerName", expression = "java(partyName(order.getSeller()))")
-        @Mapping(target = "sellerEmail", source = "seller.email")
-        @Mapping(target = "inspectorId", source = "inspector.id")
-        @Mapping(target = "inspectionCenterId", source = "inspectionCenter.id")
-        @Mapping(target = "checklistTemplateId", source = "checklistTemplate.id")
-        @Mapping(target = "feeProposalId", source = "feeProposal.id")
+        @Mapping(target = "buyerId", source = "order.buyer.id")
+        @Mapping(target = "buyerName", expression = "java(contactName(buyerContact, order.getBuyer()))")
+        @Mapping(target = "buyerEmail", source = "order.buyer.email")
+        @Mapping(target = "buyerPhone", source = "buyerContact.phone")
+        @Mapping(target = "buyerAddress", source = "buyerContact.address")
+        @Mapping(target = "sellerId", source = "order.seller.id")
+        @Mapping(target = "sellerName", expression = "java(contactName(sellerContact, order.getSeller()))")
+        @Mapping(target = "sellerEmail", source = "order.seller.email")
+        @Mapping(target = "sellerPhone", source = "sellerContact.phone")
+        @Mapping(target = "sellerAddress", source = "sellerContact.address")
+        @Mapping(target = "inspectorId", source = "order.inspector.id")
+        @Mapping(target = "inspectionCenterId", source = "order.inspectionCenter.id")
+        @Mapping(target = "inspectionCenterName", source = "centerContact.name")
+        @Mapping(target = "inspectionCenterAddress", source = "centerContact.address")
+        @Mapping(target = "inspectionCenterPhone", source = "centerContact.phone")
+        @Mapping(target = "checklistTemplateId", source = "order.checklistTemplate.id")
+        @Mapping(target = "feeProposalId", source = "order.feeProposal.id")
         @Mapping(target = "inspectorName", expression = "java(inspectorName(order.getInspector()))")
-        @Mapping(target = "postId", source = "post.id")
-        @Mapping(target = "postTitle", source = "post.title")
-        @Mapping(target = "postImageUrls", source = "post.imageUrls")
-        @Mapping(target = "postPrice", source = "post.price")
-        @Mapping(target = "linkedOrderId", source = "order.id")
-        @Mapping(target = "negotiationId", source = "negotiation.id")
+        @Mapping(target = "postId", source = "order.post.id")
+        @Mapping(target = "postTitle", source = "order.post.title")
+        @Mapping(target = "postImageUrls", source = "order.post.imageUrls")
+        @Mapping(target = "postPrice", source = "order.post.price")
+        @Mapping(target = "linkedOrderId", source = "order.order.id")
+        @Mapping(target = "negotiationId", source = "order.negotiation.id")
         @Mapping(target = "inspectionScope", expression = "java(order.getInspectionScope() != null ? order.getInspectionScope().name() : null)")
         @Mapping(target = "appealStatus", expression = "java(order.getAppealStatus() != null ? order.getAppealStatus().name() : null)")
         @Mapping(target = "initialDepositPaid", expression = "java(resolveInitialDepositPaid(order))")
         @Mapping(target = "finalPaymentRequired", expression = "java(resolveFinalPaymentRequired(order))")
         @Mapping(target = "videoCleanedMessage", expression = "java(cleanedMessage(order.getVideoCleanupStatus()))")
-        InspectionOrderResponse toResponse(InspectionOrder order);
+        InspectionOrderResponse toResponse(InspectionOrder order, ShippingAddress sellerContact,
+                                           ShippingAddress buyerContact, ShippingAddress centerContact);
+
+        default String contactName(ShippingAddress contact, User user) {
+            return contact != null && contact.name() != null && !contact.name().isBlank()
+                    ? contact.name() : partyName(user);
+        }
 
         default BigDecimal resolveInitialDepositPaid(InspectionOrder order) {
             if (order == null) return BigDecimal.ZERO;

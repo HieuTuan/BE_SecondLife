@@ -7,9 +7,11 @@ import com.secondlife.secondlife.dto.request.InspectionBuyerRespondRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
 import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
+import com.secondlife.secondlife.dto.request.InspectionStartRequest;
 import com.secondlife.secondlife.dto.request.InspectionSealScanRequest;
 import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
 import com.secondlife.secondlife.dto.request.ReviewInspectionAppealRequest;
+import com.secondlife.secondlife.dto.response.InspectionCheckInCodeResponse;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.dto.response.InspectionSealLogResponse;
 import com.secondlife.secondlife.dto.response.InspectionSealVerificationResponse;
@@ -95,7 +97,9 @@ public interface InspectionService {
     /**
      * KTV bắt đầu tiến hành kiểm tra (chuyển sang INSPECTING)
      */
-    InspectionOrderResponse startInspection(UUID actorId, UUID orderId);
+    InspectionOrderResponse startInspection(UUID actorId, UUID orderId, InspectionStartRequest request);
+
+    InspectionCheckInCodeResponse getOrCreateHomeCheckInCode(UUID sellerId, UUID orderId);
 
     /**
      * KTV nhập biên bản kết quả kiểm định chi tiết (PASSED hoặc FAILED)
@@ -131,6 +135,8 @@ public interface InspectionService {
      * Quét các đơn kiểm định quá hạn phản hồi (24h) chuyển sang CANCELLED
      */
     void processExpiredApprovals();
+
+    void processExpiredFinalPayment(UUID orderId);
 
     /**
      * Người bán gửi khiếu nại kết quả kiểm định trong vòng 24 giờ

@@ -3,6 +3,7 @@ package com.secondlife.secondlife.service;
 import com.secondlife.secondlife.dto.request.CreateShipmentRequest;
 import com.secondlife.secondlife.dto.request.ReportRequests;
 import com.secondlife.secondlife.dto.response.ShipmentResponse;
+import com.secondlife.secondlife.dto.response.InspectionReturnQuoteResponse;
 import com.secondlife.secondlife.entity.ShipmentEvent;
 import tools.jackson.databind.JsonNode;
 
@@ -16,9 +17,11 @@ public interface ShipmentService {
 
     ShipmentResponse createCenterDelivery(UUID centerId, UUID inspectionId, CreateShipmentRequest request);
 
+    InspectionReturnQuoteResponse quoteCenterReturn(UUID centerId, UUID inspectionId);
+
     List<ShipmentResponse> orderShipments(UUID actor, boolean staff, UUID id);
 
-    List<ShipmentResponse> inspectionShipments(UUID actor, boolean staff, UUID id);
+    List<ShipmentResponse> inspectionShipments(UUID actor, boolean staff, boolean center, UUID id);
 
     List<ShipmentEvent> timeline(UUID actor, boolean staff, UUID id);
 

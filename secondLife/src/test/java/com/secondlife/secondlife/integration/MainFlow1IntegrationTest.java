@@ -480,7 +480,9 @@ class MainFlow1IntegrationTest {
                     null,
                     null,
                     null,
-                    null
+                    null,
+                    List.of("https://res.cloudinary.com/test-cloud/image/upload/v123/secondlife/inspections/proofs/"
+                            + "781527ed-cfd8-4573-bb08-ad981683c50e.jpg")
             );
             inspectionService.submitResult(orderId, inspector.getId(), request);
             assertEquals("PASSED".equals(result) ? "ACTIVE" : "REJECTED", posts.findById(p.getId()).orElseThrow().getStatus());
