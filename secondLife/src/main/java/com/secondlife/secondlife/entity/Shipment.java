@@ -57,6 +57,15 @@ public class Shipment {
     private String receiverPhone;
     @Column(columnDefinition = "TEXT")
     private String receiverAddress;
+    private UUID cashPayerId;
+    private UUID cashConfirmedBy;
+    @Column(length = 255)
+    private String cashReceiptReference;
+    private Instant cashConfirmedAt;
+    @Column(precision = 18, scale = 2)
+    private BigDecimal cashPaidAmount;
+    @Column(precision = 18, scale = 2)
+    private BigDecimal cashReimbursedAmount;
     @Column(columnDefinition = "TEXT")
     private String reason;
     private UUID requestedBy;

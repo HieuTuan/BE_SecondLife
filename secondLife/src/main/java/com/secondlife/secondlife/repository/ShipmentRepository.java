@@ -19,6 +19,8 @@ public interface ShipmentRepository extends JpaRepository<Shipment,UUID>, Refres
             """)
     List<Shipment> findInspectionRoute(@Param("inspectionId") UUID inspectionId, @Param("orderId") UUID orderId);
 
+    boolean existsByInspectionOrderIdAndLegAndCashConfirmedAtIsNotNull(UUID inspectionOrderId, String leg);
+
     Optional<Shipment> findByOrderCode(String code);
     Optional<Shipment> findByProviderAndOrderCode(String provider, String code);
     Optional<Shipment> findByClientOrderCode(String code);

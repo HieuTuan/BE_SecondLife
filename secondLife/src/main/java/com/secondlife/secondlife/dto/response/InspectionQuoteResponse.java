@@ -31,7 +31,8 @@ public record InspectionQuoteResponse(
     AtHomePackageDto atHomePackage,
     AtCenterPackageDto atCenterPackage,
     InspectionConfigurationResponse inspectionConfiguration,
-    InspectionShippingQuoteResponse shippingQuote
+    InspectionShippingQuoteResponse shippingQuote,
+    boolean cashShippingSimulationEnabled
 ) {
 
     @JsonProperty("baseFee")

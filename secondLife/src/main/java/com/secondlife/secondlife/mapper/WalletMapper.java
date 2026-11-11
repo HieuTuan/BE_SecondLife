@@ -69,6 +69,7 @@ public class WalletMapper {
                 case DEPOSIT -> "Nạp tiền vào ví";
                 case WITHDRAW -> "Trừ tiền ví cho yêu cầu rút về ngân hàng";
                 case RETURN_SHIPPING_FEE -> "Thu phí vận chuyển hoàn hàng từ ví người bán";
+                case SHIPPING_REIMBURSE -> "Hoàn ứng cước vận chuyển kiểm định (Sandbox)";
                 case PAYMENT -> switch (referenceType) {
                     case ORDER -> "Thanh toán đơn hàng từ ví";
                     case INSPECTION_ORDER -> "Thanh toán cho đơn kiểm định từ ví";

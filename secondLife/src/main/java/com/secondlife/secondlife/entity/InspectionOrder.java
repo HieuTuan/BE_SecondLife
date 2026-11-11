@@ -114,6 +114,9 @@ public class InspectionOrder {
     @Column(name = "shipping_fee", precision = 18, scale = 2, nullable = false)
     private BigDecimal shippingFee = BigDecimal.ZERO; // Phí vận chuyển chiều đi
 
+    @Column(name = "cash_shipping_simulation", nullable = false)
+    private boolean cashShippingSimulation;
+
     @Column(name = "buyer_fee_share", precision = 18, scale = 2)
     private BigDecimal buyerFeeShare = BigDecimal.ZERO;
 

@@ -22,12 +22,17 @@ public class InspectionOrderMapper {
     }
 
     public InspectionOrderResponse toResponse(InspectionOrder order) {
-        return toResponse(order, null, null, null);
+        return toResponse(order, null);
+    }
+
+    public InspectionOrderResponse toResponse(InspectionOrder order, BigDecimal centerPayoutAmount) {
+        return toResponse(order, null, null, null, centerPayoutAmount);
     }
 
     public InspectionOrderResponse toResponse(InspectionOrder order, ShippingAddress sellerContact,
-                                              ShippingAddress buyerContact, ShippingAddress centerContact) {
-        return delegate.toResponse(order, sellerContact, buyerContact, centerContact);
+                                              ShippingAddress buyerContact, ShippingAddress centerContact,
+                                              BigDecimal centerPayoutAmount) {
+        return delegate.toResponse(order, sellerContact, buyerContact, centerContact, centerPayoutAmount);
     }
 
     protected String partyName(User user) {
@@ -75,8 +80,10 @@ public class InspectionOrderMapper {
         @Mapping(target = "initialDepositPaid", expression = "java(resolveInitialDepositPaid(order))")
         @Mapping(target = "finalPaymentRequired", expression = "java(resolveFinalPaymentRequired(order))")
         @Mapping(target = "videoCleanedMessage", expression = "java(cleanedMessage(order.getVideoCleanupStatus()))")
+        @Mapping(target = "centerPayoutAmount", source = "centerPayoutAmount")
         InspectionOrderResponse toResponse(InspectionOrder order, ShippingAddress sellerContact,
-                                           ShippingAddress buyerContact, ShippingAddress centerContact);
+                                           ShippingAddress buyerContact, ShippingAddress centerContact,
+                                           BigDecimal centerPayoutAmount);
 
         default String contactName(ShippingAddress contact, User user) {
             return contact != null && contact.name() != null && !contact.name().isBlank()

@@ -2,6 +2,7 @@ package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.entity.InspectionFeeSettlement;
 import com.secondlife.secondlife.entity.InspectionOrder;
+import com.secondlife.secondlife.entity.Shipment;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionSettlementOutcome;
@@ -22,9 +23,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -47,6 +51,18 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
         this.walletService = walletService;
         this.userRepository = userRepository;
         this.platformFeeRate = platformFeeRate != null ? platformFeeRate : BigDecimal.ZERO;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, BigDecimal> getCenterPayouts(UUID centerId, Collection<UUID> inspectionOrderIds) {
+        if (inspectionOrderIds.isEmpty()) {
+            return Map.of();
+        }
+        return settlements.findCenterPayouts(centerId, inspectionOrderIds).stream()
+                .collect(Collectors.toMap(
+                        InspectionFeeSettlementRepository.CenterPayout::getInspectionOrderId,
+                        InspectionFeeSettlementRepository.CenterPayout::getAmount));
     }
 
     @Override
@@ -81,6 +97,8 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
         BigDecimal serviceFee = (inspectionOrder.getInspectionFee() != null ? inspectionOrder.getInspectionFee() : BigDecimal.ZERO)
                 .add(inspectionOrder.getTravelFee() != null ? inspectionOrder.getTravelFee() : BigDecimal.ZERO);
         BigDecimal shippingFee = inspectionOrder.getShippingFee() != null ? inspectionOrder.getShippingFee() : BigDecimal.ZERO;
+        BigDecimal outboundPrepaid = inspectionOrder.isCashShippingSimulation()
+                ? buyerShare(inspectionOrder, shippingFee) : shippingFee;
         BigDecimal returnReserveFee = inspectionOrder.getReturnShippingReserveFee() != null ? inspectionOrder.getReturnShippingReserveFee() : BigDecimal.ZERO;
 
         switch (outcome) {
@@ -90,20 +108,20 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
             }
             case FAILED_INSPECTION -> {
                 centerPayout = computeCenterPayout(inspectionOrder, serviceFee);
-                outboundShipping = shippingFee;
+                outboundShipping = outboundPrepaid;
                 returnReserve = returnReserveFee;
                 buyerRefund = buyerDeposit;
             }
             case PASSED_PURCHASED -> {
                 centerPayout = computeCenterPayout(inspectionOrder, serviceFee);
-                outboundShipping = shippingFee;
+                outboundShipping = outboundPrepaid;
                 BigDecimal buyerReserveShare = buyerShare(inspectionOrder, returnReserveFee);
                 buyerRefund = buyerDeposit.add(buyerReserveShare);
                 sellerRefund = returnReserveFee.subtract(buyerReserveShare);
             }
             case PASSED_BUYER_DEFAULTED -> {
                 centerPayout = computeCenterPayout(inspectionOrder, serviceFee);
-                outboundShipping = shippingFee;
+                outboundShipping = outboundPrepaid;
                 returnReserve = returnReserveFee;
                 sellerCompensation = buyerDeposit;
             }
@@ -167,9 +185,7 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
     public void settleReturnShipping(InspectionOrder order, BigDecimal actualFee) {
         // The shipment workflow locks the inspection before changing its settlement.
         var settlement = settlements.findByInspectionOrderId(order.getId()).orElse(null);
-        if (settlement == null || settlement.getReturnShippingSettledAt() != null
-                || (settlement.getOutcome() != InspectionSettlementOutcome.FAILED_INSPECTION
-                    && settlement.getOutcome() != InspectionSettlementOutcome.PASSED_BUYER_DEFAULTED)) {
+        if (!hasUnsettledReturnReserve(settlement)) {
             return;
         }
 
@@ -180,6 +196,63 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
             return;
         }
 
+        applyReturnShippingSettlement(order, settlement, actualFee);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public BigDecimal reimburseCashShipping(InspectionOrder order, Shipment shipment, BigDecimal paidAmount) {
+        if (!order.isCashShippingSimulation() || order.getBuyerPaidAt() == null || order.getSellerPaidAt() == null) {
+            throw new ConflictException("Đơn chưa đủ điều kiện quyết toán cước tiền mặt mô phỏng");
+        }
+
+        var settlement = settlements.findByInspectionOrderId(order.getId()).orElse(null);
+        if ("SELLER_TO_CENTER".equals(shipment.getLeg())) {
+            if (settlement != null && (settlement.getOutcome() == InspectionSettlementOutcome.PAYMENT_EXPIRED
+                    || settlement.getOutcome() == InspectionSettlementOutcome.CANCELLED_BEFORE_INSPECTION)) {
+                throw new ConflictException("Phần cước đã được hoàn khi đóng đơn kiểm định");
+            }
+            BigDecimal prepaid = buyerShare(order, order.getShippingFee());
+            BigDecimal reimbursement = buyerShare(order, paidAmount);
+            if (reimbursement.compareTo(prepaid) > 0) {
+                throw new ConflictException("Phần cước thực tế của người mua vượt khoản đã giữ");
+            }
+            BigDecimal remainder = prepaid.subtract(reimbursement);
+            if (remainder.signum() > 0) {
+                walletService.processRefund(order.getBuyer().getId(), remainder, shipment.getId(),
+                        WalletTransactionReferenceType.SHIPMENT);
+            }
+            reimburse(shipment, reimbursement);
+            return reimbursement;
+        }
+
+        if (!"CENTER_TO_SELLER".equals(shipment.getLeg()) || !hasUnsettledReturnReserve(settlement)) {
+            throw new ConflictException("Không có khoản dự phòng chặng hoàn chờ quyết toán");
+        }
+        if (paidAmount.compareTo(settlement.getReturnReserveAllocated()) > 0) {
+            throw new ConflictException("Cước thực tế vượt khoản dự phòng chặng hoàn đã thu");
+        }
+        reimburse(shipment, paidAmount);
+        applyReturnShippingSettlement(order, settlement, paidAmount);
+        return paidAmount;
+    }
+
+    private void reimburse(Shipment shipment, BigDecimal amount) {
+        if (amount.signum() > 0) {
+            walletService.reimburseShipping(shipment.getCashPayerId(), amount, shipment.getId());
+        }
+    }
+
+    private boolean hasUnsettledReturnReserve(InspectionFeeSettlement settlement) {
+        return settlement != null && settlement.getReturnShippingSettledAt() == null
+                && (settlement.getOutcome() == InspectionSettlementOutcome.FAILED_INSPECTION
+                    || settlement.getOutcome() == InspectionSettlementOutcome.PASSED_BUYER_DEFAULTED);
+    }
+
+    private void applyReturnShippingSettlement(InspectionOrder order, InspectionFeeSettlement settlement,
+                                               BigDecimal actualFee) {
+        BigDecimal reserve = settlement.getReturnReserveAllocated();
+        BigDecimal remainder = reserve.subtract(actualFee);
         BigDecimal buyerRefund = buyerShare(order, reserve).subtract(buyerShare(order, actualFee));
         BigDecimal sellerRefund = remainder.subtract(buyerRefund);
         if (buyerRefund.signum() > 0) {
@@ -198,11 +271,7 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
 
     private BigDecimal buyerShare(InspectionOrder order, BigDecimal amount) {
         InspectionFeePayer payer = order.getFeePayer() == null ? InspectionFeePayer.BUYER_PAYS : order.getFeePayer();
-        return switch (payer) {
-            case BUYER_PAYS -> amount;
-            case SELLER_PAYS -> BigDecimal.ZERO;
-            case SPLIT_50_50 -> amount.divide(BigDecimal.TWO, 2, RoundingMode.HALF_UP);
-        };
+        return payer.buyerShare(amount);
     }
 
     private BigDecimal computeCenterPayout(InspectionOrder order, BigDecimal serviceFee) {

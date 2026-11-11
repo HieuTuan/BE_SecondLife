@@ -1,5 +1,6 @@
 package com.secondlife.secondlife.service.impl;
 
+import com.secondlife.secondlife.config.LalamoveProperties;
 import com.secondlife.secondlife.dto.request.InspectionFeeProposalRequest;
 import com.secondlife.secondlife.dto.request.InspectionQuoteRequest;
 import com.secondlife.secondlife.dto.request.ShippingAddress;
@@ -36,6 +37,7 @@ import com.secondlife.secondlife.service.ShippingQuoteService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -70,20 +72,9 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
     private final InspectionGovernanceAccessService access;
     private final InspectionCenterProfileService centerProfiles;
     private final InspectionShippingQuoteService inspectionShipping;
+    private final boolean cashShippingSimulationEnabled;
 
-    public InspectionPricingServiceImpl(PostRepository postRepository,
-                                       InspectionTravelFeeCalculator travelFeeCalculator,
-                                       InspectionFeeProposalRepository proposalRepository,
-                                       InspectionTravelTierRepository travelTierRepository,
-                                       UserRepository userRepository,
-                                       CategoryRepository categoryRepository,
-                                       ShippingQuoteService shippingQuoteService,
-                                       ObjectMapper objectMapper,
-                                        InspectionPricingMapper inspectionPricingMapper,
-                                        InspectionConfigurationService configurations,
-                                        InspectionGovernanceAccessService access,
-                                        InspectionCenterProfileService centerProfiles,
-                                        InspectionShippingQuoteService inspectionShipping) {
+    public InspectionPricingServiceImpl(PostRepository postRepository, InspectionTravelFeeCalculator travelFeeCalculator, InspectionFeeProposalRepository proposalRepository, InspectionTravelTierRepository travelTierRepository, UserRepository userRepository, CategoryRepository categoryRepository, ShippingQuoteService shippingQuoteService, ObjectMapper objectMapper, InspectionPricingMapper inspectionPricingMapper, InspectionConfigurationService configurations, InspectionGovernanceAccessService access, InspectionCenterProfileService centerProfiles, InspectionShippingQuoteService inspectionShipping, LalamoveProperties lalamove, @Value("${app.inspection.cash-shipping-simulation-enabled:false}") boolean cashShippingSimulationEnabled) {
         this.postRepository = postRepository;
         this.travelFeeCalculator = travelFeeCalculator;
         this.proposalRepository = proposalRepository;
@@ -97,6 +88,10 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
         this.access = access;
         this.centerProfiles = centerProfiles;
         this.inspectionShipping = inspectionShipping;
+        if (cashShippingSimulationEnabled && !lalamove.isSandbox()) {
+            throw new IllegalStateException("Inspection cash shipping simulation requires Lalamove Sandbox");
+        }
+        this.cashShippingSimulationEnabled = cashShippingSimulationEnabled;
     }
 
     @Override
@@ -114,29 +109,21 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
     @Override
     @Transactional
     public InspectionQuoteResponse quote(InspectionQuoteRequest request) {
-        Post post = postRepository.findById(request.postId())
-                .orElseThrow(() -> new NotFoundException("Post not found"));
+        Post post = postRepository.findById(request.postId()).orElseThrow(() -> new NotFoundException("Post not found"));
 
         InspectionConfigurationResponse configuration = configurations.resolve(post, request.inspectionCenterId());
-        if ((request.expectedFeeProposalId() != null && !request.expectedFeeProposalId().equals(configuration.feeProposalId()))
-                || (request.expectedChecklistTemplateId() != null && !request.expectedChecklistTemplateId().equals(configuration.checklistTemplateId()))) {
+        if ((request.expectedFeeProposalId() != null && !request.expectedFeeProposalId().equals(configuration.feeProposalId())) || (request.expectedChecklistTemplateId() != null && !request.expectedChecklistTemplateId().equals(configuration.checklistTemplateId()))) {
             throw new ConflictException("Biểu phí hoặc checklist đã thay đổi; vui lòng lấy báo giá mới trước khi xác nhận");
         }
         BigDecimal baseFee = configuration.inspectionFee();
 
         // Lấy tọa độ Seller từ pickup address
         ShippingAddress sellerPickup = shippingQuoteService.pickup(post.getUser().getId());
-        if (sellerPickup == null || sellerPickup.latitude() == null || sellerPickup.longitude() == null
-                || sellerPickup.latitude().abs().compareTo(BigDecimal.valueOf(90)) > 0
-                || sellerPickup.longitude().abs().compareTo(BigDecimal.valueOf(180)) > 0) {
+        if (sellerPickup == null || sellerPickup.latitude() == null || sellerPickup.longitude() == null || sellerPickup.latitude().abs().compareTo(BigDecimal.valueOf(90)) > 0 || sellerPickup.longitude().abs().compareTo(BigDecimal.valueOf(180)) > 0) {
             throw new ConflictException("Người bán cần cấu hình địa chỉ lấy hàng và GPS trước khi báo phí kiểm định");
         }
-        User center = userRepository.findById(configuration.inspectionCenterId())
-                .orElseThrow(() -> new NotFoundException("Inspection center not found"));
-        if (center.getProfile() == null || center.getProfile().getLatitude() == null
-                || center.getProfile().getLongitude() == null
-                || !Double.isFinite(center.getProfile().getLatitude()) || !Double.isFinite(center.getProfile().getLongitude())
-                || Math.abs(center.getProfile().getLatitude()) > 90 || Math.abs(center.getProfile().getLongitude()) > 180) {
+        User center = userRepository.findById(configuration.inspectionCenterId()).orElseThrow(() -> new NotFoundException("Inspection center not found"));
+        if (center.getProfile() == null || center.getProfile().getLatitude() == null || center.getProfile().getLongitude() == null || !Double.isFinite(center.getProfile().getLatitude()) || !Double.isFinite(center.getProfile().getLongitude()) || Math.abs(center.getProfile().getLatitude()) > 90 || Math.abs(center.getProfile().getLongitude()) > 180) {
             throw new ConflictException("Trung tâm cần cập nhật địa chỉ và GPS trong hồ sơ trước khi báo phí kiểm định");
         }
         BigDecimal sellerLat = sellerPickup.latitude();
@@ -145,15 +132,13 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
         BigDecimal centerLon = BigDecimal.valueOf(center.getProfile().getLongitude());
 
         // 1. Tính toán gói AT_HOME
-        InspectionTravelFeeCalculator.TravelFeeResult travelResult =
-                travelFeeCalculator.calculate(sellerLat, sellerLon, centerLat, centerLon);
+        InspectionTravelFeeCalculator.TravelFeeResult travelResult = travelFeeCalculator.calculate(sellerLat, sellerLon, centerLat, centerLon);
 
         BigDecimal atHomeTotal = baseFee.add(travelResult.getRoundTripFee());
         Map<String, BigDecimal> atHomeSplits = calculateSplits(atHomeTotal);
 
         // 2. Tính toán gói AT_CENTER
-        InspectionShippingQuoteResponse shippingQuote = request.orderType() == InspectionOrderType.AT_HOME ? null
-                : inspectionShipping.quote(post.getId(), configuration.inspectionCenterId(), request.inspectionShippingQuoteId());
+        InspectionShippingQuoteResponse shippingQuote = request.orderType() == InspectionOrderType.AT_HOME ? null : inspectionShipping.quote(post.getId(), configuration.inspectionCenterId(), request.inspectionShippingQuoteId());
         BigDecimal shippingToCenterFee = shippingQuote == null ? null : shippingQuote.outbound().shippingFee();
         BigDecimal returnReserveFee = shippingQuote == null ? null : shippingQuote.returnReserve().shippingFee();
         BigDecimal atCenterTotal = shippingQuote == null ? null : baseFee.add(shippingToCenterFee).add(returnReserveFee);
@@ -162,42 +147,11 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
         BigDecimal atHomeSplit50 = atHomeTotal.divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
         BigDecimal atCenterSplit50 = shippingQuote == null ? null : atCenterTotal.divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
 
-        InspectionQuoteResponse.AtHomePackageDto atHomePkg = InspectionQuoteResponse.AtHomePackageDto.builder()
-                .distanceKm(travelResult.getDistanceKm())
-                .travelFeeOneWay(travelResult.getOneWayFee())
-                .travelFeeRoundTrip(travelResult.getRoundTripFee())
-                .totalFee(atHomeTotal)
-                .suggestedSplit50(atHomeSplit50)
-                .tiersBreakdown(travelResult.getAppliedTiers())
-                .build();
+        InspectionQuoteResponse.AtHomePackageDto atHomePkg = InspectionQuoteResponse.AtHomePackageDto.builder().distanceKm(travelResult.getDistanceKm()).travelFeeOneWay(travelResult.getOneWayFee()).travelFeeRoundTrip(travelResult.getRoundTripFee()).totalFee(atHomeTotal).suggestedSplit50(atHomeSplit50).tiersBreakdown(travelResult.getAppliedTiers()).build();
 
-        InspectionQuoteResponse.AtCenterPackageDto atCenterPkg = shippingQuote == null ? null : InspectionQuoteResponse.AtCenterPackageDto.builder()
-                .shippingToCenterFee(shippingToCenterFee)
-                .returnReserveFee(returnReserveFee)
-                .totalFee(atCenterTotal)
-                .suggestedSplit50(atCenterSplit50)
-                .build();
+        InspectionQuoteResponse.AtCenterPackageDto atCenterPkg = shippingQuote == null ? null : InspectionQuoteResponse.AtCenterPackageDto.builder().shippingToCenterFee(shippingToCenterFee).returnReserveFee(returnReserveFee).totalFee(atCenterTotal).suggestedSplit50(atCenterSplit50).build();
 
-        return InspectionQuoteResponse.builder()
-                .postId(post.getId())
-                .postTitle(post.getTitle())
-                .postPrice(post.getPrice())
-                .baseInspectionFee(baseFee)
-                .travelDistanceKm(travelResult.getDistanceKm())
-                .travelFeeOneWay(travelResult.getOneWayFee())
-                .travelFeeRoundTrip(travelResult.getRoundTripFee())
-                .atHomeTotalFee(atHomeTotal)
-                .appliedTiers(travelResult.getAppliedTiers())
-                .atHomeSplitOptions(atHomeSplits)
-                .shippingToCenterFee(shippingToCenterFee)
-                .returnShippingReserveFee(returnReserveFee)
-                .atCenterTotalFee(atCenterTotal)
-                .atCenterSplitOptions(atCenterSplits)
-                .atHomePackage(atHomePkg)
-                .atCenterPackage(atCenterPkg)
-                .inspectionConfiguration(configuration)
-                .shippingQuote(shippingQuote)
-                .build();
+        return InspectionQuoteResponse.builder().postId(post.getId()).postTitle(post.getTitle()).postPrice(post.getPrice()).baseInspectionFee(baseFee).travelDistanceKm(travelResult.getDistanceKm()).travelFeeOneWay(travelResult.getOneWayFee()).travelFeeRoundTrip(travelResult.getRoundTripFee()).atHomeTotalFee(atHomeTotal).appliedTiers(travelResult.getAppliedTiers()).atHomeSplitOptions(atHomeSplits).shippingToCenterFee(shippingToCenterFee).returnShippingReserveFee(returnReserveFee).atCenterTotalFee(atCenterTotal).atCenterSplitOptions(atCenterSplits).atHomePackage(atHomePkg).atCenterPackage(atCenterPkg).inspectionConfiguration(configuration).shippingQuote(shippingQuote).cashShippingSimulationEnabled(shippingQuote != null && cashShippingSimulationEnabled).build();
     }
 
     @Override
@@ -224,9 +178,7 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
     @Override
     @Transactional(readOnly = true)
     public List<InspectionTravelTierDto> getActiveTiers() {
-        return travelTierRepository.findAllActive().stream()
-                .map(inspectionPricingMapper::toTierResponse)
-                .collect(Collectors.toList());
+        return travelTierRepository.findAllActive().stream().map(inspectionPricingMapper::toTierResponse).collect(Collectors.toList());
     }
 
     @Override
@@ -235,12 +187,11 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
         if (dtoList == null || dtoList.isEmpty()) return getActiveTiers();
 
         for (InspectionTravelTierDto dto : dtoList) {
-            InspectionTravelTier tier = travelTierRepository.findByTierNumber(dto.tierNumber())
-                    .orElseGet(() -> {
-                        InspectionTravelTier newTier = new InspectionTravelTier();
-                        newTier.setTierNumber(dto.tierNumber());
-                        return newTier;
-                    });
+            InspectionTravelTier tier = travelTierRepository.findByTierNumber(dto.tierNumber()).orElseGet(() -> {
+                InspectionTravelTier newTier = new InspectionTravelTier();
+                newTier.setTierNumber(dto.tierNumber());
+                return newTier;
+            });
             tier.setName(dto.name());
             tier.setFromKm(dto.fromKm());
             tier.setToKm(dto.toKm());
@@ -256,16 +207,13 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
     @Transactional
     public InspectionFeeProposalResponse proposeFee(UUID proposedById, InspectionFeeProposalRequest request) {
         User proposer = access.requireCenter(proposedById);
-        if (request.baseInspectionFee() == null || request.baseInspectionFee().signum() < 0
-                || request.baseInspectionFee().scale() > 2 || request.baseInspectionFee().precision() - request.baseInspectionFee().scale() > 16) {
+        if (request.baseInspectionFee() == null || request.baseInspectionFee().signum() < 0 || request.baseInspectionFee().scale() > 2 || request.baseInspectionFee().precision() - request.baseInspectionFee().scale() > 16) {
             throw new BadRequestException("Phí kiểm định phải không âm, tối đa 16 chữ số nguyên và 2 chữ số thập phân");
         }
-        if (request.complexityLevel() != null && (request.categoryId() != null
-                || (request.tiers() != null && !request.tiers().isEmpty()))) {
+        if (request.complexityLevel() != null && (request.categoryId() != null || (request.tiers() != null && !request.tiers().isEmpty()))) {
             throw new BadRequestException("Giá L1-L4 áp dụng theo trung tâm; không gửi kèm categoryId hoặc bậc phí di chuyển");
         }
-        if (request.complexityLevel() == null && request.categoryId() == null
-                && (request.tiers() == null || request.tiers().isEmpty())) {
+        if (request.complexityLevel() == null && request.categoryId() == null && (request.tiers() == null || request.tiers().isEmpty())) {
             throw new BadRequestException("Cần chọn cấp L1-L4 để đề xuất phí kiểm định");
         }
 
@@ -278,8 +226,7 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
 
         InspectionFeeProposal proposal = new InspectionFeeProposal();
         if (request.categoryId() != null) {
-            proposal.setCategory(categoryRepository.findById(request.categoryId())
-                    .orElseThrow(() -> new NotFoundException("Category not found")));
+            proposal.setCategory(categoryRepository.findById(request.categoryId()).orElseThrow(() -> new NotFoundException("Category not found")));
         }
         proposal.setComplexityLevel(request.complexityLevel());
         proposal.setBaseInspectionFee(request.baseInspectionFee());
@@ -296,8 +243,7 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
     public Page<InspectionFeeProposalResponse> getProposals(InspectionFeeProposalStatus status, Pageable pageable) {
         pageable = InspectionPageables.validate(pageable, Set.of("id", "createdAt", "reviewedAt", "status", "complexityLevel"));
         if (status != null) {
-            return proposalRepository.findByStatusOrderByCreatedAtDesc(status, pageable)
-                    .map(this::toProposalResponse);
+            return proposalRepository.findByStatusOrderByCreatedAtDesc(status, pageable).map(this::toProposalResponse);
         }
         return proposalRepository.findAll(pageable).map(this::toProposalResponse);
     }
@@ -306,8 +252,7 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
     @Transactional
     public InspectionFeeProposalResponse reviewProposal(UUID proposalId, UUID reviewerId, boolean approved, String reason) {
         User reviewer = access.requireAdmin(reviewerId);
-        InspectionFeeProposal proposal = proposalRepository.findByIdForUpdate(proposalId)
-                .orElseThrow(() -> new NotFoundException("Fee proposal not found"));
+        InspectionFeeProposal proposal = proposalRepository.findByIdForUpdate(proposalId).orElseThrow(() -> new NotFoundException("Fee proposal not found"));
 
         if (proposal.getStatus() != InspectionFeeProposalStatus.PENDING_APPROVAL) {
             throw new ConflictException("Proposal has already been reviewed");
@@ -327,7 +272,8 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
         if (approved && proposal.getComplexityLevel() == null) {
             List<InspectionTravelTierDto> tiers;
             try {
-                tiers = objectMapper.readValue(proposal.getTiersJson(), new TypeReference<List<InspectionTravelTierDto>>() {});
+                tiers = objectMapper.readValue(proposal.getTiersJson(), new TypeReference<List<InspectionTravelTierDto>>() {
+                });
             } catch (RuntimeException ex) {
                 throw new BadRequestException("Đề xuất có dữ liệu bậc phí không hợp lệ; không thể duyệt");
             }
@@ -356,7 +302,8 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
         List<InspectionTravelTierDto> tiers = Collections.emptyList();
         try {
             if (p.getTiersJson() != null && !p.getTiersJson().isBlank()) {
-                tiers = objectMapper.readValue(p.getTiersJson(), new TypeReference<List<InspectionTravelTierDto>>() {});
+                tiers = objectMapper.readValue(p.getTiersJson(), new TypeReference<List<InspectionTravelTierDto>>() {
+                });
             }
         } catch (RuntimeException exception) {
             throw new ConflictException("Đề xuất biểu phí có dữ liệu bậc di chuyển không hợp lệ; cần kiểm tra lại cấu hình");

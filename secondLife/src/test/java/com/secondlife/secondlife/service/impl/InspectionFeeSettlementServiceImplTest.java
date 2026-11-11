@@ -3,10 +3,12 @@ package com.secondlife.secondlife.service.impl;
 import com.secondlife.secondlife.entity.InspectionFeeSettlement;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Post;
+import com.secondlife.secondlife.entity.Shipment;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionSettlementOutcome;
 import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
+import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.repository.InspectionFeeSettlementRepository;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.UserRepository;
@@ -152,6 +154,42 @@ class InspectionFeeSettlementServiceImplTest {
                 eq(WalletTransactionReferenceType.INSPECTION_ORDER));
         verify(walletService, times(sellerRefund.signum())).processRefund(eq(seller.getId()), any(), eq(order.getId()),
                 eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"BUYER_PAYS,28000,2000", "SELLER_PAYS,0,0", "SPLIT_50_50,14000,1000"})
+    void outboundReimbursesOnlyTheBuyersActualShare(InspectionFeePayer payer, BigDecimal reimbursement,
+                                                   BigDecimal refund) {
+        order.setCashShippingSimulation(true);
+        order.setFeePayer(payer);
+        var shipment = new Shipment();
+        shipment.setId(UUID.randomUUID());
+        shipment.setLeg("SELLER_TO_CENTER");
+        shipment.setCashPayerId(seller.getId());
+
+        var amount = settlementService.reimburseCashShipping(order, shipment, new BigDecimal("28000"));
+
+        assertEquals(0, reimbursement.compareTo(amount));
+        verify(walletService, times(reimbursement.signum())).reimburseShipping(eq(seller.getId()), any(), eq(shipment.getId()));
+        verify(walletService, times(refund.signum())).processRefund(eq(buyer.getId()), any(), eq(shipment.getId()),
+                eq(WalletTransactionReferenceType.SHIPMENT));
+    }
+
+    @Test
+    void cashReturnCannotOverdrawTheReserve() {
+        order.setCashShippingSimulation(true);
+        var settlement = new InspectionFeeSettlement();
+        settlement.setOutcome(InspectionSettlementOutcome.FAILED_INSPECTION);
+        settlement.setReturnReserveAllocated(new BigDecimal("36000"));
+        when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.of(settlement));
+        var shipment = new Shipment();
+        shipment.setLeg("CENTER_TO_SELLER");
+
+        assertThrows(ConflictException.class,
+                () -> settlementService.reimburseCashShipping(order, shipment, new BigDecimal("42000")));
+
+        assertNull(settlement.getReturnShippingSettledAt());
+        verifyNoInteractions(walletService);
     }
 
     @Test
