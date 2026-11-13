@@ -1,6 +1,8 @@
 package com.secondlife.secondlife.entity;
 
 import com.secondlife.secondlife.enums.InspectionAppealStatus;
+import com.secondlife.secondlife.enums.InspectionAppointmentShift;
+import com.secondlife.secondlife.enums.InspectionAppointmentStatus;
 import com.secondlife.secondlife.enums.InspectionComplexityLevel;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionOrderType;
@@ -152,6 +154,30 @@ public class InspectionOrder {
 
     @Column(name = "appointment_scheduled_at")
     private Instant appointmentScheduledAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "appointment_shift", length = 10)
+    private InspectionAppointmentShift appointmentShift;
+
+    @Column(name = "appointment_note", length = 500)
+    private String appointmentNote;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "appointment_status", length = 30)
+    private InspectionAppointmentStatus appointmentStatus;
+
+    @Column(name = "counter_scheduled_at")
+    private Instant counterScheduledAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "counter_shift", length = 10)
+    private InspectionAppointmentShift counterShift;
+
+    @Column(name = "counter_note", length = 500)
+    private String counterNote;
+
+    @Column(name = "appointment_rejection_reason", length = 500)
+    private String appointmentRejectionReason;
 
     @Column(name = "home_check_in_code")
     private UUID homeCheckInCode;

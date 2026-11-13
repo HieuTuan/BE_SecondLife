@@ -2,6 +2,8 @@ package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.common.PageResponse;
+import com.secondlife.secondlife.dto.request.InspectionAppointmentCounterRequest;
+import com.secondlife.secondlife.dto.request.InspectionAppointmentRejectRequest;
 import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
 import com.secondlife.secondlife.dto.request.InspectionStartRequest;
@@ -78,14 +80,61 @@ public class InspectorController {
         return ResponseEntity.ok(inspectionService.assignInspector(orderId, inspectorId, managerId));
     }
 
+    @GetMapping("/orders/{orderId}")
+    @Operation(summary = "Xem chi tiết đơn kiểm định theo quyền truy cập của người dùng")
+    public ResponseEntity<InspectionOrderResponse> getOrder(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @PathVariable UUID orderId) {
+        return ResponseEntity.ok(inspectionService.getOrderById(currentUserProvider.resolveUserId(principal), orderId));
+    }
+
     @PostMapping("/orders/{orderId}/schedule")
-    @Operation(summary = "Kỹ thuật viên hoặc Người bán lên lịch hẹn ngày giờ đến nhà kiểm định (Gói AT_HOME)")
+    @PreAuthorize("hasRole('SELLER')")
+    @Operation(summary = "Người bán gửi lịch hẹn kiểm định tại nhà cho trung tâm")
     public ResponseEntity<InspectionOrderResponse> scheduleAppointment(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID orderId,
             @Valid @RequestBody InspectionAppointmentRequest request) {
         UUID actorId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(inspectionService.scheduleAppointment(actorId, orderId, request));
+    }
+
+    @PostMapping("/orders/{orderId}/appointment/confirm")
+    @PreAuthorize("hasAnyRole('INSPECTION_CENTER', 'ADMIN')")
+    @Operation(summary = "Trung tâm hoặc Admin xác nhận lịch của người bán")
+    public ResponseEntity<InspectionOrderResponse> confirmAppointment(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @PathVariable UUID orderId) {
+        return ResponseEntity.ok(inspectionService.confirmAppointment(currentUserProvider.resolveUserId(principal), orderId));
+    }
+
+    @PostMapping("/orders/{orderId}/appointment/counter")
+    @PreAuthorize("hasAnyRole('INSPECTION_CENTER', 'ADMIN')")
+    @Operation(summary = "Trung tâm hoặc Admin đề xuất lịch khác")
+    public ResponseEntity<InspectionOrderResponse> counterAppointment(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @PathVariable UUID orderId,
+            @Valid @RequestBody InspectionAppointmentCounterRequest request) {
+        return ResponseEntity.ok(inspectionService.counterAppointment(currentUserProvider.resolveUserId(principal), orderId, request));
+    }
+
+    @PostMapping("/orders/{orderId}/appointment/accept-counter")
+    @PreAuthorize("hasRole('SELLER')")
+    @Operation(summary = "Người bán chấp nhận lịch trung tâm đề xuất")
+    public ResponseEntity<InspectionOrderResponse> acceptAppointmentCounter(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @PathVariable UUID orderId) {
+        return ResponseEntity.ok(inspectionService.acceptAppointmentCounter(currentUserProvider.resolveUserId(principal), orderId));
+    }
+
+    @PostMapping("/orders/{orderId}/appointment/reject")
+    @PreAuthorize("hasAnyRole('INSPECTION_CENTER', 'ADMIN')")
+    @Operation(summary = "Trung tâm hoặc Admin từ chối lịch để người bán đặt lại")
+    public ResponseEntity<InspectionOrderResponse> rejectAppointment(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @PathVariable UUID orderId,
+            @Valid @RequestBody InspectionAppointmentRejectRequest request) {
+        return ResponseEntity.ok(inspectionService.rejectAppointment(currentUserProvider.resolveUserId(principal), orderId, request));
     }
 
     @GetMapping("/orders/{orderId}/checklist")

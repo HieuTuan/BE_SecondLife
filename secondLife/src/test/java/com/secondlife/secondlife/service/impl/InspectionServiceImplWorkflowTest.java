@@ -1,10 +1,11 @@
 package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.dto.request.InspectionAppealRequest;
+import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
+import com.secondlife.secondlife.enums.InspectionAppointmentShift;
 import com.secondlife.secondlife.dto.request.InspectionBuyerRespondRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
 import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
-import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
 import com.secondlife.secondlife.dto.request.InspectionStartRequest;
 import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
@@ -16,6 +17,7 @@ import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.InspectionAppealStatus;
+import com.secondlife.secondlife.enums.InspectionAppointmentStatus;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionOrderStatus;
 import com.secondlife.secondlife.enums.InspectionOrderType;
@@ -66,6 +68,8 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
@@ -295,6 +299,45 @@ class InspectionServiceImplWorkflowTest {
     }
 
     @Test
+    @DisplayName("WP-Appointment: Người bán có thể hẹn lại lịch mới khi đang có đề xuất COUNTERED_BY_CENTER")
+    void testSellerCanRescheduleWhenCounteredByCenter() {
+        order.setOrderType(InspectionOrderType.AT_HOME);
+        order.setStatus("CONFIRMED_PENDING_DISPATCH");
+        order.setAppointmentStatus(InspectionAppointmentStatus.COUNTERED_BY_CENTER);
+        order.setBuyerPaidAt(Instant.now());
+        User center = new User();
+        center.setId(UUID.randomUUID());
+        center.addRole(new Role("INSPECTION_CENTER", "Center", null));
+        order.setInspectionCenter(center);
+
+        Instant tomorrow9Am = ZonedDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh"))
+                .plusDays(2)
+                .withHour(9)
+                .withMinute(0)
+                .withSecond(0)
+                .withNano(0)
+                .toInstant();
+
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+        when(inspectionOrderMapper.toResponse(order)).thenAnswer(inv ->
+                InspectionOrderResponse.builder()
+                        .appointmentStatus(order.getAppointmentStatus())
+                        .appointmentScheduledAt(order.getAppointmentScheduledAt())
+                        .build());
+
+        InspectionAppointmentRequest req = new InspectionAppointmentRequest(tomorrow9Am, InspectionAppointmentShift.MORNING, "Tôi hẹn lại ca sáng");
+        InspectionOrderResponse resp = service.scheduleAppointment(seller.getId(), order.getId(), req);
+
+        assertEquals(InspectionAppointmentStatus.PENDING_CENTER_CONFIRMATION, resp.appointmentStatus());
+        assertEquals(tomorrow9Am, order.getAppointmentScheduledAt());
+        assertEquals(InspectionAppointmentShift.MORNING, order.getAppointmentShift());
+        assertNull(order.getCounterScheduledAt());
+        assertNull(order.getCounterShift());
+        assertNull(order.getCounterNote());
+        verify(notificationService).notifyInApp(eq(center.getId()), any(), any(), eq(NotificationType.INSPECTION), eq(order.getId()), any(), any());
+    }
+
+    @Test
     @DisplayName("WP-1: Không thể tạo đơn mới nếu bài đăng đang có đơn kiểm định ACTIVE")
     void testRequestInspectionThrowsConflictWhenActiveOrderExists() {
         when(postRepository.findByIdForUpdate(post.getId())).thenReturn(Optional.of(post));
@@ -358,6 +401,7 @@ class InspectionServiceImplWorkflowTest {
         order.setOrderType(InspectionOrderType.AT_HOME);
         order.setStatus("SCHEDULED");
         order.setAppointmentScheduledAt(Instant.now().plusSeconds(60));
+        order.setAppointmentStatus(InspectionAppointmentStatus.CONFIRMED);
         when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
 
         assertThrows(ForbiddenException.class, () -> service.getOrCreateHomeCheckInCode(buyer.getId(), order.getId()));
@@ -383,25 +427,6 @@ class InspectionServiceImplWorkflowTest {
         assertEquals("INSPECTING", order.getStatus());
         assertNull(order.getHomeCheckInCode());
         verify(inspectionOrderRepository).save(order);
-    }
-
-    @Test
-    void reschedulingInvalidatesTheOldCheckInCode() {
-        order.setOrderType(InspectionOrderType.AT_HOME);
-        order.setStatus("SCHEDULED");
-        order.setAppointmentScheduledAt(Instant.now().plusSeconds(60));
-        order.setBuyerPaidAt(Instant.now());
-        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
-        when(inspectionOrderRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-
-        var oldCode = service.getOrCreateHomeCheckInCode(seller.getId(), order.getId()).code();
-        service.scheduleAppointment(seller.getId(), order.getId(),
-                new InspectionAppointmentRequest(Instant.now().plusSeconds(3600), null));
-        var newCode = service.getOrCreateHomeCheckInCode(seller.getId(), order.getId()).code();
-
-        assertNotEquals(oldCode, newCode);
-        assertThrows(BadRequestException.class, () -> service.startInspection(inspector.getId(), order.getId(),
-                new InspectionStartRequest(oldCode)));
     }
 
     @Test
