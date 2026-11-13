@@ -1,5 +1,6 @@
 package com.secondlife.secondlife.service;
 
+import com.secondlife.secondlife.dto.request.ConfirmShipmentCashRequest;
 import com.secondlife.secondlife.dto.request.CreateShipmentRequest;
 import com.secondlife.secondlife.dto.request.ReportRequests;
 import com.secondlife.secondlife.dto.response.ShipmentResponse;
@@ -30,6 +31,8 @@ public interface ShipmentService {
     ShipmentResponse refundReturned(UUID actor, boolean staff, UUID id, String reason);
 
     ShipmentResponse refundReturned(UUID actor, boolean staff, UUID id, String reason, ReportRequests.ResponsibleParty responsibleParty);
+
+    ShipmentResponse confirmCashPayment(UUID actor, boolean reviewer, UUID shipmentId, ConfirmShipmentCashRequest request);
 
     ShipmentResponse sync(UUID actor, boolean staff, UUID id);
 

@@ -101,6 +101,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -300,25 +301,6 @@ public class InspectionServiceImpl implements InspectionService {
             totalFee = quote.atCenterTotalFee();
         }
 
-        BigDecimal buyerFeeShare;
-        BigDecimal sellerFeeShare;
-
-        switch (feePayer) {
-            case BUYER_PAYS -> {
-                buyerFeeShare = totalFee;
-                sellerFeeShare = BigDecimal.ZERO;
-            }
-            case SELLER_PAYS -> {
-                buyerFeeShare = BigDecimal.ZERO;
-                sellerFeeShare = totalFee;
-            }
-            case SPLIT_50_50 -> {
-                buyerFeeShare = totalFee.divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
-                sellerFeeShare = totalFee.subtract(buyerFeeShare);
-            }
-            default -> throw new BadRequestException("Tùy chọn phân chia phí không hợp lệ");
-        }
-
         BigDecimal commitmentDeposit = BigDecimal.ZERO;
         if (buyerCommitmentDepositRate.compareTo(BigDecimal.ZERO) > 0) {
             commitmentDeposit = finalItemPrice.multiply(buyerCommitmentDepositRate)
@@ -345,8 +327,8 @@ public class InspectionServiceImpl implements InspectionService {
         order.setReturnShippingReserveFee(returnReserve);
         inspectionPricingService.applyConfiguration(order, quote);
 
-        order.setBuyerFeeShare(buyerFeeShare);
-        order.setSellerFeeShare(sellerFeeShare);
+        order.setCashShippingSimulation(orderType == InspectionOrderType.AT_CENTER && quote.cashShippingSimulationEnabled());
+        setFeeShares(order, totalFee);
         order.setBuyerCommitmentDeposit(commitmentDeposit);
 
         order.setBuyerConsentZin(request.buyerConsentZinLoss());
@@ -460,6 +442,8 @@ public class InspectionServiceImpl implements InspectionService {
                     order.setReturnShippingReserveFee(quote.returnShippingReserveFee());
                 }
                 order.setInspectionFee(quote.baseInspectionFee());
+                order.setCashShippingSimulation(request.counterOrderType() == InspectionOrderType.AT_CENTER
+                        && quote.cashShippingSimulationEnabled());
                 inspectionPricingService.applyConfiguration(order, quote);
             }
 
@@ -468,21 +452,7 @@ public class InspectionServiceImpl implements InspectionService {
                     ? order.getInspectionFee().add(order.getTravelFee())
                     : order.getInspectionFee().add(order.getShippingFee()).add(order.getReturnShippingReserveFee());
 
-            switch (request.counterFeePayer()) {
-                case BUYER_PAYS -> {
-                    order.setBuyerFeeShare(totalFee);
-                    order.setSellerFeeShare(BigDecimal.ZERO);
-                }
-                case SELLER_PAYS -> {
-                    order.setBuyerFeeShare(BigDecimal.ZERO);
-                    order.setSellerFeeShare(totalFee);
-                }
-                case SPLIT_50_50 -> {
-                    BigDecimal half = totalFee.divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
-                    order.setBuyerFeeShare(half);
-                    order.setSellerFeeShare(totalFee.subtract(half));
-                }
-            }
+            setFeeShares(order, totalFee);
             order.setStatus(InspectionOrderStatus.WAITING_BUYER_APPROVAL.name());
             order.setApprovalDeadline(Instant.now().plus(Duration.ofHours(approvalTtlHours)));
             order.setNote("Người bán đề xuất lại phương án chia phí: " + request.counterFeePayer());
@@ -607,21 +577,7 @@ public class InspectionServiceImpl implements InspectionService {
                     ? order.getInspectionFee().add(order.getTravelFee())
                     : order.getInspectionFee().add(order.getShippingFee()).add(order.getReturnShippingReserveFee());
 
-            switch (request.counterFeePayer()) {
-                case BUYER_PAYS -> {
-                    order.setBuyerFeeShare(totalFee);
-                    order.setSellerFeeShare(BigDecimal.ZERO);
-                }
-                case SELLER_PAYS -> {
-                    order.setBuyerFeeShare(BigDecimal.ZERO);
-                    order.setSellerFeeShare(totalFee);
-                }
-                case SPLIT_50_50 -> {
-                    BigDecimal half = totalFee.divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
-                    order.setBuyerFeeShare(half);
-                    order.setSellerFeeShare(totalFee.subtract(half));
-                }
-            }
+            setFeeShares(order, totalFee);
 
             order.setStatus(InspectionOrderStatus.WAITING_SELLER_APPROVAL.name());
             order.setApprovalDeadline(Instant.now().plus(Duration.ofHours(approvalTtlHours)));
@@ -769,10 +725,15 @@ public class InspectionServiceImpl implements InspectionService {
             throw new ForbiddenException("Bạn không có quyền xem thông tin đơn kiểm định này");
         }
 
-        return toOrderDetail(order);
+        boolean canViewCenterPayout = actor != null && actor.hasRole("INSPECTION_CENTER")
+                && (isCenter || (order.getInspectionCenter() == null && managesInspector));
+        BigDecimal centerPayoutAmount = canViewCenterPayout
+                ? feeSettlementService.getCenterPayouts(actorId, List.of(orderId)).get(orderId)
+                : null;
+        return toOrderDetail(order, centerPayoutAmount);
     }
 
-    private InspectionOrderResponse toOrderDetail(InspectionOrder inspection) {
+    private InspectionOrderResponse toOrderDetail(InspectionOrder inspection, BigDecimal centerPayoutAmount) {
         Order purchase = inspection.getOrder();
         List<Shipment> route = shipments.findInspectionRoute(inspection.getId(), purchase == null ? null : purchase.getId());
         Shipment inbound = latestShipment(route, "SELLER_TO_CENTER");
@@ -806,7 +767,7 @@ public class InspectionServiceImpl implements InspectionService {
         if (buyerContact == null) buyerContact = readShippingContact(inspection.getBuyerDeliveryAddressJson());
 
         return inspectionOrderMapper.toResponse(inspection, withProfilePhone(sellerContact, seller),
-                withProfilePhone(buyerContact, inspection.getBuyer()), centerContact);
+                withProfilePhone(buyerContact, inspection.getBuyer()), centerContact, centerPayoutAmount);
     }
 
     private Shipment latestShipment(List<Shipment> route, String leg) {
@@ -1073,7 +1034,10 @@ public class InspectionServiceImpl implements InspectionService {
         if (actor.hasRole("ADMIN") || actor.hasRole("STAFF")) return getAllOrders(status, pageable);
         String normalized = status == null || status.isBlank() ? null : status.strip().toUpperCase(Locale.ROOT);
         if (actor.hasRole("INSPECTION_CENTER")) {
-            return inspectionOrderRepository.findVisibleToCenter(actorId, normalized, pageable).map(inspectionOrderMapper::toResponse);
+            Page<InspectionOrder> orders = inspectionOrderRepository.findVisibleToCenter(actorId, normalized, pageable);
+            List<UUID> orderIds = orders.getContent().stream().map(InspectionOrder::getId).toList();
+            Map<UUID, BigDecimal> payouts = feeSettlementService.getCenterPayouts(actorId, orderIds);
+            return orders.map(order -> inspectionOrderMapper.toResponse(order, payouts.get(order.getId())));
         }
         if (actor.hasRole("INSPECTOR")) {
             return inspectionOrderRepository.findVisibleToInspector(actorId, normalized, pageable).map(inspectionOrderMapper::toResponse);
@@ -1529,6 +1493,14 @@ public class InspectionServiceImpl implements InspectionService {
     private void requireFundedConfiguredRequest(InspectionOrder order) {
         if (order.getChecklistSnapshotJson() == null || order.getInspectionScope() != InspectionScope.BUYER_REQUEST) return;
         requireInspectionFeesPaid(order);
+    }
+
+    private void setFeeShares(InspectionOrder order, BigDecimal totalFee) {
+        BigDecimal outboundCash = order.isCashShippingSimulation() ? order.getShippingFee() : BigDecimal.ZERO;
+        BigDecimal remainingFees = totalFee.subtract(outboundCash);
+        BigDecimal buyerRemaining = order.getFeePayer().buyerShare(remainingFees);
+        order.setBuyerFeeShare(buyerRemaining.add(order.getFeePayer().buyerShare(outboundCash)));
+        order.setSellerFeeShare(remainingFees.subtract(buyerRemaining));
     }
 
     private void requireInspectionFeesPaid(InspectionOrder order) {

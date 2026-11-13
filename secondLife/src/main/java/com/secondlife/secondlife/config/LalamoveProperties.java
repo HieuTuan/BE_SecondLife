@@ -25,12 +25,18 @@ public class LalamoveProperties {
     @Positive @Max(4 * 1024 * 1024) private int maxResponseCharacters;
     @Min(0) private int webhookMaxFutureSkewSeconds;
 
+    public boolean isSandbox() {
+        if (baseUrl == null) return false;
+        String normalized = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        return Set.of("https://rest.sandbox.lalamove.com", "https://rest.sandbox.lalamove.com/v3").contains(normalized);
+    }
+
     @AssertTrue(message = "Enabled Lalamove integration requires approved gateway and matching API credentials")
     public boolean isEnabledConfigurationValid() {
         if (!enabled) return true;
         if (baseUrl == null || key == null || secret == null) return false;
         String normalized = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
-        boolean sandbox = Set.of("https://rest.sandbox.lalamove.com", "https://rest.sandbox.lalamove.com/v3").contains(normalized);
+        boolean sandbox = isSandbox();
         boolean production = Set.of("https://rest.lalamove.com", "https://rest.lalamove.com/v3").contains(normalized);
         return (sandbox && key.startsWith("pk_test_") && secret.startsWith("sk_test_")
                 || production && key.startsWith("pk_prod_") && secret.startsWith("sk_prod_"))

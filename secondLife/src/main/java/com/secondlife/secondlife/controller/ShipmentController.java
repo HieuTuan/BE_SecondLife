@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.ApiResponse;
+import com.secondlife.secondlife.dto.request.ConfirmShipmentCashRequest;
 import com.secondlife.secondlife.dto.request.CreateShipmentRequest;
 import com.secondlife.secondlife.dto.request.ReconcileShipmentRequest;
 import com.secondlife.secondlife.dto.request.ShippingDecisionRequest;
@@ -105,6 +106,14 @@ public class ShipmentController {
     public ApiResponse<ShipmentResponse> sync(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID shipmentId) {
         return ApiResponse.success(shipments.sync(actor(user),staff(),shipmentId));
     }
+    @PostMapping("/shipments/{shipmentId}/cash-confirmation")
+    @PreAuthorize("(hasRole('STAFF') and hasAuthority('STAFF_DISPUTE_REVIEW')) or (hasRole('ADMIN') and hasAuthority('ADMIN_RBAC_MANAGE'))")
+    @Operation(summary = "Verify a simulated inspection shipment cash payment and reimburse the recorded payer")
+    public ApiResponse<ShipmentResponse> confirmCashPayment(@AuthenticationPrincipal CustomUserDetails user,
+            @PathVariable UUID shipmentId, @Valid @RequestBody ConfirmShipmentCashRequest request) {
+        return ApiResponse.success(shipments.confirmCashPayment(actor(user), staff(), shipmentId, request));
+    }
+
     @PostMapping("/shipments/{shipmentId}/refund") @PreAuthorize("(hasRole('STAFF') and hasAuthority('STAFF_DISPUTE_REVIEW')) or (hasRole('ADMIN') and hasAuthority('ADMIN_RBAC_MANAGE'))")
     public ApiResponse<ShipmentResponse> refund(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID shipmentId,@Valid @RequestBody ShippingDecisionRequest body) {
         return ApiResponse.success(shipments.refundReturned(actor(user),staff(),shipmentId,body.reason(),body.responsibleParty()));

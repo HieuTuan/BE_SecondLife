@@ -215,6 +215,21 @@ public class WalletServiceImpl implements WalletService {
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
+    public void reimburseShipping(UUID userId, BigDecimal amount, UUID shipmentId) {
+        validateAmountPrecision(amount);
+        if (amount.signum() <= 0) {
+            throw new BadRequestException("Shipping reimbursement must be positive");
+        }
+        userWalletRepository.ensureWalletExists(UUID.randomUUID(), userId);
+        UserWallet wallet = getWalletWithLock(userId);
+        wallet.setBalance(wallet.getBalance().add(amount));
+        userWalletRepository.save(wallet);
+        createTransaction(wallet, amount, WalletTransactionType.SHIPPING_REIMBURSE, shipmentId,
+                WalletTransactionReferenceType.SHIPMENT);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public BigDecimal collectReturnShippingFee(UUID sellerId, BigDecimal fee, UUID shipmentId) {
         if (fee == null || fee.signum() < 0 || fee.compareTo(new BigDecimal("1000000000")) > 0) {
             throw new ConflictException("Invalid return shipping fee");

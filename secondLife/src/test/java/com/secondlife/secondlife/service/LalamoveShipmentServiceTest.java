@@ -14,6 +14,8 @@ import com.secondlife.secondlife.service.impl.ListingFingerprintImpl;
 import com.secondlife.secondlife.service.impl.ShipmentServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
@@ -122,7 +124,9 @@ class LalamoveShipmentServiceTest {
         verify(lala, times(1)).create(anyMap());
     }
 
-    @Test void assignedCenterCanReturnFailedGoodsWithoutClosingAppealWindow() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void assignedCenterCanReturnFailedGoodsWithoutClosingAppealWindow(boolean cashShipping) {
         User center = new User();
         center.setId(UUID.randomUUID());
         InspectionOrder inspection = new InspectionOrder();
@@ -134,6 +138,7 @@ class LalamoveShipmentServiceTest {
         order.getPost().setPrice(order.getFinalPrice());
         inspection.setOrderType(InspectionOrderType.AT_CENTER);
         inspection.setStatus("FAILED");
+        inspection.setCashShippingSimulation(cashShipping);
         inspection.setFeeSettledAt(Instant.now());
         inspection.setReturnShippingReserveFee(new BigDecimal("36000"));
         Instant appealDeadline = Instant.now().plusSeconds(3600);
@@ -189,7 +194,15 @@ class LalamoveShipmentServiceTest {
         assertEquals("FAILED", inspection.getStatus());
         assertEquals(appealDeadline, inspection.getAppealDeadline());
         assertEquals("DELIVERED", rows.get(result.shipmentId()).getStatus());
-        verify(inspectionFeeSettlement).settleReturnShipping(inspection, new BigDecimal("32000"));
+        if (cashShipping) {
+            assertEquals(center.getId(), result.cashPayerId());
+            verify(lala).create(argThat(payload -> Boolean.TRUE.equals(payload.get("inspection_cash_simulation"))
+                    && payload.get("content").toString().startsWith("Trung tâm kiểm định")));
+            verifyNoInteractions(inspectionFeeSettlement);
+        } else {
+            assertNull(result.cashPayerId());
+            verify(inspectionFeeSettlement).settleReturnShipping(inspection, new BigDecimal("32000"));
+        }
     }
 
     @Test void carrierIdentityPersistsAndReplayDoesNotCreateTwice() {

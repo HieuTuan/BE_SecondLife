@@ -1,5 +1,6 @@
 package com.secondlife.secondlife.service.impl;
 
+import com.secondlife.secondlife.dto.request.ConfirmShipmentCashRequest;
 import com.secondlife.secondlife.dto.request.CreateShipmentRequest;
 import com.secondlife.secondlife.dto.request.ReportRequests;
 import com.secondlife.secondlife.dto.request.ShippingAddress;
@@ -47,6 +48,7 @@ import com.secondlife.secondlife.service.WalletService;
 
 import jakarta.persistence.LockModeType;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
@@ -92,6 +94,7 @@ public class ShipmentServiceImpl implements ShipmentService {
     private final InspectionCenterProfileService centerProfiles;
     private final InspectionShippingQuoteService inspectionShipping;
     private final InspectionFeeSettlementService inspectionFeeSettlement;
+    private final boolean cashShippingSimulationEnabled;
 
     public ShipmentServiceImpl(ShipmentRepository shipments, ShipmentEventRepository events, OrderRepository orders,
                            InspectionOrderRepository inspections, ShippingQuoteRepository quotes, ShippingQuoteService quoteService,
@@ -100,7 +103,7 @@ public class ShipmentServiceImpl implements ShipmentService {
                            SystemWalletService systemWallet, SellerReputationService reputation, ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes, ReturnShippingFeeService returnShippingFees,
                            InspectionCenterProfileService centerProfiles, InspectionShippingQuoteService inspectionShipping,
                            InspectionFeeSettlementService inspectionFeeSettlement) {
-        this(shipments, events, orders, inspections, quotes, quoteService, geocoding, provider, mapper, wallets, transactions, systemWallet, reputation, null, null, listingFingerprint, shipmentMapper, disputes, returnShippingFees, centerProfiles, inspectionShipping, inspectionFeeSettlement);
+        this(shipments, events, orders, inspections, quotes, quoteService, geocoding, provider, mapper, wallets, transactions, systemWallet, reputation, null, null, listingFingerprint, shipmentMapper, disputes, returnShippingFees, centerProfiles, inspectionShipping, inspectionFeeSettlement, false);
     }
 
     @Autowired
@@ -113,7 +116,8 @@ public class ShipmentServiceImpl implements ShipmentService {
                            @Autowired(required = false) InspectionSealLogRepository sealLogs,
                            ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes, ReturnShippingFeeService returnShippingFees,
                            InspectionCenterProfileService centerProfiles, InspectionShippingQuoteService inspectionShipping,
-                           InspectionFeeSettlementService inspectionFeeSettlement) {
+                           InspectionFeeSettlementService inspectionFeeSettlement,
+                           @Value("${app.inspection.cash-shipping-simulation-enabled:false}") boolean cashShippingSimulationEnabled) {
         this.shipmentMapper = shipmentMapper;
         this.disputes = Objects.requireNonNull(disputes, "OrderDisputeService is required");
         this.returnShippingFees = Objects.requireNonNull(returnShippingFees, "ReturnShippingFeeService is required");
@@ -136,6 +140,7 @@ public class ShipmentServiceImpl implements ShipmentService {
         this.centerProfiles = centerProfiles;
         this.inspectionShipping = inspectionShipping;
         this.inspectionFeeSettlement = inspectionFeeSettlement;
+        this.cashShippingSimulationEnabled = cashShippingSimulationEnabled;
         this.listingFingerprint = listingFingerprint;
     }
 
@@ -204,7 +209,7 @@ public class ShipmentServiceImpl implements ShipmentService {
                         .map(InspectionOrder::getId).orElse(null);
             }
         }
-        var prepared=prepare(actor,orderId,linkedInspectionId,order.getSeller().getId(),order.getBuyer().getId(),request,payload,quotedFee,quote.getProvider());
+        var prepared=prepare(actor,orderId,linkedInspectionId,order.getSeller().getId(),order.getBuyer().getId(),request,payload,quotedFee,quote.getProvider(),null);
         if (returnDecision!=null) disputes.bindReturn(order,returnDecision,shipments.findById(prepared.id()).orElseThrow());
         return prepared;
     }
@@ -352,7 +357,10 @@ public class ShipmentServiceImpl implements ShipmentService {
         }
 
         UUID buyer = inspection.getBuyer() == null ? null : inspection.getBuyer().getId();
-        return prepare(actor,null,inspectionId,seller,buyer,request,payload,fee,saved.map(Shipment::getProvider).orElse(activeCarrier()));
+        UUID cashPayer = inspection.isCashShippingSimulation() && "SELLER_TO_CENTER".equals(request.leg())
+                ? seller : null;
+        return prepare(actor, null, inspectionId, seller, buyer, request, payload, fee,
+                saved.map(Shipment::getProvider).orElse(activeCarrier()), cashPayer);
     }
 
     @Override
@@ -431,8 +439,9 @@ public class ShipmentServiceImpl implements ShipmentService {
             payload = ShippingPayloads.create(from, to, ShippingPayloads.parcel(post), post.getTitle(), post.getPrice());
         }
         UUID buyer = inspection.getBuyer() == null ? null : inspection.getBuyer().getId();
+        UUID cashPayer = inspection.isCashShippingSimulation() && centerActor ? actor : null;
         return prepare(actor, null, inspectionId, seller, buyer, request, payload,
-                inspection.getReturnShippingReserveFee(), saved.map(Shipment::getProvider).orElse(activeCarrier()));
+                inspection.getReturnShippingReserveFee(), saved.map(Shipment::getProvider).orElse(activeCarrier()), cashPayer);
     }
 
     private ShippingAddress legacyCenterPickup(InspectionOrder inspection, CreateShipmentRequest request,
@@ -467,7 +476,9 @@ public class ShipmentServiceImpl implements ShipmentService {
         return total.decimalValue();
     }
 
-    private Prepared prepare(UUID actor,UUID orderId,UUID inspectionId,UUID seller,UUID buyer,CreateShipmentRequest request,Map<String,Object> payload,BigDecimal fee,String carrierCode) {
+    private Prepared prepare(UUID actor, UUID orderId, UUID inspectionId, UUID seller, UUID buyer,
+                             CreateShipmentRequest request, Map<String, Object> payload, BigDecimal fee,
+                             String carrierCode, UUID cashPayer) {
         UUID parent=orderId!=null?orderId:inspectionId;
         UUID id=shipmentId(parent,request);
         payload.put("client_order_code","SL"+id);
@@ -520,6 +531,7 @@ public class ShipmentServiceImpl implements ShipmentService {
             shipment.setClientOrderCode("SL"+id); shipment.setPayload(serialized); shipment.setReason(request.reason()); shipment.setRequestedBy(actor);
             shipment.setStatus("CREATING"); shipment.setQuotedFee(fee);
             shipment.setProvider(carrierCode);
+            shipment.setCashPayerId(cashPayer);
             var route = mapper.valueToTree(payload);
             shipmentMapper.snapshotRoute(shipment, ShippingPayloads.storedAddress(route, "from"),
                     ShippingPayloads.storedAddress(route, "to"));
@@ -532,6 +544,13 @@ public class ShipmentServiceImpl implements ShipmentService {
         var shipment=lock(prepared.id());
         if (!prepared.submit() || shipment.getOrderCode()!=null) return shipmentMapper.toResponse(shipment);
         Map<String,Object> payload=readMap(shipment.getPayload());
+        if (shipment.getCashPayerId() != null) {
+            payload.put("inspection_cash_simulation", true);
+            String payerNote = "SELLER_TO_CENTER".equals(shipment.getLeg())
+                    ? "Người bán là bên trả cước tiền mặt. Vui lòng xác nhận với người bán trước khi giao."
+                    : "Trung tâm kiểm định là bên trả cước tiền mặt. Vui lòng xác nhận với trung tâm trước khi giao.";
+            payload.put("content", payerNote + "\n" + Objects.toString(payload.get("content"), ""));
+        }
         try {
             var result=carrier(shipment.getProvider()).create(payload);
             var code=result.get("order_code");
@@ -685,6 +704,53 @@ public class ShipmentServiceImpl implements ShipmentService {
         shipment.setReason(reason); shipment.setRequestedBy(actor); shipments.save(shipment);
         // Do not re-publish returned/disputed goods automatically; the seller must resolve their condition.
         return shipmentMapper.toResponse(shipment);
+    }
+
+    @Override
+    @Transactional
+    public ShipmentResponse confirmCashPayment(UUID actor, boolean reviewer, UUID shipmentId, ConfirmShipmentCashRequest request) {
+        if (!reviewer) throw new ForbiddenException("Cần quyền duyệt quyết toán cước vận chuyển");
+        if (!cashShippingSimulationEnabled) {
+            throw new ConflictException("Môi trường chưa bật hoàn ứng cước mô phỏng");
+        }
+        Shipment shipment = lock(shipmentId);
+        if (shipment.getCashPayerId() == null || shipment.getInspectionOrderId() == null
+                || shipment.getOrderId() != null || !"LALAMOVE".equals(shipment.getProvider())) {
+            throw new ConflictException("Vận đơn không thuộc luồng hoàn ứng cước mô phỏng");
+        }
+
+        String receiptReference = request.receiptReference().strip();
+        BigDecimal paidAmount = request.paidAmount();
+        if (shipment.getCashConfirmedAt() != null) {
+            if (shipment.getCashPaidAmount().compareTo(paidAmount) == 0
+                    && shipment.getCashReceiptReference().equals(receiptReference)) {
+                return shipmentMapper.toResponse(shipment);
+            }
+            throw new ConflictException("Vận đơn đã được quyết toán với thông tin khác");
+        }
+
+        if (!"DELIVERED".equals(shipment.getStatus()) || !"COMPLETED".equals(shipment.getProviderStatus())
+                || shipment.getOrderCode() == null) {
+            throw new ConflictException("Chỉ quyết toán khi Lalamove xác nhận giao hàng thành công");
+        }
+        if (shipment.getActualFee() == null || shipment.getActualFee().compareTo(paidAmount) != 0) {
+            throw new ConflictException("Số tiền biên nhận chưa khớp cước Lalamove. Hãy đồng bộ vận đơn trước khi xác nhận");
+        }
+        if (shipments.existsByInspectionOrderIdAndLegAndCashConfirmedAtIsNotNull(
+                shipment.getInspectionOrderId(), shipment.getLeg())) {
+            throw new ConflictException("Chặng vận chuyển này đã được quyết toán");
+        }
+
+        // lock() acquired the inspection before locking and refreshing the shipment.
+        InspectionOrder inspection = inspections.findById(shipment.getInspectionOrderId()).orElseThrow();
+        BigDecimal reimbursed = inspectionFeeSettlement.reimburseCashShipping(inspection, shipment, paidAmount);
+        shipment.setCashConfirmedBy(actor);
+        shipment.setCashReceiptReference(receiptReference);
+        shipment.setCashPaidAmount(paidAmount);
+        shipment.setCashReimbursedAmount(reimbursed);
+        shipment.setCashConfirmedAt(Instant.now());
+        shipment.setUpdatedAt(shipment.getCashConfirmedAt());
+        return shipmentMapper.toResponse(shipments.save(shipment));
     }
 
     @Transactional public ShipmentResponse sync(UUID actor,boolean staff,UUID id) {
@@ -928,7 +994,7 @@ public class ShipmentServiceImpl implements ShipmentService {
             if ("PASSED".equals(inspection.getStatus())) {
                 inspection.setStatus("CANCELLED");
             }
-            if (observedFee != null) {
+            if (observedFee != null && !inspection.isCashShippingSimulation()) {
                 inspectionFeeSettlement.settleReturnShipping(inspection, observedFee);
             }
         }

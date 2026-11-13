@@ -56,6 +56,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.Mock;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -478,6 +481,21 @@ class InspectionServiceImplWorkflowTest {
         assertNull(order.getApprovalDeadline());
     }
 
+    @ParameterizedTest
+    @CsvSource({"BUYER_PAYS,260000,0", "SELLER_PAYS,0,230000", "SPLIT_50_50,130000,115000"})
+    void cashOutboundPrepaymentExcludesOnlyTheSellersOutboundShare(InspectionFeePayer payer,
+            BigDecimal buyerDue, BigDecimal sellerDue) {
+        order.setCashShippingSimulation(true);
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+        when(inspectionOrderRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.respondInspection(seller.getId(), order.getId(),
+                new InspectionSellerRespondRequest("COUNTER", null, payer, false, null));
+
+        assertEquals(0, buyerDue.compareTo(order.getBuyerFeeShare()));
+        assertEquals(0, sellerDue.compareTo(order.getSellerFeeShare()));
+    }
+
     private void assertFeePaymentDeadline(Instant startedAt) {
         Instant deadline = order.getPaymentDeadline();
         assertNotNull(deadline);
@@ -502,9 +520,10 @@ class InspectionServiceImplWorkflowTest {
         verify(postRepository, times(1)).save(post);
     }
 
-    @Test
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     @DisplayName("WP-4: Yêu cầu kiểm định có kèm negotiationId -> Khóa giá finalItemPrice theo thương lượng")
-    void testRequestInspectionWithNegotiationLocksAgreedPrice() {
+    void testRequestInspectionWithNegotiationLocksAgreedPrice(boolean cashShipping) {
         UUID negotiationId = UUID.randomUUID();
         Negotiation negotiation = new Negotiation();
         negotiation.setId(negotiationId);
@@ -524,6 +543,7 @@ class InspectionServiceImplWorkflowTest {
                 .shippingToCenterFee(new BigDecimal("30000"))
                 .returnShippingReserveFee(new BigDecimal("30000"))
                 .atCenterTotalFee(new BigDecimal("260000"))
+                .cashShippingSimulationEnabled(cashShipping)
                 .build();
         when(inspectionPricingService.calculateQuote(any())).thenReturn(mockQuote);
         when(inspectionOrderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -531,7 +551,7 @@ class InspectionServiceImplWorkflowTest {
         InspectionBuyRequest req = new InspectionBuyRequest(
                 post.getId(),
                 InspectionOrderType.AT_CENTER,
-                InspectionFeePayer.BUYER_PAYS,
+                InspectionFeePayer.SPLIT_50_50,
                 true,
                 null,
                 null,
@@ -544,7 +564,10 @@ class InspectionServiceImplWorkflowTest {
 
         verify(inspectionOrderRepository).save(argThat(saved ->
                 saved.getFinalItemPrice().compareTo(new BigDecimal("9000000")) == 0 &&
-                saved.getBuyerCommitmentDeposit().compareTo(new BigDecimal("450000.00")) == 0
+                saved.getBuyerCommitmentDeposit().compareTo(new BigDecimal("450000.00")) == 0 &&
+                saved.isCashShippingSimulation() == cashShipping &&
+                saved.getBuyerFeeShare().compareTo(new BigDecimal("130000")) == 0 &&
+                saved.getSellerFeeShare().compareTo(BigDecimal.valueOf(cashShipping ? 115000 : 130000)) == 0
         ));
     }
 

@@ -1,11 +1,13 @@
 package com.secondlife.secondlife.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.secondlife.secondlife.enums.InspectionComplexityLevel;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionOrderStatus;
 import com.secondlife.secondlife.enums.InspectionOrderType;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 
 import java.math.BigDecimal;
@@ -89,7 +91,12 @@ public record InspectionOrderResponse(
     String buyerAddress,
     String inspectionCenterName,
     String inspectionCenterAddress,
-    String inspectionCenterPhone
+    String inspectionCenterPhone,
+    boolean cashShippingSimulation,
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Schema(description = "Settled amount credited to the authenticated inspection center in VND. "
+            + "Zero means the settlement allocated no payout. Omitted when no settlement belongs to this center.")
+    BigDecimal centerPayoutAmount
 ) {
     @JsonProperty("customerStatus")
     public String customerStatus() {

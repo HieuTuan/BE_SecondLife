@@ -163,6 +163,9 @@ public class LalamoveShippingProvider implements ShippingProvider {
 
     @Override public JsonNode create(Map<String, Object> payload) {
         configuration();
+        if (payload != null && Boolean.TRUE.equals(payload.get("inspection_cash_simulation")) && !properties.isSandbox()) {
+            throw new ConflictException("Simulated cash shipping requires Lalamove Sandbox");
+        }
         if (payload == null || payload.get("provider_quote") == null)
             throw new ConflictException("Obtain a current Lalamove quotation before creating the shipment");
         JsonNode quotation = payload.get("provider_quote") instanceof JsonNode node ? node : mapper.valueToTree(payload.get("provider_quote"));
