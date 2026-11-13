@@ -44,6 +44,10 @@ public class Item {
     @Column(name = "replacement_for_item_id")
     private UUID replacementForItemId;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "replacement_for_item_id", insertable = false, updatable = false)
+    private Item replacementForItem;
+
     @Column(name = "variant_code", length = 60)
     private String variantCode;
 }

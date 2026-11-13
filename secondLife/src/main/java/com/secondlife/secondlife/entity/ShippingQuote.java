@@ -18,10 +18,16 @@ public class ShippingQuote {
     private UUID id;
     @Column(nullable = false)
     private String provider = "LALAMOVE";
-    @Column(nullable = false)
+    @Column(name = "buyer_id", nullable = false)
     private UUID buyerId;
-    @Column(nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "buyer_id", insertable = false, updatable = false)
+    private User buyer;
+    @Column(name = "post_id", nullable = false)
     private UUID postId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "post_id", insertable = false, updatable = false)
+    private Post post;
     @Column(nullable = false)
     private String leg = "SELLER_TO_BUYER";
     @Column(nullable = false, columnDefinition = "TEXT")

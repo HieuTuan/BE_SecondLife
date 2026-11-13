@@ -20,14 +20,26 @@ public class OrderSettlement {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
-    @Column(nullable = false, unique = true)
+    @Column(name = "order_id", nullable = false, unique = true)
     private UUID orderId;
-    @Column(nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "order_id", insertable = false, updatable = false)
+    private Order order;
+    @Column(name = "commission_snapshot_id", nullable = false)
     private UUID commissionSnapshotId;
-    @Column(nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "commission_snapshot_id", insertable = false, updatable = false)
+    private OrderCommissionSnapshot commissionSnapshot;
+    @Column(name = "buyer_id", nullable = false)
     private UUID buyerId;
-    @Column(nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "buyer_id", insertable = false, updatable = false)
+    private User buyer;
+    @Column(name = "seller_id", nullable = false)
     private UUID sellerId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "seller_id", insertable = false, updatable = false)
+    private User seller;
     @Column(nullable = false, precision = 18, scale = 2)
     private BigDecimal commissionBase;
     @Column(nullable = false, precision = 18, scale = 2)

@@ -5,9 +5,12 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -32,8 +35,16 @@ public class CategoryQuestionTemplateProposal {
     @Column(name = "category_id", nullable = false)
     private UUID categoryId;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "category_id", insertable = false, updatable = false)
+    private Category category;
+
     @Column(name = "item_id")
     private UUID itemId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "item_id", insertable = false, updatable = false)
+    private Item item;
 
     @Column(name = "template_text", nullable = false, columnDefinition = "TEXT")
     private String templateText;
@@ -45,11 +56,19 @@ public class CategoryQuestionTemplateProposal {
     @Column(name = "triggered_by")
     private UUID triggeredBy;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "triggered_by", insertable = false, updatable = false)
+    private User triggeredByUser;
+
     @Column(name = "request_count", nullable = false)
     private int requestCount = 1;
 
     @Column(name = "reviewed_by")
     private UUID reviewedBy;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "reviewed_by", insertable = false, updatable = false)
+    private User reviewer;
 
     @Column(name = "reviewed_at")
     private Instant reviewedAt;

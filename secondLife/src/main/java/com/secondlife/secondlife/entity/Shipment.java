@@ -2,7 +2,10 @@ package com.secondlife.secondlife.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -26,13 +29,31 @@ public class Shipment {
     @Column(columnDefinition = "TEXT")
     private String shareLink;
     private Instant lastReconciledAt;
+    @Column(name = "order_id")
     private UUID orderId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "order_id", insertable = false, updatable = false)
+    private Order order;
+    @Column(name = "inspection_order_id")
     private UUID inspectionOrderId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "inspection_order_id", insertable = false, updatable = false)
+    private InspectionOrder inspectionOrder;
     @Column(name = "report_id")
     private UUID reportId;
-    @Column(nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "report_id", insertable = false, updatable = false)
+    private UserReport report;
+    @Column(name = "seller_id", nullable = false)
     private UUID sellerId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "seller_id", insertable = false, updatable = false)
+    private User seller;
+    @Column(name = "buyer_id")
     private UUID buyerId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "buyer_id", insertable = false, updatable = false)
+    private User buyer;
     @Column(nullable = false)
     private String leg;
     @Column(nullable = false)

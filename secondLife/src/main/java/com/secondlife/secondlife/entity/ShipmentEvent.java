@@ -15,8 +15,11 @@ public class ShipmentEvent {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
-    @Column(nullable = false)
+    @Column(name = "shipment_id", nullable = false)
     private UUID shipmentId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "shipment_id", insertable = false, updatable = false)
+    private Shipment shipment;
     @Column(nullable = false)
     private String eventKey;
     @Column(nullable = false)

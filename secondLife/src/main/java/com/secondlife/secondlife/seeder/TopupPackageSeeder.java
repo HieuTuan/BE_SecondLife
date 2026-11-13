@@ -1,6 +1,13 @@
 package com.secondlife.secondlife.seeder;
 
+import com.secondlife.secondlife.entity.CreditPricingRule;
+import com.secondlife.secondlife.entity.InspectionReturnShippingPolicy;
+import com.secondlife.secondlife.entity.SystemWallet;
 import com.secondlife.secondlife.entity.TopupPackage;
+import com.secondlife.secondlife.enums.CreditType;
+import com.secondlife.secondlife.repository.CreditPricingRuleRepository;
+import com.secondlife.secondlife.repository.InspectionReturnShippingPolicyRepository;
+import com.secondlife.secondlife.repository.SystemWalletRepository;
 import com.secondlife.secondlife.repository.TopupPackageRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -10,7 +17,9 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 @Slf4j
 @Component
@@ -19,9 +28,14 @@ import java.util.List;
 public class TopupPackageSeeder implements ApplicationRunner {
 
     private final TopupPackageRepository topupPackageRepository;
+    private final CreditPricingRuleRepository creditPricingRuleRepository;
+    private final SystemWalletRepository systemWalletRepository;
+    private final InspectionReturnShippingPolicyRepository inspectionReturnShippingPolicyRepository;
 
     @Override
     public void run(ApplicationArguments args) {
+        seedBaselineCreditPricingRulesAndSystemWallet();
+
         if (topupPackageRepository.count() > 0) {
             log.info("Topup packages already seeded. Skipping...");
             return;
@@ -54,6 +68,37 @@ public class TopupPackageSeeder implements ApplicationRunner {
 
         topupPackageRepository.saveAll(packages);
         log.info("Successfully seeded {} Topup Packages.", packages.size());
+    }
+
+    private void seedBaselineCreditPricingRulesAndSystemWallet() {
+        for (CreditType creditType : CreditType.values()) {
+            if (creditPricingRuleRepository.findByCreditType(creditType).isEmpty()) {
+                CreditPricingRule rule = new CreditPricingRule();
+                rule.setId(UUID.randomUUID());
+                rule.setCreditType(creditType);
+                rule.setUnitPrice(null);
+                rule.setCurrency("VND");
+                rule.setActive(false);
+                rule.setUpdatedAt(Instant.now());
+                creditPricingRuleRepository.save(rule);
+            }
+        }
+        if (systemWalletRepository.findById(SystemWallet.MAIN).isEmpty()) {
+            SystemWallet mainWallet = new SystemWallet();
+            mainWallet.setId(SystemWallet.MAIN);
+            mainWallet.setHeldBalance(BigDecimal.ZERO);
+            mainWallet.setShippingBalance(BigDecimal.ZERO);
+            mainWallet.setRevenueBalance(BigDecimal.ZERO);
+            mainWallet.setCurrency("VND");
+            mainWallet.setUpdatedAt(Instant.now());
+            systemWalletRepository.save(mainWallet);
+        }
+        if (inspectionReturnShippingPolicyRepository.findById((short) 1).isEmpty()) {
+            InspectionReturnShippingPolicy policy = new InspectionReturnShippingPolicy();
+            policy.setId((short) 1);
+            policy.setMarkupPercentage(new BigDecimal("20.00"));
+            inspectionReturnShippingPolicyRepository.save(policy);
+        }
     }
 
     private TopupPackage createPackage(String name, String description, int postCredits, int chatCredits, int valuationCredits, BigDecimal price, double discountPercentage) {

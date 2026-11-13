@@ -1,0 +1,98 @@
+erDiagram
+    %% =====================================================================
+    %% SECONDLIFE - FULL ENTITY RELATIONSHIP DIAGRAM (63 BANG NGHIEP VU)
+    %% =====================================================================
+
+    %% 1. Identity, RBAC & Notifications
+    Permission ||--o{ RolePermission : "permission_id"
+    Role ||--o{ RolePermission : "role_id"
+    Role ||--o{ UserRole : "role_id"
+    User ||--|{ UserRole : "user_id"
+    User ||--o| UserProfile : "user_id"
+    User ||--o{ Notification : "user_id"
+    User ||--o{ UserDeviceToken : "user_id"
+
+    %% 2. Seller Onboarding, eKYC & Reputation
+    User ||--o| SellerOnboarding : "user_id"
+    User ||--o| ShippingPickupAddress : "user_id"
+    User ||--o{ SellerVerification : "user_id"
+    SellerVerification ||--o{ SellerVerificationEvent : "verification_id"
+    User |o--o{ IdentityRestriction : "created_by"
+    User ||--o| SellerReputation : "seller_id"
+    User ||--o{ SellerReputationEvent : "seller_id"
+    Order ||--o| ReputationOrderOutcome : "order_id"
+    Order ||--o{ ReputationOrderFault : "order_id"
+    UserReport |o--o| ReputationIncident : "source_report_id"
+    Order ||--o{ OrderConfirmationPenalty : "order_id"
+
+    %% 3. Wallet, SePay Deposit & Credits
+    User ||--o| UserWallet : "user_id"
+    UserWallet ||--o{ WalletTransaction : "wallet_id"
+    User ||--o{ DepositRequest : "user_id"
+    DepositRequest ||..o| SePayTransferReceipt : "transfer_code"
+    User ||--o{ WalletWithdrawal : "user_id"
+    TopupPackage ||--o{ TopupPackagePurchase : "package_id"
+    User ||--o{ TopupPackagePurchase : "user_id"
+    User ||--o{ CreditBalance : "user_id"
+    User |o--o{ CreditPricingRule : "updated_by"
+    User ||--o{ CreditPurchase : "user_id"
+    CreditPurchase |o--o{ CreditLedgerEntry : "purchase_id"
+    User ||--o{ CreditLedgerEntry : "user_id"
+
+    %% 4. Catalog, AI Interview, Post & Negotiation
+    Category ||--o{ Item : "category_id"
+    Category ||--o{ CategoryQuestionTemplate : "category_id"
+    Item |o--o{ CategoryQuestionTemplate : "item_id"
+    Item |o--o{ CategoryQuestionTemplateProposal : "item_id"
+    User ||--o{ AiChatSession : "user_id"
+    AiChatSession ||--o{ AiChatMessage : "session_id"
+    AiChatSession |o--o| Post : "ai_chat_session_id"
+    Item |o--o{ Post : "item_id"
+    User ||--o{ Post : "user_id"
+    Post ||--|{ PostImage : "post_id"
+    Post |o..o{ AiPriceEstimate : "listing_id"
+    Post ||--o{ Negotiation : "post_id"
+    User ||--o{ Negotiation : "buyer_id"
+    Post ||--o{ ChatRoom : "post_id"
+    ChatRoom ||--o{ ChatMessage : "chat_room_id"
+
+    %% 5. Order, Escrow, Commission & Settlement
+    Post ||--o{ ShippingQuote : "post_id"
+    ShippingQuote |o--o| Order : "shipping_quote_id"
+    Negotiation |o--o| Order : "negotiation_id"
+    Post ||--o{ Order : "post_id"
+    User ||--o{ Order : "buyer_seller"
+    CommissionRule ||--o{ CommissionRuleAudit : "rule_id"
+    CommissionRule ||--o{ OrderCommissionSnapshot : "rule_id"
+    Order ||--o| OrderCommissionSnapshot : "order_id"
+    OrderCommissionSnapshot ||--o| OrderSettlement : "commission_snapshot_id"
+    Order ||--o| OrderSettlement : "order_id"
+    Order ||--o| SystemOrderFunds : "order_id"
+    Order ||--o{ SystemWalletTransaction : "order_id"
+
+    %% 6. Inspection, Checklist, Fee Proposal & Tamper Seal
+    Category ||--o{ InspectionChecklistTemplate : "category_id"
+    Item |o--o{ InspectionChecklistTemplate : "catalog_item_id"
+    InspectionChecklistTemplate ||--|{ InspectionChecklistItem : "template_id"
+    InspectionChecklistTemplate |o--o{ InspectionOrder : "checklist_template_id"
+    InspectionFeeProposal |o--o{ InspectionOrder : "fee_proposal_id"
+    InspectionShippingQuote |o--o| InspectionOrder : "inspection_shipping_quote_id"
+    Post ||--o{ InspectionOrder : "post_id"
+    Order |o--o| InspectionOrder : "order_id"
+    InspectionOrder ||--o| InspectionFeeSettlement : "inspection_order_id"
+    InspectionOrder ||--o{ InspectionSealLog : "inspection_order_id"
+
+    %% 7. Lalamove Shipping & Return Shipping Fee
+    Order |o--o{ Shipment : "order_id"
+    InspectionOrder |o--o{ Shipment : "inspection_order_id"
+    Shipment ||--o{ ShipmentEvent : "shipment_id"
+    Shipment ||--o| ReturnShippingFee : "id"
+    Order ||--o{ ReturnShippingFee : "order_id"
+
+    %% 8. Dispute, User Report & Video Evidence
+    Order |o--o| UserReport : "order_id"
+    User ||--o{ UserReport : "reporter_id"
+    UserReport ||--o{ ReturnShippingFee : "report_id"
+    UserReport ||--o{ ReportSubmission : "report_id"
+    UserReport ||--|{ ReportEvidenceUpload : "report_id"
+    User ||--o{ VideoUploadSession : "owner_id"
