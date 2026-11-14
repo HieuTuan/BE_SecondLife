@@ -201,6 +201,27 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
+    public boolean reimburseDeliveredReturn(InspectionOrder order, Shipment shipment, BigDecimal actualFee) {
+        if (!order.isCashShippingSimulation() || order.getBuyerPaidAt() == null || order.getSellerPaidAt() == null
+                || order.getInspectionCenter() == null || !"CENTER_TO_SELLER".equals(shipment.getLeg())
+                || !order.getInspectionCenter().getId().equals(shipment.getCashPayerId())) {
+            return false;
+        }
+
+        var settlement = settlements.findByInspectionOrderId(order.getId()).orElse(null);
+        if (!hasUnsettledReturnReserve(settlement)) return false;
+        if (actualFee.compareTo(settlement.getReturnReserveAllocated()) > 0) {
+            log.warn("Inspection {} return shipping fee {} exceeds reserve {}",
+                    order.getId(), actualFee, settlement.getReturnReserveAllocated());
+            return false;
+        }
+
+        applyCashReturnShippingSettlement(order, shipment, settlement, actualFee);
+        return true;
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public BigDecimal reimburseCashShipping(InspectionOrder order, Shipment shipment, BigDecimal paidAmount) {
         if (!order.isCashShippingSimulation() || order.getBuyerPaidAt() == null || order.getSellerPaidAt() == null) {
             throw new ConflictException("Đơn chưa đủ điều kiện quyết toán cước tiền mặt mô phỏng");
@@ -232,9 +253,14 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
         if (paidAmount.compareTo(settlement.getReturnReserveAllocated()) > 0) {
             throw new ConflictException("Cước thực tế vượt khoản dự phòng chặng hoàn đã thu");
         }
-        reimburse(shipment, paidAmount);
-        applyReturnShippingSettlement(order, settlement, paidAmount);
+        applyCashReturnShippingSettlement(order, shipment, settlement, paidAmount);
         return paidAmount;
+    }
+
+    private void applyCashReturnShippingSettlement(InspectionOrder order, Shipment shipment,
+                                                   InspectionFeeSettlement settlement, BigDecimal actualFee) {
+        reimburse(shipment, actualFee);
+        applyReturnShippingSettlement(order, settlement, actualFee);
     }
 
     private void reimburse(Shipment shipment, BigDecimal amount) {

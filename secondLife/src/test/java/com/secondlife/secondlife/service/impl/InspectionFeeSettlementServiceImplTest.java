@@ -193,6 +193,34 @@ class InspectionFeeSettlementServiceImplTest {
     }
 
     @Test
+    void automaticReturnCreditsHubOnceAndRefundsUnusedReserve() {
+        order.setCashShippingSimulation(true);
+        order.setInspectionCenter(manager);
+        var settlement = new InspectionFeeSettlement();
+        settlement.setOutcome(InspectionSettlementOutcome.FAILED_INSPECTION);
+        settlement.setReturnReserveAllocated(new BigDecimal("36000"));
+        when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.of(settlement));
+        var shipment = new Shipment();
+        shipment.setId(UUID.randomUUID());
+        shipment.setLeg("CENTER_TO_SELLER");
+        shipment.setCashPayerId(manager.getId());
+
+        assertFalse(settlementService.reimburseDeliveredReturn(order, shipment, new BigDecimal("42000")));
+        verifyNoInteractions(walletService);
+
+        BigDecimal actualFee = new BigDecimal("32000");
+        assertTrue(settlementService.reimburseDeliveredReturn(order, shipment, actualFee));
+        assertFalse(settlementService.reimburseDeliveredReturn(order, shipment, actualFee));
+
+        verify(walletService).reimburseShipping(manager.getId(), actualFee, shipment.getId());
+        verify(walletService).processRefund(buyer.getId(), new BigDecimal("2000.00"), order.getId(),
+                WalletTransactionReferenceType.INSPECTION_ORDER);
+        verify(walletService).processRefund(seller.getId(), new BigDecimal("2000.00"), order.getId(),
+                WalletTransactionReferenceType.INSPECTION_ORDER);
+        assertNotNull(settlement.getReturnShippingSettledAt());
+    }
+
+    @Test
     void returnAboveReserveRemainsUnsettled() {
         var settlement = new InspectionFeeSettlement();
         settlement.setOutcome(InspectionSettlementOutcome.PASSED_BUYER_DEFAULTED);

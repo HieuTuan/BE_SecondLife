@@ -411,16 +411,16 @@ class InspectionServiceImplWorkflowTest {
         var code = service.getOrCreateHomeCheckInCode(seller.getId(), order.getId()).code();
         assertEquals(code, service.getOrCreateHomeCheckInCode(seller.getId(), order.getId()).code());
         assertThrows(ForbiddenException.class, () -> service.startInspection(buyer.getId(), order.getId(),
-                new InspectionStartRequest(code)));
+                new InspectionStartRequest(code.toString(), null, null)));
         assertThrows(BadRequestException.class, () -> service.startInspection(inspector.getId(), order.getId(),
-                new InspectionStartRequest(UUID.randomUUID())));
+                new InspectionStartRequest(UUID.randomUUID().toString(), null, null)));
         assertThrows(ConflictException.class, () -> service.submitResult(order.getId(), inspector.getId(),
                 resultWithPhotos(null)));
 
         when(inspectionOrderRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        service.startInspection(inspector.getId(), order.getId(), new InspectionStartRequest(code));
+        service.startInspection(inspector.getId(), order.getId(), new InspectionStartRequest(code.toString(), null, null));
         Instant checkedInAt = order.getHomeCheckedInAt();
-        service.startInspection(inspector.getId(), order.getId(), new InspectionStartRequest(code));
+        service.startInspection(inspector.getId(), order.getId(), new InspectionStartRequest(code.toString(), null, null));
 
         assertNotNull(checkedInAt);
         assertEquals(checkedInAt, order.getHomeCheckedInAt());

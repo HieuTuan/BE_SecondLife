@@ -5,6 +5,7 @@ import com.secondlife.secondlife.dto.request.CancelOrderRequest;
 import com.secondlife.secondlife.dto.request.OrderRequestDTO;
 import com.secondlife.secondlife.dto.response.OrderBankPaymentResponse;
 import com.secondlife.secondlife.dto.response.OrderResponseDTO;
+import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Negotiation;
 import com.secondlife.secondlife.entity.Order;
 import com.secondlife.secondlife.entity.Post;
@@ -17,6 +18,7 @@ import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.OrderMapper;
+import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.NegotiationRepository;
 import com.secondlife.secondlife.repository.OrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
@@ -73,6 +75,8 @@ public class OrderServiceImpl implements OrderService {
     private final OrderConfirmationService confirmations;
     private PaidOrderService paidOrders;
     private OrderBankPaymentService bankPayments;
+    @Autowired(required = false)
+    private InspectionOrderRepository inspectionOrderRepository;
 
     @Autowired
     public OrderServiceImpl(OrderRepository orders,PostRepository posts,UserRepository users,NegotiationRepository negotiations,
@@ -253,19 +257,39 @@ public class OrderServiceImpl implements OrderService {
     @Transactional
     public OrderResponseDTO confirmDelivery(UUID buyerId, UUID orderId) {
         Order order = orderRepository.findByIdForUpdate(orderId)
-                .orElseThrow(() -> new NotFoundException("Order not found"));
+                .orElse(null);
+
+        if (order == null && inspectionOrderRepository != null) {
+            order = inspectionOrderRepository.findById(orderId)
+                    .map(InspectionOrder::getOrder)
+                    .filter(Objects::nonNull)
+                    .flatMap(o -> orderRepository.findByIdForUpdate(o.getId()))
+                    .orElse(null);
+        }
+
+        if (order == null) {
+            throw new NotFoundException("Order not found");
+        }
 
         if (!order.getBuyer().getId().equals(buyerId)) {
             throw new BadRequestException("Only the buyer can confirm delivery");
         }
 
-        if (order.getStatus()==OrderStatus.COMPLETED && order.getEscrowStatus()==EscrowStatus.RELEASED) return mapToDTO(order);
-        if (order.getStatus()!=OrderStatus.DELIVERED || order.getShippingDeliveredAt()==null)
-            throw new ConflictException("Carrier must confirm delivery before the buyer can release escrow");
+        if (order.getStatus() == OrderStatus.COMPLETED && order.getEscrowStatus() == EscrowStatus.RELEASED) {
+            return mapToDTO(order);
+        }
 
         if (order.getEscrowStatus() != EscrowStatus.HELD) {
             throw new ConflictException("Escrow funds are not currently HELD; resolve the shipping issue or return decision first");
         }
+
+        if (order.getStatus() != OrderStatus.DELIVERED) {
+            order.setStatus(OrderStatus.DELIVERED);
+        }
+        if (order.getShippingDeliveredAt() == null) {
+            order.setShippingDeliveredAt(Instant.now());
+        }
+        orderRepository.saveAndFlush(order);
 
         // Persist settlement and release the net seller amount using the order's policy snapshot.
         settlements.settle(order);

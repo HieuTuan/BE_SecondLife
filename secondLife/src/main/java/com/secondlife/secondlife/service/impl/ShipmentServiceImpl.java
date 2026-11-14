@@ -245,15 +245,18 @@ public class ShipmentServiceImpl implements ShipmentService {
         return submit(prepared);
     }
     private Prepared prepareForInspection(UUID actor,boolean staff,UUID inspectionId,CreateShipmentRequest request) {
+        UUID targetOrderId = null;
         UUID seller = inspections.findOwnerId(inspectionId).orElse(null);
         if (seller == null) {
             var byOrder = inspections.findByOrderId(inspectionId).orElse(null);
             if (byOrder != null) {
+                targetOrderId = inspectionId;
                 inspectionId = byOrder.getId();
                 seller = byOrder.getPost().getUser().getId();
             } else {
                 var ord = orders.findById(inspectionId).orElse(null);
                 if (ord != null) {
+                    targetOrderId = ord.getId();
                     var byPost = inspections.findFirstByPostIdOrderByCreatedAtDesc(ord.getPost().getId()).orElse(null);
                     if (byPost != null) {
                         inspectionId = byPost.getId();
@@ -356,10 +359,14 @@ public class ShipmentServiceImpl implements ShipmentService {
             }
         }
 
+        if (targetOrderId == null && inspection.getOrder() != null) {
+            targetOrderId = inspection.getOrder().getId();
+        }
+
         UUID buyer = inspection.getBuyer() == null ? null : inspection.getBuyer().getId();
         UUID cashPayer = inspection.isCashShippingSimulation() && "SELLER_TO_CENTER".equals(request.leg())
                 ? seller : null;
-        return prepare(actor, null, inspectionId, seller, buyer, request, payload, fee,
+        return prepare(actor, targetOrderId, inspectionId, seller, buyer, request, payload, fee,
                 saved.map(Shipment::getProvider).orElse(activeCarrier()), cashPayer);
     }
 
@@ -796,6 +803,15 @@ public class ShipmentServiceImpl implements ShipmentService {
         if (body.hasNonNull("share_link") && body.path("share_link").asText().startsWith("https://")) shipment.setShareLink(body.path("share_link").asText());
         if (body.hasNonNull("pod_url") && body.path("pod_url").asText().startsWith("https://")) shipment.setPodUrl(body.path("pod_url").asText());
         if ("FAILED".equals(body.path("pod_status").asText())) freeze(shipment);
+        if ("COMPLETED".equals(status) && !currentFee && awaitsAutomaticReturnReimbursement(shipment)) {
+            var detail = carrier("LALAMOVE").detail(code);
+            if (!code.equals(detail.path("order_code").asText())
+                    || !"COMPLETED".equals(detail.path("status").asText()) || !detail.hasNonNull("total_fee")) {
+                throw new ShippingProviderException("Lalamove has not confirmed the final return fee; retry callback", 503);
+            }
+            reconcileLalamove(shipment, detail);
+            return;
+        }
         if (!status.isBlank()) applyLalamoveStatus(shipment,status,time,currentFee ? fee.decimalValue() : null);
         shipment.setUpdatedAt(Instant.now()); shipments.save(shipment);
     }
@@ -994,12 +1010,37 @@ public class ShipmentServiceImpl implements ShipmentService {
             if ("PASSED".equals(inspection.getStatus())) {
                 inspection.setStatus("CANCELLED");
             }
-            if (observedFee != null && !inspection.isCashShippingSimulation()) {
-                inspectionFeeSettlement.settleReturnShipping(inspection, observedFee);
+            if (observedFee != null) {
+                if (inspection.isCashShippingSimulation()) {
+                    reimburseDeliveredCashReturn(inspection, shipment, observedFee);
+                } else {
+                    inspectionFeeSettlement.settleReturnShipping(inspection, observedFee);
+                }
             }
         }
         inspections.save(inspection);
     }
+
+    private boolean awaitsAutomaticReturnReimbursement(Shipment shipment) {
+        return cashShippingSimulationEnabled && "LALAMOVE".equals(shipment.getProvider())
+                && "CENTER_TO_SELLER".equals(shipment.getLeg()) && shipment.getInspectionOrderId() != null
+                && shipment.getCashPayerId() != null && shipment.getCashConfirmedAt() == null;
+    }
+
+    private void reimburseDeliveredCashReturn(InspectionOrder inspection, Shipment shipment, BigDecimal actualFee) {
+        if (!awaitsAutomaticReturnReimbursement(shipment) || shipment.getOrderCode() == null
+                || shipments.existsByInspectionOrderIdAndLegAndCashConfirmedAtIsNotNull(
+                        inspection.getId(), shipment.getLeg())
+                || !inspectionFeeSettlement.reimburseDeliveredReturn(inspection, shipment, actualFee)) {
+            return;
+        }
+
+        shipment.setCashReceiptReference("LALAMOVE_COMPLETED:" + shipment.getOrderCode());
+        shipment.setCashPaidAmount(actualFee);
+        shipment.setCashReimbursedAmount(actualFee);
+        shipment.setCashConfirmedAt(Instant.now());
+    }
+
     private void recordVerifiedPickup(Shipment shipment,Instant actualTime) {
         if(shipment.getOrderId()==null || !"SELLER_TO_BUYER".equals(shipment.getLeg())) return;
         var order=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();

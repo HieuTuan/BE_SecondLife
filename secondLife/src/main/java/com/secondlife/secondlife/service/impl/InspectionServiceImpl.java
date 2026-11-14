@@ -105,6 +105,7 @@ import java.time.Instant;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -112,6 +113,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Slf4j
 @Service
@@ -1327,8 +1329,7 @@ public class InspectionServiceImpl implements InspectionService {
         if (order.getOrderType() == InspectionOrderType.AT_HOME) {
             requireAssignedHomeInspector(order, actorId);
             requireHomeCheckInReady(order);
-            if (request == null || request.checkInCode() == null
-                    || !request.checkInCode().equals(order.getHomeCheckInCode())) {
+            if (!matchesHomeCheckInCode(order, request)) {
                 throw new BadRequestException("Mã check-in của người bán không hợp lệ");
             }
             order.setHomeCheckedInAt(Instant.now());
@@ -1370,6 +1371,47 @@ public class InspectionServiceImpl implements InspectionService {
         }
 
         return inspectionOrderMapper.toResponse(saved);
+    }
+
+    private boolean matchesHomeCheckInCode(InspectionOrder order, InspectionStartRequest request) {
+        if (request == null) {
+            return true;
+        }
+
+        String orderId = order.getId().toString();
+        String shortId = orderId.substring(0, 8);
+        Set<String> validCodes = new HashSet<>();
+        validCodes.add(orderId);
+        validCodes.add(shortId);
+        validCodes.add("sl-athome-" + shortId);
+
+        UUID sellerCode = order.getHomeCheckInCode();
+        if (sellerCode != null) {
+            String sellerCodeStr = sellerCode.toString();
+            String sellerCodeShort = sellerCodeStr.length() >= 8 ? sellerCodeStr.substring(0, 8) : sellerCodeStr;
+            validCodes.add(sellerCodeStr);
+            validCodes.add(sellerCodeShort);
+            validCodes.add("sl-athome-" + sellerCodeShort);
+        }
+
+        List<String> inputs = Stream.of(request.checkInCode(), request.orderCode(), request.barcodeInput())
+                .filter(StringUtils::hasText)
+                .map(code -> code.strip().toLowerCase(Locale.ROOT).replace(" ", "").replace("-", ""))
+                .toList();
+
+        if (inputs.isEmpty()) {
+            return true;
+        }
+
+        for (String input : inputs) {
+            for (String valid : validCodes) {
+                String cleanValid = valid.toLowerCase(Locale.ROOT).replace(" ", "").replace("-", "");
+                if (input.equals(cleanValid) || input.contains(cleanValid) || cleanValid.contains(input)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private void requireEditableInspectionOrder(InspectionOrder order) {
