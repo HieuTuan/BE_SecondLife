@@ -22,8 +22,9 @@ public class PostMapper {
         this.delegate = delegate;
     }
 
-    public MarketplaceListingResponse toMarketplaceResponse(Post post) {
-        return delegate.toMarketplaceResponse(post);
+    public MarketplaceListingResponse toMarketplaceResponse(Post post, boolean isInspected,
+                                                            String tamperSealId, String conditionGrade) {
+        return delegate.toMarketplaceResponse(post, isInspected, tamperSealId, conditionGrade);
     }
 
     public PostDto toResponse(Post post) {
@@ -46,12 +47,16 @@ public class PostMapper {
 
     @Mapper(config = MapStructConfiguration.class)
     public interface Delegate {
-        @Mapping(target = "postId", source = "id")
-        @Mapping(target = "sellerId", source = "user.id")
-        @Mapping(target = "sellerName", source = "user.profile.fullName")
-        @Mapping(target = "sellerAvatar", source = "user.profile.avatarUrl")
+        @Mapping(target = "postId", source = "post.id")
+        @Mapping(target = "sellerId", source = "post.user.id")
+        @Mapping(target = "sellerName", source = "post.user.profile.fullName")
+        @Mapping(target = "sellerAvatar", source = "post.user.profile.avatarUrl")
         @Mapping(target = "sellerAddress", expression = "java(profileAddress(post.getUser() == null ? null : post.getUser().getProfile()))")
-        MarketplaceListingResponse toMarketplaceResponse(Post post);
+        @Mapping(target = "isInspected", source = "isInspected")
+        @Mapping(target = "tamperSealId", source = "tamperSealId")
+        @Mapping(target = "conditionGrade", source = "conditionGrade")
+        MarketplaceListingResponse toMarketplaceResponse(Post post, boolean isInspected,
+                                                        String tamperSealId, String conditionGrade);
 
         PostDto toResponse(Post post);
 

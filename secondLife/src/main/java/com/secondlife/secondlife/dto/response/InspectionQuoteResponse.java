@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.dto.response;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 
 import java.math.BigDecimal;
@@ -32,7 +33,11 @@ public record InspectionQuoteResponse(
     AtCenterPackageDto atCenterPackage,
     InspectionConfigurationResponse inspectionConfiguration,
     InspectionShippingQuoteResponse shippingQuote,
-    boolean cashShippingSimulationEnabled
+    boolean cashShippingSimulationEnabled,
+    UUID inspectionCenterId,
+    String inspectionCenterName,
+    @Schema(description = "Khoảng cách đường chim bay từ kho người bán đến trung tâm, tính bằng km")
+    BigDecimal distanceKm
 ) {
 
     @JsonProperty("baseFee")

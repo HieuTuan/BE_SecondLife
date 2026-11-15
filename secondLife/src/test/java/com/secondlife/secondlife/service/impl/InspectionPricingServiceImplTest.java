@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.dto.request.InspectionQuoteRequest;
+import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.response.InspectionConfigurationResponse;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.enums.InspectionComplexityLevel;
@@ -10,10 +11,11 @@ import com.secondlife.secondlife.repository.CategoryRepository;
 import com.secondlife.secondlife.repository.InspectionFeeProposalRepository;
 import com.secondlife.secondlife.repository.InspectionTravelTierRepository;
 import com.secondlife.secondlife.repository.PostRepository;
-import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.InspectionConfigurationService;
 import com.secondlife.secondlife.service.InspectionGovernanceAccessService;
-import com.secondlife.secondlife.service.ShippingQuoteService;
+import com.secondlife.secondlife.service.InspectionLocationService;
+import com.secondlife.secondlife.service.InspectionLocationService.HubSelection;
+import com.secondlife.secondlife.service.InspectionShippingQuoteService;
 
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.Test;
@@ -28,8 +30,6 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -39,9 +39,9 @@ class InspectionPricingServiceImplTest {
     @Mock InspectionTravelFeeCalculator travelFeeCalculator;
     @Mock InspectionFeeProposalRepository proposalRepository;
     @Mock InspectionTravelTierRepository travelTierRepository;
-    @Mock UserRepository userRepository;
     @Mock CategoryRepository categoryRepository;
-    @Mock ShippingQuoteService shippingQuoteService;
+    @Mock InspectionLocationService locations;
+    @Mock InspectionShippingQuoteService inspectionShipping;
     @Mock ObjectMapper objectMapper;
     @Mock InspectionPricingMapper inspectionPricingMapper;
     @Mock InspectionConfigurationService configurations;
@@ -71,12 +71,17 @@ class InspectionPricingServiceImplTest {
         Post post = new Post();
         post.setId(UUID.randomUUID());
         when(postRepository.findById(post.getId())).thenReturn(Optional.of(post));
-        when(configurations.resolve(any(), isNull())).thenReturn(new InspectionConfigurationResponse(
-                UUID.randomUUID(), UUID.randomUUID(), InspectionComplexityLevel.L2,
+        UUID centerId = UUID.randomUUID();
+        ShippingAddress pickup = new ShippingAddress("Seller", "0912345678", "Kho người bán",
+                new BigDecimal("21.02"), new BigDecimal("105.53"));
+        when(locations.sellerPickup(post)).thenReturn(pickup);
+        when(locations.selectHub(pickup, null)).thenReturn(new HubSelection(centerId, "Hub", BigDecimal.ONE));
+        when(configurations.resolve(post, centerId)).thenReturn(new InspectionConfigurationResponse(
+                centerId, UUID.randomUUID(), InspectionComplexityLevel.L2,
                 UUID.randomUUID(), new BigDecimal("50000"), null));
         var request = InspectionQuoteRequest.builder().postId(post.getId())
                 .expectedFeeProposalId(UUID.randomUUID()).build();
         assertThrows(ConflictException.class, () -> service.quote(request));
-        verifyNoInteractions(shippingQuoteService, travelFeeCalculator);
+        verifyNoInteractions(inspectionShipping, travelFeeCalculator);
     }
 }

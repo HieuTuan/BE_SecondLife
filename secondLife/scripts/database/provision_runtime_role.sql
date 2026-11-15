@@ -32,6 +32,7 @@ DECLARE
     owner_id oid;
     object record;
     required_privileges text;
+    app_views constant text[] := ARRAY['inspection_hub_payouts', 'system_wallet_statement'];
     -- Review new migration tables here. Never grant on ALL TABLES or unknown/platform tables.
     app_tables constant text[] := ARRAY[
         'ai_chat_messages', 'ai_chat_sessions', 'ai_price_estimates',
@@ -133,6 +134,13 @@ BEGIN
     END LOOP;
 
     FOR object IN
+        SELECT relname FROM pg_class
+        WHERE relnamespace = schema_id AND relkind = 'v' AND relname = ANY(app_views)
+    LOOP
+        EXECUTE format('GRANT SELECT ON TABLE %I.%I TO %I', schema_name, object.relname, runtime_name);
+    END LOOP;
+
+    FOR object IN
         SELECT DISTINCT s.relname FROM pg_class s JOIN pg_depend d ON d.objid = s.oid
         JOIN pg_class t ON t.oid = d.refobjid
         WHERE s.relnamespace = schema_id AND s.relkind = 'S'
@@ -147,7 +155,7 @@ BEGIN
     END IF;
     -- Check effective ACLs as well as direct ACLs, including column grants on private/history tables.
     FOR object IN
-        SELECT oid, relname FROM pg_class
+        SELECT oid, relname, relkind FROM pg_class
         WHERE relnamespace = schema_id AND relkind IN ('r', 'p', 'v', 'm', 'f')
     LOOP
         IF has_table_privilege(runtime_id, object.oid, 'TRUNCATE,REFERENCES,TRIGGER')
@@ -158,7 +166,12 @@ BEGIN
                'SELECT WITH GRANT OPTION,INSERT WITH GRANT OPTION,UPDATE WITH GRANT OPTION,DELETE WITH GRANT OPTION') THEN
             RAISE EXCEPTION 'Unsafe effective structural/grant privileges on %.%', schema_name, object.relname;
         END IF;
-        IF NOT object.relname = ANY(app_tables)
+        IF object.relkind = 'v' AND object.relname = ANY(app_views) THEN
+            IF has_table_privilege(runtime_id, object.oid, 'INSERT,UPDATE,DELETE')
+               OR has_any_column_privilege(runtime_id, object.oid, 'INSERT,UPDATE') THEN
+                RAISE EXCEPTION 'Runtime can modify read-only view %.%', schema_name, object.relname;
+            END IF;
+        ELSIF NOT object.relname = ANY(app_tables)
            AND (has_table_privilege(runtime_id, object.oid, 'SELECT,INSERT,UPDATE,DELETE')
                 OR has_any_column_privilege(runtime_id, object.oid, 'SELECT,INSERT,UPDATE')) THEN
             RAISE EXCEPTION 'Runtime can access unreviewed/history table %.%; remove extra/PUBLIC grants first', schema_name, object.relname;

@@ -12,6 +12,7 @@ import com.secondlife.secondlife.repository.InspectionFeeSettlementRepository;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.InspectionFeeSettlementService;
+import com.secondlife.secondlife.service.SystemWalletService;
 import com.secondlife.secondlife.service.WalletService;
 
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +38,7 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
     private final InspectionFeeSettlementRepository settlements;
     private final InspectionOrderRepository inspectionOrders;
     private final WalletService walletService;
+    private final SystemWalletService systemWallet;
     private final UserRepository userRepository;
     private final BigDecimal platformFeeRate;
 
@@ -44,11 +46,13 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
             InspectionFeeSettlementRepository settlements,
             InspectionOrderRepository inspectionOrders,
             WalletService walletService,
+            SystemWalletService systemWallet,
             UserRepository userRepository,
             @Value("${app.inspection.platform-fee-share-rate:0.00}") BigDecimal platformFeeRate) {
         this.settlements = settlements;
         this.inspectionOrders = inspectionOrders;
         this.walletService = walletService;
+        this.systemWallet = systemWallet;
         this.userRepository = userRepository;
         this.platformFeeRate = platformFeeRate != null ? platformFeeRate : BigDecimal.ZERO;
     }
@@ -76,6 +80,7 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
             return existing.get();
         }
 
+        boolean tracked = systemWallet.lockInspectionFunds(inspectionOrder.getId());
         BigDecimal buyerFee = inspectionOrder.getBuyerPaidAt() != null && inspectionOrder.getBuyerFeeShare() != null
                 ? inspectionOrder.getBuyerFeeShare() : BigDecimal.ZERO;
         BigDecimal buyerDeposit = inspectionOrder.getBuyerPaidAt() != null && inspectionOrder.getBuyerCommitmentDeposit() != null
@@ -93,6 +98,8 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
         BigDecimal buyerRefund = BigDecimal.ZERO;
         BigDecimal sellerRefund = BigDecimal.ZERO;
         BigDecimal sellerCompensation = BigDecimal.ZERO;
+        BigDecimal sellerAdditionalCollected = BigDecimal.ZERO;
+        BigDecimal sellerOutstanding = BigDecimal.ZERO;
 
         BigDecimal serviceFee = (inspectionOrder.getInspectionFee() != null ? inspectionOrder.getInspectionFee() : BigDecimal.ZERO)
                 .add(inspectionOrder.getTravelFee() != null ? inspectionOrder.getTravelFee() : BigDecimal.ZERO);
@@ -111,11 +118,20 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
                 outboundShipping = outboundPrepaid;
                 returnReserve = returnReserveFee;
                 buyerRefund = buyerDeposit;
+                if (inspectionOrder.isCorporateShipping()) {
+                    buyerRefund = buyerRefund.add(buyerFee);
+                    BigDecimal sellerShortfall = serviceFee.add(outboundShipping).add(returnReserve)
+                            .subtract(sellerFee).max(BigDecimal.ZERO);
+                    sellerAdditionalCollected = collectFailedInspectionFee(inspectionOrder, sellerShortfall);
+                    sellerOutstanding = sellerShortfall.subtract(sellerAdditionalCollected);
+                }
             }
             case PASSED_PURCHASED -> {
                 centerPayout = computeCenterPayout(inspectionOrder, serviceFee);
                 outboundShipping = outboundPrepaid;
-                BigDecimal buyerReserveShare = buyerShare(inspectionOrder, returnReserveFee);
+                BigDecimal buyerReserveShare = inspectionOrder.isCorporateShipping()
+                        ? InspectionFeePayer.SPLIT_50_50.buyerShare(returnReserveFee)
+                        : buyerShare(inspectionOrder, returnReserveFee);
                 buyerRefund = buyerDeposit.add(buyerReserveShare);
                 sellerRefund = returnReserveFee.subtract(buyerReserveShare);
             }
@@ -134,7 +150,8 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
                 .add(sellerRefund)
                 .add(sellerCompensation);
 
-        BigDecimal platformRetained = totalCollected.subtract(allocatedBeforePlatform);
+        BigDecimal platformRetained = totalCollected.add(sellerAdditionalCollected).add(sellerOutstanding)
+                .subtract(allocatedBeforePlatform);
         if (platformRetained.signum() < 0) {
             throw new ConflictException("Phí đã thu không đủ để quyết toán kiểm định; cần kiểm tra giao dịch trước khi xử lý");
         }
@@ -162,6 +179,8 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
         settlement.setInspectionOrder(inspectionOrder);
         settlement.setOutcome(outcome);
         settlement.setTotalCollected(totalCollected);
+        settlement.setSellerAdditionalCollected(sellerAdditionalCollected);
+        settlement.setSellerOutstandingAmount(sellerOutstanding);
         settlement.setCenterRecipientUser(centerRecipient);
         settlement.setCenterPayoutAmount(centerPayout);
         settlement.setOutboundShippingAllocated(outboundShipping);
@@ -172,6 +191,9 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
         settlement.setPlatformRetainedAmount(platformRetained);
         settlement.setSettledAt(Instant.now());
 
+        if (tracked) {
+            systemWallet.settleInspectionFees(settlement);
+        }
         settlement = settlements.saveAndFlush(settlement);
 
         inspectionOrder.setFeeSettledAt(settlement.getSettledAt());
@@ -189,14 +211,31 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
             return;
         }
 
-        BigDecimal reserve = settlement.getReturnReserveAllocated();
-        BigDecimal remainder = reserve.subtract(actualFee);
-        if (remainder.signum() < 0) {
-            log.warn("Inspection {} return shipping fee {} exceeds reserve {}", order.getId(), actualFee, reserve);
+        boolean sellerPays = order.isCorporateShipping()
+                && settlement.getOutcome() == InspectionSettlementOutcome.FAILED_INSPECTION;
+        if (!sellerPays && settlement.getReturnReserveAllocated().compareTo(actualFee) < 0) {
+            log.warn("Inspection {} return shipping fee {} exceeds reserve {}",
+                    order.getId(), actualFee, settlement.getReturnReserveAllocated());
             return;
         }
 
-        applyReturnShippingSettlement(order, settlement, actualFee);
+        boolean tracked = systemWallet.lockInspectionFunds(order.getId());
+        BigDecimal collectedBefore = settlement.getSellerAdditionalCollected();
+        BigDecimal refundedBefore = totalRefunds(settlement);
+        if (sellerPays) {
+            settleSellerPaidReturn(order, settlement, actualFee);
+        } else {
+            applyReturnShippingSettlement(order, settlement, actualFee);
+        }
+        if (tracked) {
+            systemWallet.settleInspectionReturn(order.getId(), actualFee,
+                    settlement.getSellerAdditionalCollected().subtract(collectedBefore),
+                    totalRefunds(settlement).subtract(refundedBefore));
+        }
+    }
+
+    private BigDecimal totalRefunds(InspectionFeeSettlement settlement) {
+        return settlement.getBuyerRefundAmount().add(settlement.getSellerRefundAmount());
     }
 
     @Override
@@ -293,6 +332,40 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
         settlement.setBuyerRefundAmount(settlement.getBuyerRefundAmount().add(buyerRefund));
         settlement.setSellerRefundAmount(settlement.getSellerRefundAmount().add(sellerRefund));
         settlement.setReturnShippingSettledAt(Instant.now());
+    }
+
+    private void settleSellerPaidReturn(InspectionOrder order, InspectionFeeSettlement settlement, BigDecimal actualFee) {
+        BigDecimal remainder = settlement.getReturnReserveAllocated().subtract(actualFee);
+        BigDecimal outstanding = settlement.getSellerOutstandingAmount();
+        if (remainder.signum() < 0) {
+            BigDecimal extraCost = remainder.negate();
+            BigDecimal collected = collectFailedInspectionFee(order, extraCost);
+            settlement.setSellerAdditionalCollected(settlement.getSellerAdditionalCollected().add(collected));
+            settlement.setSellerOutstandingAmount(outstanding.add(extraCost.subtract(collected)));
+        } else {
+            BigDecimal debtReduction = remainder.min(outstanding);
+            BigDecimal sellerRefund = remainder.subtract(debtReduction);
+            settlement.setSellerOutstandingAmount(outstanding.subtract(debtReduction));
+            if (sellerRefund.signum() > 0) {
+                walletService.processRefund(sellerId(order), sellerRefund, order.getId(),
+                        WalletTransactionReferenceType.INSPECTION_ORDER);
+                settlement.setSellerRefundAmount(settlement.getSellerRefundAmount().add(sellerRefund));
+            }
+        }
+        settlement.setReturnReserveAllocated(actualFee);
+        settlement.setReturnShippingSettledAt(Instant.now());
+    }
+
+    private BigDecimal collectFailedInspectionFee(InspectionOrder order, BigDecimal amount) {
+        if (amount.signum() == 0) return BigDecimal.ZERO;
+        return walletService.collectFailedInspectionFee(sellerId(order), amount, order.getId());
+    }
+
+    private UUID sellerId(InspectionOrder order) {
+        if (order.getSeller() == null) {
+            throw new ConflictException("Chưa xác định được người bán chịu phí kiểm định");
+        }
+        return order.getSeller().getId();
     }
 
     private BigDecimal buyerShare(InspectionOrder order, BigDecimal amount) {

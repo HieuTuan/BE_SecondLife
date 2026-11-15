@@ -7,6 +7,7 @@ import java.math.BigDecimal;
 
 public interface ReverseGeocodingService {
     GeocodedAddressResponse geocode(String address);
+    GeocodedAddressResponse geocodeStreetAddress(String address);
     ShippingAddress shipping(ShippingAddressRequest request);
     GeocodedAddressResponse reverse(BigDecimal latitude, BigDecimal longitude);
 }

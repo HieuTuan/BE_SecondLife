@@ -23,6 +23,129 @@ import java.util.UUID;
 
 @Repository
 public interface OrderRepository extends JpaRepository<Order, UUID>, RefreshOperations {
+    // A linked inspection enriches its purchase order. Only unlinked inspections are separate rows.
+    String FEED_SCOPE = """
+            with candidates as (
+                select o.id, i.id as inspection_id, o.post_id, o.buyer_id, o.seller_id, o.created_at,
+                    case
+                        when o.status = 'COMPLETED' or o.escrow_status = 'RELEASED' then 'completed'
+                        when o.status = 'CANCELLED' or o.escrow_status = 'REFUNDED' then 'cancelled'
+                        when o.escrow_status = 'FROZEN' then 'disputed'
+                        when o.status = 'DELIVERED' then 'delivered'
+                        when o.status = 'SHIPPED' then 'shipping'
+                        else 'awaiting_pickup'
+                    end as stage
+                from orders o
+                left join lateral (
+                    select id from inspection_orders i where i.order_id = o.id
+                        and (i.buyer_id = :actor or i.seller_id = :actor)
+                    order by i.created_at desc, i.id desc limit 1
+                ) i on true
+                where o.buyer_id = :actor or o.seller_id = :actor
+                union all
+                select i.id, i.id, i.post_id, i.buyer_id, i.seller_id, i.created_at,
+                    case
+                        when i.status = 'COMPLETED' then 'completed'
+                        when i.status in ('CANCELLED', 'PAYMENT_EXPIRED', 'FAILED', 'REJECTED') then 'cancelled'
+                        when i.status = 'DISPUTED' then 'disputed'
+                        when i.status = 'DELIVERING_TO_BUYER' then 'shipping'
+                        else 'inspecting'
+                    end
+                from inspection_orders i
+                where i.order_id is null and (i.buyer_id = :actor or i.seller_id = :actor)
+            ), scoped as (
+                select c.*, p.title, p.image_url, p.category_id, p.item_id, p.item_condition,
+                    coalesce(nullif(b.full_name, ''), bu.email) as buyer_name,
+                    coalesce(nullif(s.full_name, ''), su.email) as seller_name
+                from candidates c
+                join posts p on p.id = c.post_id
+                left join users bu on bu.id = c.buyer_id
+                left join users su on su.id = c.seller_id
+                left join user_profiles b on b.user_id = c.buyer_id
+                left join user_profiles s on s.user_id = c.seller_id
+            ), matched as (
+                select * from scoped
+                where (:perspective = 'all' or (:perspective = 'buyer' and buyer_id = :actor)
+                       or (:perspective = 'seller' and seller_id = :actor))
+                  and (:q = '' or strpos(lower(cast(id as text)), :q) > 0
+                       or strpos(lower(cast(inspection_id as text)), :q) > 0
+                       or strpos(lower(title), :q) > 0 or strpos(lower(buyer_name), :q) > 0
+                       or strpos(lower(seller_name), :q) > 0)
+            )
+            """;
+
+    @Query(value = FEED_SCOPE + """
+            select count(*) as "allCount",
+                   count(*) filter (where stage = 'awaiting_pickup') as "awaitingPickup",
+                   count(*) filter (where stage = 'inspecting') as inspecting,
+                   count(*) filter (where stage = 'shipping') as shipping,
+                   count(*) filter (where stage = 'delivered') as delivered,
+                   count(*) filter (where stage = 'completed') as completed,
+                   count(*) filter (where stage = 'cancelled') as cancelled,
+                   count(*) filter (where stage = 'disputed') as disputed,
+                   count(*) filter (where inspection_id is not null) as "withInspection"
+            from matched
+            """, nativeQuery = true)
+    FeedCounts countFeedRows(@Param("actor") UUID actor, @Param("perspective") String perspective,
+                            @Param("q") String search);
+
+    @Query(value = FEED_SCOPE + """
+            , page_rows as (
+                select * from matched
+                where :filter = 'all' or stage = :filter
+                   or (:filter = 'with_inspection' and inspection_id is not null)
+                order by created_at desc, id desc limit :size offset :offset
+            ), detail_row as (
+                select * from scoped where id = cast(:detail as uuid) or inspection_id = cast(:detail as uuid)
+                order by created_at desc, id desc limit 1
+            )
+            select id, inspection_id as "inspectionId", buyer_name as "buyerName", seller_name as "sellerName",
+                   image_url as "postImageUrl", category_id as "categoryId", item_id as "itemId",
+                   item_condition as "itemCondition", false as detail, created_at
+            from page_rows
+            union all
+            select id, inspection_id, buyer_name, seller_name, image_url, category_id, item_id, item_condition,
+                   true, created_at
+            from detail_row
+            order by detail, created_at desc, id desc
+            """, nativeQuery = true)
+    List<FeedRow> findFeedRows(@Param("actor") UUID actor, @Param("perspective") String perspective,
+                               @Param("q") String search, @Param("filter") String filter, @Param("size") int size,
+                               @Param("offset") long offset, @Param("detail") UUID detail);
+
+    @Query("""
+            select o from Order o join fetch o.post
+            join fetch o.buyer b left join fetch b.profile
+            join fetch o.seller s left join fetch s.profile
+            left join fetch o.negotiation
+            where o.id in :ids
+            """)
+    List<Order> findFeedOrdersByIds(@Param("ids") List<UUID> ids);
+
+    interface FeedCounts {
+        long getAllCount();
+        long getAwaitingPickup();
+        long getInspecting();
+        long getShipping();
+        long getDelivered();
+        long getCompleted();
+        long getCancelled();
+        long getDisputed();
+        long getWithInspection();
+    }
+
+    interface FeedRow {
+        UUID getId();
+        UUID getInspectionId();
+        String getBuyerName();
+        String getSellerName();
+        String getPostImageUrl();
+        UUID getCategoryId();
+        UUID getItemId();
+        String getItemCondition();
+        boolean isDetail();
+    }
+
     @Query("""
         select o.id as id, o.shippingDeliveredAt as deliveredAt from Order o
         where o.status = :status and o.escrowStatus = :escrow and o.shippingDeliveredAt <= :cutoff

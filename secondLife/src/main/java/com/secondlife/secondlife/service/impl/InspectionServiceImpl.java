@@ -341,7 +341,6 @@ public class InspectionServiceImpl implements InspectionService {
         order.setReturnShippingReserveFee(returnReserve);
         inspectionPricingService.applyConfiguration(order, quote);
 
-        order.setCashShippingSimulation(orderType == InspectionOrderType.AT_CENTER && quote.cashShippingSimulationEnabled());
         setFeeShares(order, totalFee);
         order.setBuyerCommitmentDeposit(commitmentDeposit);
 
@@ -456,8 +455,6 @@ public class InspectionServiceImpl implements InspectionService {
                     order.setReturnShippingReserveFee(quote.returnShippingReserveFee());
                 }
                 order.setInspectionFee(quote.baseInspectionFee());
-                order.setCashShippingSimulation(request.counterOrderType() == InspectionOrderType.AT_CENTER
-                        && quote.cashShippingSimulationEnabled());
                 inspectionPricingService.applyConfiguration(order, quote);
             }
 
@@ -547,11 +544,21 @@ public class InspectionServiceImpl implements InspectionService {
             throw new ForbiddenException("Bạn không phải người mua của đơn kiểm định này");
         }
 
-        if (!InspectionOrderStatus.WAITING_BUYER_APPROVAL.name().equals(order.getStatus())) {
+        String action = request.action() != null ? request.action().toUpperCase() : "";
+
+        boolean isInitialBuyerProposal = InspectionOrderStatus.WAITING_SELLER_APPROVAL.name().equals(order.getStatus())
+                && (order.getNote() == null || (!order.getNote().contains("đề xuất lại") && !order.getNote().toLowerCase().contains("counter")));
+
+        boolean isBuyerCancelling = "REJECT".equals(action) && isInitialBuyerProposal;
+
+        if (!InspectionOrderStatus.WAITING_BUYER_APPROVAL.name().equals(order.getStatus()) && !isBuyerCancelling) {
+            if ("REJECT".equals(action) && InspectionOrderStatus.WAITING_SELLER_APPROVAL.name().equals(order.getStatus())) {
+                throw new ConflictException("Chỉ được hủy yêu cầu kiểm định ở lần đề xuất đầu tiên. Không thể hủy từ lần thương lượng thứ 2 trở đi.");
+            }
             throw new ConflictException("Đơn kiểm định không ở trạng thái chờ người mua phản hồi");
         }
 
-        if (order.getApprovalDeadline() != null && order.getApprovalDeadline().isBefore(Instant.now())) {
+        if (!"REJECT".equals(action) && order.getApprovalDeadline() != null && order.getApprovalDeadline().isBefore(Instant.now())) {
             order.setStatus(InspectionOrderStatus.CANCELLED.name());
             order.setNote("Đơn kiểm định đã bị hủy do hết hạn phản hồi từ người mua");
             restorePostStatusAfterInspectionEnd(order);
@@ -559,20 +566,23 @@ public class InspectionServiceImpl implements InspectionService {
             throw new ConflictException("Thời hạn phản hồi đề xuất kiểm định (24 giờ) đã hết");
         }
 
-        String action = request.action() != null ? request.action().toUpperCase() : "";
-
         if ("REJECT".equals(action)) {
             order.setStatus(InspectionOrderStatus.CANCELLED.name());
             order.setApprovalDeadline(null);
+            String notePrefix = isBuyerCancelling ? "Người mua hủy yêu cầu: " : "Người mua từ chối đề xuất: ";
             order.setNote(
-                    "Người mua từ chối đề xuất: " + (request.note() != null ? request.note() : "Không nêu lý do"));
+                    notePrefix + (request.note() != null ? request.note() : "Không nêu lý do"));
             restorePostStatusAfterInspectionEnd(order);
             InspectionOrder saved = inspectionOrderRepository.save(order);
             if (notificationService != null && order.getSeller() != null) {
+                String notifTitle = isBuyerCancelling ? "Người mua đã hủy yêu cầu kiểm định" : "Người mua từ chối đề xuất chia phí";
+                String notifBody = isBuyerCancelling
+                        ? "Người mua đã hủy yêu cầu kiểm định cho sản phẩm \"" + (order.getPost() != null ? order.getPost().getTitle() : "") + "\". Đơn kiểm định đã kết thúc."
+                        : "Người mua đã từ chối phương án kiểm định bạn đề xuất. Đơn kiểm định đã kết thúc.";
                 notificationService.notify(
                         order.getSeller().getId(),
-                        "Người mua từ chối đề xuất chia phí",
-                        "Người mua đã từ chối phương án kiểm định bạn đề xuất. Đơn kiểm định đã kết thúc.",
+                        notifTitle,
+                        notifBody,
                         NotificationType.INSPECTION,
                         order.getId(),
                         "INSPECTION_ORDER",
@@ -857,6 +867,7 @@ public class InspectionServiceImpl implements InspectionService {
     @Transactional(readOnly = true)
     public InspectionOrderResponse getOrderById(UUID actorId, UUID orderId) {
         InspectionOrder order = inspectionOrderRepository.findById(orderId)
+                .or(() -> inspectionOrderRepository.findByOrderId(orderId))
                 .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
 
         boolean isBuyer = order.getBuyer() != null && order.getBuyer().getId().equals(actorId);
@@ -1005,12 +1016,7 @@ public class InspectionServiceImpl implements InspectionService {
 
         BigDecimal itemPrice = order.getFinalItemPrice() != null ? order.getFinalItemPrice() : post.getPrice();
 
-        // Step 1: Settle inspection fees and refund unused return shipping reserve
-        feeSettlementService.settle(order, InspectionSettlementOutcome.PASSED_PURCHASED,
-                "Buyer confirmed purchase after PASSED inspection");
-
-        // Step 2: Resolve shipping quote (use passed quoteId or auto-quote from buyer
-        // delivery address)
+        // Resolve the carrier quote before locking funds in the system wallet.
         UUID quoteId = request != null ? request.shippingQuoteId() : null;
         if (quoteId == null) {
             ShippingAddressRequest deliveryAddressRequest = request != null && request.deliveryAddress() != null
@@ -1025,7 +1031,7 @@ public class InspectionServiceImpl implements InspectionService {
             quoteId = quoteResponse.quoteId();
         }
 
-        // Step 3: Create and complete canonical Order holding funds in SystemWallet
+        // Create the canonical order and snapshot its commission before locking the wallet.
         UUID reqId = (request != null && request.requestId() != null)
                 ? request.requestId()
                 : UUID.nameUUIDFromBytes(("INSPECTION_ORDER:" + order.getId()).getBytes(StandardCharsets.UTF_8));
@@ -1054,6 +1060,8 @@ public class InspectionServiceImpl implements InspectionService {
         newOrder.setShippingFee(quote.getFee());
         newOrder.setDeliveryAddress(quote.getDeliveryAddress());
 
+        feeSettlementService.settle(order, InspectionSettlementOutcome.PASSED_PURCHASED,
+                "Buyer confirmed purchase after PASSED inspection");
         paidOrderService.complete(newOrder, true);
 
         // Auto-mark seller confirmed since seller consented to inspection and goods are
@@ -1690,11 +1698,11 @@ public class InspectionServiceImpl implements InspectionService {
     }
 
     private void setFeeShares(InspectionOrder order, BigDecimal totalFee) {
-        BigDecimal outboundCash = order.isCashShippingSimulation() ? order.getShippingFee() : BigDecimal.ZERO;
-        BigDecimal remainingFees = totalFee.subtract(outboundCash);
-        BigDecimal buyerRemaining = order.getFeePayer().buyerShare(remainingFees);
-        order.setBuyerFeeShare(buyerRemaining.add(order.getFeePayer().buyerShare(outboundCash)));
-        order.setSellerFeeShare(remainingFees.subtract(buyerRemaining));
+        order.setCashShippingSimulation(false);
+        order.setCorporateShipping(order.getOrderType() == InspectionOrderType.AT_CENTER);
+        BigDecimal buyerShare = order.getFeePayer().buyerShare(totalFee);
+        order.setBuyerFeeShare(buyerShare);
+        order.setSellerFeeShare(totalFee.subtract(buyerShare));
     }
 
     private void requireInspectionFeesPaid(InspectionOrder order) {

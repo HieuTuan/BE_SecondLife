@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.ApiResponse;
+import com.secondlife.secondlife.dto.response.OrderFeedResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.OrderFeedService;
@@ -23,7 +24,7 @@ public class OrderFeedController {
 
     @GetMapping
     @PreAuthorize("isAuthenticated()")
-    public ApiResponse<OrderFeedService.Feed> read(
+    public ApiResponse<OrderFeedResponse> read(
             @AuthenticationPrincipal CustomUserDetails user,
             @RequestParam(defaultValue = "all") String perspective,
             @RequestParam(defaultValue = "all") String filter,

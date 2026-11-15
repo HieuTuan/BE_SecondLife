@@ -507,8 +507,8 @@ class InspectionServiceImplWorkflowTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"BUYER_PAYS,260000,0", "SELLER_PAYS,0,230000", "SPLIT_50_50,130000,115000"})
-    void cashOutboundPrepaymentExcludesOnlyTheSellersOutboundShare(InspectionFeePayer payer,
+    @CsvSource({"BUYER_PAYS,260000,0", "SELLER_PAYS,0,260000", "SPLIT_50_50,130000,130000"})
+    void counterProposalSplitsAllFeesAndDisablesCashSimulation(InspectionFeePayer payer,
             BigDecimal buyerDue, BigDecimal sellerDue) {
         order.setCashShippingSimulation(true);
         when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
@@ -517,6 +517,8 @@ class InspectionServiceImplWorkflowTest {
         service.respondInspection(seller.getId(), order.getId(),
                 new InspectionSellerRespondRequest("COUNTER", null, payer, false, null));
 
+        assertFalse(order.isCashShippingSimulation());
+        assertTrue(order.isCorporateShipping());
         assertEquals(0, buyerDue.compareTo(order.getBuyerFeeShare()));
         assertEquals(0, sellerDue.compareTo(order.getSellerFeeShare()));
     }
@@ -590,9 +592,9 @@ class InspectionServiceImplWorkflowTest {
         verify(inspectionOrderRepository).save(argThat(saved ->
                 saved.getFinalItemPrice().compareTo(new BigDecimal("9000000")) == 0 &&
                 saved.getBuyerCommitmentDeposit().compareTo(new BigDecimal("450000.00")) == 0 &&
-                saved.isCashShippingSimulation() == cashShipping &&
+                !saved.isCashShippingSimulation() && saved.isCorporateShipping() &&
                 saved.getBuyerFeeShare().compareTo(new BigDecimal("130000")) == 0 &&
-                saved.getSellerFeeShare().compareTo(BigDecimal.valueOf(cashShipping ? 115000 : 130000)) == 0
+                saved.getSellerFeeShare().compareTo(BigDecimal.valueOf(130000)) == 0
         ));
     }
 

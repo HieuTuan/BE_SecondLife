@@ -7,6 +7,7 @@ import com.secondlife.secondlife.dto.response.InspectionShippingQuoteResponse;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.InspectionReturnShippingPolicy;
 import com.secondlife.secondlife.entity.InspectionShippingQuote;
+import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.exception.ShippingProviderException;
@@ -20,8 +21,8 @@ import com.secondlife.secondlife.repository.InspectionReturnShippingPolicyReposi
 import com.secondlife.secondlife.repository.InspectionShippingQuoteRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.service.InspectionCenterProfileService;
+import com.secondlife.secondlife.service.InspectionLocationService;
 import com.secondlife.secondlife.service.InspectionShippingQuoteService;
-import com.secondlife.secondlife.service.ShippingQuoteService;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -48,7 +49,7 @@ public class InspectionShippingQuoteServiceImpl implements InspectionShippingQuo
     private final InspectionOrderRepository orders;
     private final PostRepository posts;
     private final InspectionCenterProfileService centers;
-    private final ShippingQuoteService shipping;
+    private final InspectionLocationService locations;
     private final ShippingProvider provider;
     private final InspectionShippingQuoteMapper mapper;
     private final ShippingVehicleSelectionMapper vehicles;
@@ -60,7 +61,14 @@ public class InspectionShippingQuoteServiceImpl implements InspectionShippingQuo
     @Override
     @Transactional
     public InspectionShippingQuoteResponse quote(UUID postId, UUID centerId, UUID quoteId) {
-        Context context = context(postId, centerId);
+        Post post = posts.findById(postId).orElseThrow(() -> new NotFoundException("Post not found"));
+        return quote(post, centerId, quoteId, locations.sellerPickup(post));
+    }
+
+    @Override
+    @Transactional
+    public InspectionShippingQuoteResponse quote(Post post, UUID centerId, UUID quoteId, ShippingAddress sellerPickup) {
+        Context context = context(post, centerId, sellerPickup);
         if (quoteId != null) {
             InspectionShippingQuote row = quotes.findById(quoteId)
                     .orElseThrow(() -> new NotFoundException("Không tìm thấy báo giá vận chuyển kiểm định"));
@@ -80,7 +88,7 @@ public class InspectionShippingQuoteServiceImpl implements InspectionShippingQuo
         InspectionShippingQuoteResponse.Leg returnLeg = mapper.toLeg(
                 "CENTER_TO_SELLER", reserve, null, null, outboundLeg.expiresAt(), null);
         InspectionShippingQuote row = new InspectionShippingQuote();
-        row.setPostId(postId);
+        row.setPostId(context.postId());
         row.setInspectionCenterId(centerId);
         row.setOutboundPayload(json.writeValueAsString(context.outbound()));
         row.setReturnPayload(json.writeValueAsString(context.reverse()));
@@ -121,7 +129,7 @@ public class InspectionShippingQuoteServiceImpl implements InspectionShippingQuo
             return;
         }
         InspectionShippingQuote row = quotes.findById(quote.id()).orElseThrow(() -> new NotFoundException("Inspection shipping quote not found"));
-        requireMatch(row, context(order.getPost().getId(), quote.inspectionCenterId()));
+        requireMatch(row, context(order.getPost(), quote.inspectionCenterId()));
         if (!row.getExpiresAt().isAfter(Instant.now())) throw new ConflictException("Báo giá vận chuyển đã hết hạn; lấy báo giá mới");
         orders.findByInspectionShippingQuoteId(row.getId()).ifPresent(existing -> {
             if (!Objects.equals(existing.getId(), order.getId())) {
@@ -139,17 +147,19 @@ public class InspectionShippingQuoteServiceImpl implements InspectionShippingQuo
     public Map<String, Object> outboundPayload(InspectionOrder order) {
         InspectionShippingQuote row = quotes.findById(order.getInspectionShippingQuoteId())
                 .orElseThrow(() -> new ConflictException("Thiếu báo giá vận chuyển đã gắn với đơn kiểm định"));
-        requireMatch(row, context(order.getPost().getId(), order.getInspectionCenter().getId()));
+        requireMatch(row, context(order.getPost(), order.getInspectionCenter().getId()));
         return json.readValue(row.getOutboundPayload(), new TypeReference<Map<String, Object>>() { });
     }
 
-    private Context context(UUID postId, UUID centerId) {
-        var post = posts.findById(postId).orElseThrow(() -> new NotFoundException("Post not found"));
-        ShippingAddress from = shipping.pickup(post.getUser().getId());
+    private Context context(Post post, UUID centerId) {
+        return context(post, centerId, locations.sellerPickup(post));
+    }
+
+    private Context context(Post post, UUID centerId, ShippingAddress from) {
         ShippingAddress to = centers.requireShippingAddress(centerId);
         ShippingPayloads.requireCoordinates(from, "Seller pickup");
         var parcel = ShippingPayloads.parcel(post);
-        return new Context(postId, centerId, from, to,
+        return new Context(post.getId(), centerId, from, to,
                 ShippingPayloads.create(from, to, parcel, post.getTitle(), post.getPrice()),
                 ShippingPayloads.create(to, from, parcel, post.getTitle(), post.getPrice()));
     }

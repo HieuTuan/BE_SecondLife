@@ -32,6 +32,12 @@ public class InspectionFeeSettlement {
     @Column(name = "total_collected", precision = 18, scale = 2, nullable = false)
     private BigDecimal totalCollected = BigDecimal.ZERO;
 
+    @Column(name = "seller_additional_collected", precision = 18, scale = 2, nullable = false)
+    private BigDecimal sellerAdditionalCollected = BigDecimal.ZERO;
+
+    @Column(name = "seller_outstanding_amount", precision = 18, scale = 2, nullable = false)
+    private BigDecimal sellerOutstandingAmount = BigDecimal.ZERO;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "center_recipient_user_id")
     private User centerRecipientUser;

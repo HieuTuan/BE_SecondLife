@@ -24,10 +24,12 @@ import com.secondlife.secondlife.service.UserService;
 import jakarta.persistence.EntityManagerFactory;
 import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.domain.PageRequest;
@@ -38,9 +40,6 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
@@ -52,7 +51,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@Testcontainers(disabledWithoutDocker = true)
+@EnabledIf("databaseAvailable")
 @SpringBootTest
 @TestPropertySource(locations = "classpath:application-test.properties", properties = {
         "spring.flyway.enabled=true", "spring.jpa.hibernate.ddl-auto=none", "app.seeder.enabled=false",
@@ -60,12 +59,21 @@ import static org.junit.jupiter.api.Assertions.*;
         "spring.jpa.properties.hibernate.query.fail_on_pagination_over_collection_fetch=true"
 })
 class ReadQueryIntegrationTest {
-    @Container static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
+    private static final String DATABASE_ENV = "READ_QUERY_TEST_JDBC_URL";
+    private static final GhnTestDatabase database = new GhnTestDatabase(DATABASE_ENV);
+
+    static boolean databaseAvailable() {
+        return GhnTestDatabase.available(DATABASE_ENV);
+    }
 
     @DynamicPropertySource static void database(DynamicPropertyRegistry properties) {
-        properties.add("spring.datasource.url", postgres::getJdbcUrl);
-        properties.add("spring.datasource.username", postgres::getUsername);
-        properties.add("spring.datasource.password", postgres::getPassword);
+        properties.add("spring.datasource.url", database::getJdbcUrl);
+        properties.add("spring.datasource.username", database::getUsername);
+        properties.add("spring.datasource.password", database::getPassword);
+    }
+
+    @AfterAll static void closeDatabase() {
+        database.close();
     }
 
     @Autowired JdbcTemplate jdbc;
@@ -224,11 +232,17 @@ class ReadQueryIntegrationTest {
         assertEquals(directOrder, pickup.items().getFirst().order().id());
         assertNull(pickup.items().getFirst().inspection());
 
+        statistics.clear();
         var shipping = orderFeed.read(buyer, "buyer", "shipping", "Post 0", 0, 10, standaloneInspection);
         assertEquals(1, shipping.totalElements());
         assertEquals(linkedOrder, shipping.items().getFirst().order().id());
         assertEquals(linkedInspection, shipping.items().getFirst().inspection().id());
         assertEquals(standaloneInspection, shipping.detail().inspection().id());
+        assertEquals("Nguyễn Văn An", shipping.items().getFirst().sellerName());
+        assertEquals(category, shipping.items().getFirst().categoryId());
+        assertEquals(List.of("https://image/0/0", "https://image/0/1"),
+                shipping.items().getFirst().inspection().postImageUrls());
+        boundedQueries(4);
 
         var unrelated = orderFeed.read(user("Other"), "all", "all", "", 0, 10, linkedInspection);
         assertEquals(0, unrelated.totalElements());

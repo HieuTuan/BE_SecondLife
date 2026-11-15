@@ -3,6 +3,7 @@ package com.secondlife.secondlife.dto.response;
 import lombok.Builder;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 
 @Builder
 public record InspectionTravelTierDto(
@@ -13,6 +14,7 @@ public record InspectionTravelTierDto(
     BigDecimal pricePerKm,
     BigDecimal distanceChargedInTier,
     BigDecimal feeInTier,
-    String status
+    String status,
+    Instant updatedAt
 ) {
 }

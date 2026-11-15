@@ -119,6 +119,9 @@ public class InspectionOrder {
     @Column(name = "cash_shipping_simulation", nullable = false)
     private boolean cashShippingSimulation;
 
+    @Column(name = "corporate_shipping", nullable = false)
+    private boolean corporateShipping;
+
     @Column(name = "buyer_fee_share", precision = 18, scale = 2)
     private BigDecimal buyerFeeShare = BigDecimal.ZERO;
 

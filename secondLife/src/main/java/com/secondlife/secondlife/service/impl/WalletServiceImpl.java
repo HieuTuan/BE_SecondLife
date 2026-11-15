@@ -234,6 +234,19 @@ public class WalletServiceImpl implements WalletService {
         if (fee == null || fee.signum() < 0 || fee.compareTo(new BigDecimal("1000000000")) > 0) {
             throw new ConflictException("Invalid return shipping fee");
         }
+        return collectSellerFee(sellerId, fee, shipmentId, WalletTransactionType.RETURN_SHIPPING_FEE,
+                WalletTransactionReferenceType.SHIPMENT);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public BigDecimal collectFailedInspectionFee(UUID sellerId, BigDecimal fee, UUID inspectionOrderId) {
+        return collectSellerFee(sellerId, fee, inspectionOrderId, WalletTransactionType.PAYMENT,
+                WalletTransactionReferenceType.INSPECTION_ORDER);
+    }
+
+    private BigDecimal collectSellerFee(UUID sellerId, BigDecimal fee, UUID referenceId,
+                                        WalletTransactionType type, WalletTransactionReferenceType referenceType) {
         BigDecimal amount = fee.setScale(2, RoundingMode.UNNECESSARY);
         if (amount.signum() == 0) return amount;
 
@@ -245,7 +258,7 @@ public class WalletServiceImpl implements WalletService {
         if (collected.signum() > 0) {
             wallet.setBalance(wallet.getBalance().subtract(collected));
             userWalletRepository.save(wallet);
-            createTransaction(wallet, collected.negate(), WalletTransactionType.RETURN_SHIPPING_FEE, shipmentId);
+            createTransaction(wallet, collected.negate(), type, referenceId, referenceType);
         }
         return collected;
     }
