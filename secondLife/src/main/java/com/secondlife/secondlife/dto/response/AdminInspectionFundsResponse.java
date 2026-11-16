@@ -45,6 +45,8 @@ public record AdminInspectionFundsResponse(
             InspectionSettlementOutcome outcome,
             UUID centerRecipientUserId,
             BigDecimal centerPayoutAmount,
+            BigDecimal sellerAdditionalCollected,
+            BigDecimal sellerOutstandingAmount,
             BigDecimal outboundShippingAllocated,
             @Schema(description = "Reserved amount before return reconciliation, or actual return cost after reconciliation")
             BigDecimal returnReserveAllocated,

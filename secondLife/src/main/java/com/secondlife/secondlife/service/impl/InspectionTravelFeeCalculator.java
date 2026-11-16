@@ -1,5 +1,6 @@
 package com.secondlife.secondlife.service.impl;
 
+import com.secondlife.secondlife.common.GeoDistance;
 import com.secondlife.secondlife.dto.response.InspectionTravelTierDto;
 import com.secondlife.secondlife.entity.InspectionTravelTier;
 import com.secondlife.secondlife.repository.InspectionTravelTierRepository;
@@ -26,7 +27,6 @@ public class InspectionTravelFeeCalculator {
     @Value("${app.inspection.center.longitude:106.7050}")
     private double defaultCenterLongitude;
 
-    private static final double EARTH_RADIUS_KM = 6371.0;
     private static final double ROAD_CURVATURE_FACTOR = 1.25;
 
     public static class TravelFeeResult {
@@ -75,8 +75,11 @@ public class InspectionTravelFeeCalculator {
         double lat2 = centerLat != null ? centerLat.doubleValue() : defaultCenterLatitude;
         double lon2 = centerLon != null ? centerLon.doubleValue() : defaultCenterLongitude;
 
-        double directDistance = haversine(lat1, lon1, lat2, lon2);
-        double roadDistance = Math.max(1.0, directDistance * ROAD_CURVATURE_FACTOR);
+        return calculateWithDirectDistance(BigDecimal.valueOf(GeoDistance.haversineKm(lat1, lon1, lat2, lon2)));
+    }
+
+    public TravelFeeResult calculateWithDirectDistance(BigDecimal directDistanceKm) {
+        double roadDistance = Math.max(1.0, directDistanceKm.doubleValue() * ROAD_CURVATURE_FACTOR);
         BigDecimal distanceKm = BigDecimal.valueOf(roadDistance).setScale(2, RoundingMode.HALF_UP);
 
         return calculateWithDistance(distanceKm);
@@ -125,16 +128,6 @@ public class InspectionTravelFeeCalculator {
                 .roundTripFee(roundTripFee)
                 .appliedTiers(appliedTiers)
                 .build();
-    }
-
-    private double haversine(double lat1, double lon1, double lat2, double lon2) {
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
-                        Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return EARTH_RADIUS_KM * c;
     }
 
     private List<InspectionTravelTier> defaultTiers() {

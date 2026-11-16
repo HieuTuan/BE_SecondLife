@@ -71,7 +71,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.doCallRealMethod;
@@ -159,6 +162,18 @@ class InspectionGovernanceIntegrationTest {
         when(carrier.preview(any())).thenAnswer(invocation -> json.valueToTree(Map.of(
                 "total_fee", 50000, "expires_at", Instant.now().plusSeconds(600).toString(),
                 "provider_quote", Map.of("quotationId", UUID.randomUUID().toString(), "serviceType", "MOTORCYCLE"))));
+    }
+
+    @Test
+    void centerTravelTiersIncludeLastUpdatedTimestamp() throws Exception {
+        String updatedAt = "2026-11-14T09:00:00Z";
+        jdbc.update("UPDATE inspection_travel_tiers SET updated_at = CAST(? AS timestamptz) WHERE tier_number = 1",
+                updatedAt);
+
+        mvc.perform(get("/api/v1/inspector-center/travel-tiers").header("Authorization", auth(center)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].tierNumber").value(1))
+                .andExpect(jsonPath("$[0].updatedAt").value(updatedAt));
     }
 
     @Test
@@ -438,8 +453,11 @@ class InspectionGovernanceIntegrationTest {
         mvc.perform(post("/api/v1/inspector/orders/" + orderId + "/start").header("Authorization", auth(inspector)))
                 .andExpect(status().isOk());
         UUID criterion = orderChecklists.getForOrder(inspector.getId(), orderId).items().getFirst().id();
+        String photo = "https://res.cloudinary.com/test-cloud/image/upload/v123/secondlife/inspections/proofs/"
+                + "781527ed-cfd8-4573-bb08-ad981683c50e.jpg";
         mvc.perform(post("/api/v1/inspector/orders/" + orderId + "/result").header("Authorization", auth(inspector))
                         .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("status", "PASSED",
+                                "evidencePhotoUrls", List.of(photo),
                                 "checklistResults", List.of(Map.of("itemId", criterion, "itemTitle", "Client title", "passed", true))))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("PASSED"));
         assertTrue(orders.findById(orderId).orElseThrow().getChecklistResultJson().contains("Check heating"));
@@ -650,6 +668,109 @@ class InspectionGovernanceIntegrationTest {
         return mvc.perform(post("/api/v1/inspection/quote").header("Authorization", auth(buyer))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(Map.of("postId", post.getId(), "inspectionCenterId", center.getId()))));
+    }
+
+    @Test
+    void autoHubQuoteAndRequestChooseSameNearbyHanoiCenter() throws Exception {
+        approve(propose(riceCooker, "L2", "Check heating"));
+        approveFee(center, "L2", 50000);
+        UUID hanoiFee = approveFee(otherCenter, "L2", 65000);
+        configureHanoiCenter(otherCenter, "Hub Hà Nội gần", 21.0135277, 105.5252615);
+        configureHanoiCenter(actor("INSPECTION_CENTER"), "Hub Hà Nội xa", 21.0285, 105.8542);
+        setHanoiSellerPickup();
+        Post product = listing(riceCooker);
+
+        JsonNode quote = json.readTree(mvc.perform(post("/api/v1/inspection/quote")
+                        .header("Authorization", auth(buyer)).contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("postId", product.getId(), "inspectionCenterId", "AUTO"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.inspectionCenterId").value(otherCenter.getId().toString()))
+                .andExpect(jsonPath("$.inspectionCenterName").value("Hub Hà Nội gần"))
+                .andExpect(jsonPath("$.baseInspectionFee").value(65000))
+                .andExpect(jsonPath("$.atHomeTotalFee").isNumber())
+                .andExpect(jsonPath("$.shippingQuote.inspectionCenterId").value(otherCenter.getId().toString()))
+                .andReturn().getResponse().getContentAsString());
+        assertTrue(quote.path("distanceKm").decimalValue().compareTo(BigDecimal.valueOf(3)) < 0);
+
+        mvc.perform(post("/api/v1/inspection/requests").header("Authorization", auth(buyer))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("postId", product.getId(),
+                                "orderType", "AT_CENTER", "feePayer", "SPLIT_50_50", "buyerConsentZin", true,
+                                "expectedFeeProposalId", hanoiFee,
+                                "inspectionShippingQuoteId", quote.path("shippingQuote").path("id").asText()))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.inspectionCenterId").value(otherCenter.getId().toString()));
+
+        assertEquals(otherCenter.getId(), orders.findActiveByPostId(product.getId()).orElseThrow()
+                .getInspectionCenter().getId());
+        verify(carrier, times(1)).preview(argThat(payload ->
+                new BigDecimal("21.0135277").equals(payload.get("to_latitude"))
+                        && new BigDecimal("21.02").equals(payload.get("from_latitude"))));
+    }
+
+    @Test
+    void homeQuoteAcceptsOmittedNullAndBlankCenterAndRejectsCrossCityCenter() throws Exception {
+        approve(propose(riceCooker, "L2", "Check heating"));
+        approveFee(otherCenter, "L2", 65000);
+        configureHanoiCenter(otherCenter, "Hub Hà Nội", 21.0135277, 105.5252615);
+        setHanoiSellerPickup();
+        Post product = listing(riceCooker);
+
+        for (String centerField : List.of("", ",\"inspectionCenterId\":null", ",\"inspectionCenterId\":\"\"")) {
+            String body = "{\"postId\":\"" + product.getId() + "\",\"orderType\":\"AT_HOME\"" + centerField + "}";
+            mvc.perform(post("/api/v1/inspection/quote").header("Authorization", auth(buyer))
+                            .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.inspectionCenterId").value(otherCenter.getId().toString()))
+                    .andExpect(jsonPath("$.travelDistanceKm").isNumber())
+                    .andExpect(jsonPath("$.shippingQuote").doesNotExist());
+        }
+        quote(product, center).andExpect(status().isConflict());
+        quoteCenterValue(product, "invalid-uuid").andExpect(status().isBadRequest());
+        mvc.perform(post("/api/v1/inspection/requests").header("Authorization", auth(buyer))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("postId", product.getId(),
+                                "orderType", "AT_HOME", "feePayer", "BUYER_PAYS", "buyerConsentZin", true,
+                                "inspectionCenterId", "AUTO"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.inspectionCenterId").value(otherCenter.getId().toString()));
+        verifyNoInteractions(carrier);
+    }
+
+    @Test
+    void autoQuoteDoesNotUseAnotherCityWhenLocalCenterIsUnavailable() throws Exception {
+        approve(propose(riceCooker, "L2", "Check heating"));
+        approveFee(center, "L2", 50000);
+        configureHanoiCenter(otherCenter, "Hub Hà Nội", 21.0135277, 105.5252615);
+        otherCenter.setAccountStatus(AccountStatus.DISABLED);
+        users.saveAndFlush(otherCenter);
+        setHanoiSellerPickup();
+
+        quoteCenterValue(listing(riceCooker), "AUTO").andExpect(status().isConflict());
+        verifyNoInteractions(carrier);
+    }
+
+    private ResultActions quoteCenterValue(Post post, String centerValue) throws Exception {
+        return mvc.perform(post("/api/v1/inspection/quote").header("Authorization", auth(buyer))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("postId", post.getId(), "inspectionCenterId", centerValue))));
+    }
+
+    private void configureHanoiCenter(User hub, String name, double lat, double lon) {
+        UserProfile profile = hub.getProfile();
+        profile.setFullName(name);
+        profile.setLatitude(lat);
+        profile.setLongitude(lon);
+        profile.setProvince("Thành phố Hà Nội");
+        profile.setWard("Hòa Lạc");
+        users.saveAndFlush(hub);
+    }
+
+    private void setHanoiSellerPickup() {
+        ShippingPickupAddress pickup = pickupAddresses.findById(seller.getId()).orElseThrow();
+        pickup.setAddressJson(json.writeValueAsString(new ShippingAddress("Seller", "0900000000",
+                "Kho seller, xã Hòa Lạc, Hà Nội", new BigDecimal("21.02"), new BigDecimal("105.53"))));
+        pickupAddresses.saveAndFlush(pickup);
     }
 
     @Test

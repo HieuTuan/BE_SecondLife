@@ -12,6 +12,7 @@ import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -19,6 +20,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -26,10 +28,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @EnabledIf("databaseAvailable")
 @SpringBootTest
+@AutoConfigureMockMvc
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestPropertySource(locations = "classpath:application-test.properties", properties = {
         "spring.flyway.enabled=true", "spring.jpa.hibernate.ddl-auto=update",
@@ -50,6 +57,7 @@ class MarketplaceListingQueryIntegrationTest {
     }
 
     @Autowired MarketplaceListingService service;
+    @Autowired MockMvc mvc;
     @Autowired JdbcTemplate jdbc;
     @Autowired EntityManagerFactory entityManagerFactory;
     @MockitoBean(name = "ollamaChatModel") ChatModel ollama;
@@ -99,14 +107,72 @@ class MarketplaceListingQueryIntegrationTest {
                     listing.imageUrls());
         }
         long statements = entityManagerFactory.unwrap(SessionFactory.class).getStatistics().getPrepareStatementCount();
-        assertTrue(statements <= 3, "Expected at most page, count and batched image queries, got " + statements);
+        assertEquals(4, statements, "Expected page, count, batched images and batched inspections");
     }
 
-    @Test void listingDetailLoadsItsImagesInOneQuery() {
+    @Test void listingDetailLoadsImagesAndInspectionInTwoQueries() {
         var listing = service.get(activeIds.getFirst());
         assertEquals(List.of(imageUrl(listing.postId(), 0), imageUrl(listing.postId(), 1), imageUrl(listing.postId(), 2)),
                 listing.imageUrls());
-        assertEquals(1, entityManagerFactory.unwrap(SessionFactory.class).getStatistics().getPrepareStatementCount());
+        assertEquals(2, entityManagerFactory.unwrap(SessionFactory.class).getStatistics().getPrepareStatementCount());
+    }
+
+    @Test
+    void publicEndpointsReturnLatestQualifyingInspectionAndExcludeUnsettledCancellations() throws Exception {
+        UUID buyerId = UUID.randomUUID();
+        jdbc.update("INSERT INTO users(id, email, password_hash) VALUES (?, ?, 'test-hash')",
+                buyerId, buyerId + "@example.test");
+
+        UUID passedPost = activeIds.get(0);
+        addInspection(passedPost, buyerId, "COMPLETED", "old-seal", "B", 1);
+        addInspection(passedPost, buyerId, "PASSED", null, "A", 2);
+        addInspection(passedPost, buyerId, "FAILED", null, "FAILED-GRADE", 3);
+        addInspection(activeIds.get(1), buyerId, "COMPLETED", "public-seal", "A", 1);
+        UUID returned = addInspection(activeIds.get(2), buyerId, "CANCELLED", null, "B", 1);
+        recordSettlement(returned, "PASSED_BUYER_DEFAULTED", true);
+        UUID pending = addInspection(activeIds.get(3), buyerId, "CANCELLED", null, "C", 1);
+        recordSettlement(pending, "PASSED_BUYER_DEFAULTED", false);
+        UUID expired = addInspection(activeIds.get(4), buyerId, "CANCELLED", null, "D", 1);
+        recordSettlement(expired, "CANCELLED_BEFORE_INSPECTION", false);
+
+        mvc.perform(get("/api/v1/posts").param("categoryId", categoryId.toString()).param("size", "8"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(8))
+                .andExpect(jsonPath("$.data.content[7].isInspected").value(true))
+                .andExpect(jsonPath("$.data.content[7].conditionGrade").value("A"))
+                .andExpect(jsonPath("$.data.content[7].tamperSealId").value(nullValue()))
+                .andExpect(jsonPath("$.data.content[6].isInspected").value(true))
+                .andExpect(jsonPath("$.data.content[6].tamperSealId").value("public-seal"))
+                .andExpect(jsonPath("$.data.content[5].isInspected").value(true))
+                .andExpect(jsonPath("$.data.content[5].conditionGrade").value("B"))
+                .andExpect(jsonPath("$.data.content[4].isInspected").value(false))
+                .andExpect(jsonPath("$.data.content[4].conditionGrade").value(nullValue()))
+                .andExpect(jsonPath("$.data.content[3].isInspected").value(false))
+                .andExpect(jsonPath("$.data.content[0].isInspected").value(false));
+        mvc.perform(get("/api/v1/posts/{postId}", passedPost))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.isInspected").value(true))
+                .andExpect(jsonPath("$.data.conditionGrade").value("A"));
+    }
+
+    private UUID addInspection(UUID postId, UUID buyerId, String status, String seal, String grade, long sequence) {
+        UUID inspectionId = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO inspection_orders (id, post_id, seller_id, buyer_id, inspection_scope, status,
+                                               tamper_seal_id, condition_grade, created_at, inspection_fee, shipping_fee)
+                VALUES (?, ?, ?, ?, 'BUYER_REQUEST', ?, ?, ?, ?, 100000, 30000)
+                """, inspectionId, postId, sellerId, buyerId, status, seal, grade,
+                Timestamp.from(Instant.parse("2026-01-02T00:00:00Z").plusSeconds(sequence)));
+        return inspectionId;
+    }
+
+    private void recordSettlement(UUID inspectionId, String outcome, boolean returnSettled) {
+        Timestamp settledAt = returnSettled ? Timestamp.from(Instant.now()) : null;
+        jdbc.update("""
+                INSERT INTO inspection_fee_settlements
+                    (inspection_order_id, outcome, total_collected, return_shipping_settled_at)
+                VALUES (?, ?, 0, ?)
+                """, inspectionId, outcome, settledAt);
     }
 
     private String imageUrl(UUID postId, int position) {

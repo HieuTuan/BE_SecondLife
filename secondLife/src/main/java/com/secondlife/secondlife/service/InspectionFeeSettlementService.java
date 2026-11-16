@@ -15,6 +15,8 @@ public interface InspectionFeeSettlementService {
 
     void settleReturnShipping(InspectionOrder inspectionOrder, BigDecimal actualFee);
 
+    boolean reimburseDeliveredReturn(InspectionOrder inspectionOrder, Shipment shipment, BigDecimal actualFee);
+
     BigDecimal reimburseCashShipping(InspectionOrder inspectionOrder, Shipment shipment, BigDecimal paidAmount);
 
     InspectionFeeSettlement settle(InspectionOrder inspectionOrder, InspectionSettlementOutcome outcome, String reason);

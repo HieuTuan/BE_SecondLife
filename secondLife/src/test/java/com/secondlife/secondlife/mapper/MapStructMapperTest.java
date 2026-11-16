@@ -50,7 +50,7 @@ class MapStructMapperTest {
         assertEquals("first.jpg", response.imageUrls().getFirst());
         post.getImages().clear();
         assertEquals("first.jpg", response.imageUrls().getFirst());
-        assertEquals(response.user().address(), mapper.toMarketplaceResponse(post).sellerAddress());
+        assertEquals(response.user().address(), mapper.toMarketplaceResponse(post, false, null, null).sellerAddress());
     }
 
     @Test

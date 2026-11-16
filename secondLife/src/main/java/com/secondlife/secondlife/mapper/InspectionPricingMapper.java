@@ -62,6 +62,7 @@ public class InspectionPricingMapper {
 
         @Mapping(target = "distanceChargedInTier", ignore = true)
         @Mapping(target = "feeInTier", ignore = true)
+        @Mapping(target = "updatedAt", source = "updatedAt")
         InspectionTravelTierDto toTierResponse(InspectionTravelTier tier);
     }
 }

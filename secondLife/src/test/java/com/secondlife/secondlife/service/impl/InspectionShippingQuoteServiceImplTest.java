@@ -13,7 +13,7 @@ import com.secondlife.secondlife.repository.InspectionReturnShippingPolicyReposi
 import com.secondlife.secondlife.repository.InspectionShippingQuoteRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.service.InspectionCenterProfileService;
-import com.secondlife.secondlife.service.ShippingQuoteService;
+import com.secondlife.secondlife.service.InspectionLocationService;
 import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
@@ -40,11 +40,11 @@ class InspectionShippingQuoteServiceImplTest {
         var policies = mock(InspectionReturnShippingPolicyRepository.class);
         var posts = mock(PostRepository.class);
         var centers = mock(InspectionCenterProfileService.class);
-        var shipping = mock(ShippingQuoteService.class);
+        var locations = mock(InspectionLocationService.class);
         var provider = mock(ShippingProvider.class);
         var json = new ObjectMapper();
         var service = new InspectionShippingQuoteServiceImpl(quotes, policies, mock(InspectionOrderRepository.class),
-                posts, centers, shipping, provider, MapperTestSupport.mapper(InspectionShippingQuoteMapper.class),
+                posts, centers, locations, provider, MapperTestSupport.mapper(InspectionShippingQuoteMapper.class),
                 mock(ShippingVehicleSelectionMapper.class), json);
 
         UUID centerId = UUID.randomUUID();
@@ -56,7 +56,7 @@ class InspectionShippingQuoteServiceImplTest {
         post.setTitle("Khung giường");
         post.setPrice(new BigDecimal("500000"));
         when(posts.findById(post.getId())).thenReturn(Optional.of(post));
-        when(shipping.pickup(seller.getId())).thenReturn(new ShippingAddress("Seller", "0912345678",
+        when(locations.sellerPickup(post)).thenReturn(new ShippingAddress("Seller", "0912345678",
                 "Địa chỉ người bán", new BigDecimal("10.77"), new BigDecimal("106.69")));
         when(centers.requireShippingAddress(centerId)).thenReturn(new ShippingAddress("Center", "0912345679",
                 "Địa chỉ trung tâm", new BigDecimal("10.78"), new BigDecimal("106.70")));

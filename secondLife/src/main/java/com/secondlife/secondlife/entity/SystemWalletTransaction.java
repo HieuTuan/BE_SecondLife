@@ -1,7 +1,15 @@
 package com.secondlife.secondlife.entity;
 
 import com.secondlife.secondlife.enums.SystemWalletTransactionType;
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -12,7 +20,10 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "system_wallet_transactions", uniqueConstraints = @UniqueConstraint(columnNames = {"order_id", "type"}))
+@Table(name = "system_wallet_transactions", uniqueConstraints = {
+        @UniqueConstraint(columnNames = {"order_id", "type"}),
+        @UniqueConstraint(columnNames = {"inspection_order_id", "inspection_entry"})
+})
 @Immutable
 @Getter
 @Setter
@@ -21,8 +32,14 @@ public class SystemWalletTransaction {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    @Column(nullable = false)
     private UUID orderId;
+    private UUID inspectionOrderId;
+    @Column(length = 32)
+    private String inspectionEntry;
+    @Column(nullable = false, precision = 18, scale = 2)
+    private BigDecimal carrierFee = BigDecimal.ZERO;
+    @Column(nullable = false, precision = 18, scale = 2)
+    private BigDecimal unfundedExpense = BigDecimal.ZERO;
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private SystemWalletTransactionType type;

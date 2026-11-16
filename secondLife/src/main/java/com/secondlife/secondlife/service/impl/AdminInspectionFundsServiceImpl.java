@@ -46,7 +46,8 @@ public class AdminInspectionFundsServiceImpl implements AdminInspectionFundsServ
         Payment buyer = payment(amount(order.getBuyerFeeShare()).add(deposit), order.getBuyerPaidAt());
         Payment seller = payment(amount(order.getSellerFeeShare()), order.getSellerPaidAt());
         BigDecimal totalCollected = settlement == null
-                ? buyer.amountCollected().add(seller.amountCollected()) : settlement.getTotalCollected();
+                ? buyer.amountCollected().add(seller.amountCollected())
+                : settlement.getTotalCollected().add(settlement.getSellerAdditionalCollected());
         InspectionFeePayer feePayer = order.getFeePayer() == null ? InspectionFeePayer.BUYER_PAYS : order.getFeePayer();
         BigDecimal shippingFee = amount(order.getShippingFee());
         BigDecimal outboundCashPending = outboundCashPending(order, settlement, route, feePayer, shippingFee);
@@ -79,7 +80,10 @@ public class AdminInspectionFundsServiceImpl implements AdminInspectionFundsServ
 
     private BigDecimal outboundCashPending(InspectionOrder order, InspectionFeeSettlement settlement,
                                            List<Shipment> route, InspectionFeePayer feePayer, BigDecimal shippingFee) {
-        if (!order.isCashShippingSimulation() || order.getBuyerPaidAt() == null || outboundCashConfirmed(route)) {
+        if (!order.isCashShippingSimulation() || order.getBuyerPaidAt() == null || outboundCashConfirmed(route)
+                || route.stream().anyMatch(shipment -> "SELLER_TO_CENTER".equals(shipment.getLeg())
+                    && shipment.getCashPayerId() == null && !"CANCELLED".equals(shipment.getStatus())
+                    && !"FAILED".equals(shipment.getStatus()))) {
             return BigDecimal.ZERO;
         }
         return settlement == null ? feePayer.buyerShare(shippingFee) : settlement.getOutboundShippingAllocated();
@@ -116,12 +120,13 @@ public class AdminInspectionFundsServiceImpl implements AdminInspectionFundsServ
                     new ReturnReserve(planned, BigDecimal.ZERO, collectedReserve.signum() == 0
                             ? ReturnReserveStatus.NOT_COLLECTED : ReturnReserveStatus.REFUNDED_UNUSED);
             case FAILED_INSPECTION, PASSED_BUYER_DEFAULTED -> {
-                BigDecimal held = settlement.getReturnReserveAllocated();
+                BigDecimal allocated = settlement.getReturnReserveAllocated();
+                BigDecimal held = allocated.subtract(settlement.getSellerOutstandingAmount()).max(BigDecimal.ZERO);
                 Shipment returning = route.reversed().stream()
                         .filter(shipment -> "CENTER_TO_SELLER".equals(shipment.getLeg())
                                 && !"CANCELLED".equals(shipment.getStatus()) && !"FAILED".equals(shipment.getStatus()))
                         .findFirst().orElse(null);
-                yield new ReturnReserve(planned, held, pendingReturnStatus(returning, held, order.isCashShippingSimulation()));
+                yield new ReturnReserve(planned, held, pendingReturnStatus(returning, allocated));
             }
         };
     }
@@ -135,12 +140,13 @@ public class AdminInspectionFundsServiceImpl implements AdminInspectionFundsServ
         return fromBuyer.add(fromSeller);
     }
 
-    private ReturnReserveStatus pendingReturnStatus(Shipment shipment, BigDecimal held, boolean cashShipping) {
+    private ReturnReserveStatus pendingReturnStatus(Shipment shipment, BigDecimal allocated) {
         if (shipment == null) return ReturnReserveStatus.AWAITING_RETURN_SHIPMENT;
         if (!"DELIVERED".equals(shipment.getStatus())) return ReturnReserveStatus.RETURN_IN_PROGRESS;
         if (shipment.getActualFee() == null) return ReturnReserveStatus.AWAITING_ACTUAL_FEE;
-        if (shipment.getActualFee().compareTo(held) > 0) return ReturnReserveStatus.EXCEEDS_RESERVE;
-        return cashShipping ? ReturnReserveStatus.AWAITING_CASH_CONFIRMATION : ReturnReserveStatus.AWAITING_RECONCILIATION;
+        if (shipment.getActualFee().compareTo(allocated) > 0) return ReturnReserveStatus.EXCEEDS_RESERVE;
+        return shipment.getCashPayerId() != null
+                ? ReturnReserveStatus.AWAITING_CASH_CONFIRMATION : ReturnReserveStatus.AWAITING_RECONCILIATION;
     }
 
     private BigDecimal amount(BigDecimal value) {

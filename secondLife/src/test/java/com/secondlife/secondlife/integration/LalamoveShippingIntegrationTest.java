@@ -192,6 +192,66 @@ class LalamoveShippingIntegrationTest {
         assertEquals(1, transactions(orderId, "REFUND"));
     }
 
+    @Test
+    void adminFiltersSystemWalletHistoryBeforeCountingAndPaginating() throws Exception {
+        Fixture cancelled = fixture();
+        UUID cancelledId = checkout(cancelled, quoteId(quote(cancelled)));
+        mvc.perform(put("/api/v1/orders/{id}/cancel", cancelledId).header("Authorization", bearer(cancelled.buyer())))
+                .andExpect(status().isOk());
+
+        UUID completedId = deliveredOrder(cancelled);
+        mvc.perform(put("/api/v1/orders/{id}/delivered", completedId).header("Authorization", bearer(cancelled.buyer())))
+                .andExpect(status().isOk());
+
+        String history = "/api/v1/admin/system-wallet/transactions";
+        String admin = bearer(user("ADMIN", BigDecimal.ZERO));
+        String staff = bearer(user("STAFF", BigDecimal.ZERO));
+        mvc.perform(get(history).header("Authorization", staff)
+                        .param("orderId", cancelledId.toString()).param("hasShipping", "true")
+                        .param("page", "0").param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].type").value("REFUND"))
+                .andExpect(jsonPath("$.data.items[0].shippingDelta").value(-27000))
+                .andExpect(jsonPath("$.data.totalElements").value(2))
+                .andExpect(jsonPath("$.data.totalPages").value(2));
+        mvc.perform(get(history).header("Authorization", admin)
+                        .param("orderId", cancelledId.toString()).param("hasShipping", "true")
+                        .param("page", "1").param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].type").value("PAYMENT_HOLD"))
+                .andExpect(jsonPath("$.data.items[0].shippingDelta").value(27000))
+                .andExpect(jsonPath("$.data.totalElements").value(2));
+
+        mvc.perform(get(history).header("Authorization", admin)
+                        .param("orderId", cancelledId.toString()).param("type", "REFUND").param("hasShipping", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].orderId").value(cancelledId.toString()))
+                .andExpect(jsonPath("$.data.totalElements").value(1));
+        mvc.perform(get(history).header("Authorization", admin)
+                        .param("orderId", completedId.toString()).param("hasShipping", "false"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].type").value("SETTLEMENT"))
+                .andExpect(jsonPath("$.data.items[0].fundCategory").value("PRODUCT_ESCROW"))
+                .andExpect(jsonPath("$.data.items[0].shippingDelta").value(0))
+                .andExpect(jsonPath("$.data.items[1].fundCategory").value("COMMISSION"))
+                .andExpect(jsonPath("$.data.totalElements").value(2));
+        mvc.perform(get(history).header("Authorization", admin)
+                        .param("orderId", cancelledId.toString()).param("sort", "id,asc").param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].type").value("PAYMENT_HOLD"));
+        mvc.perform(get(history).header("Authorization", admin).param("orderId", UUID.randomUUID().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty())
+                .andExpect(jsonPath("$.data.totalElements").value(0));
+
+        mvc.perform(get(history).header("Authorization", bearer(cancelled.buyer())).param("hasShipping", "true"))
+                .andExpect(status().isForbidden());
+        mvc.perform(get(history).header("Authorization", admin).param("type", "UNKNOWN"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get(history).header("Authorization", admin).param("orderId", "invalid"))
+                .andExpect(status().isBadRequest());
+    }
+
     private void assertReputationOnce(User seller,UUID orderId) {
         assertEquals(1L,jdbc.queryForObject("SELECT good_transactions FROM seller_reputations WHERE seller_id=?",Long.class,seller.getId()));
         assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM seller_reputation_events WHERE order_id=? AND event_type='ORDER_COMPLETED'",Integer.class,orderId));
@@ -270,6 +330,22 @@ class LalamoveShippingIntegrationTest {
                 .header("Authorization", bearer(admin))).andExpect(status().isOk()).andReturn()).path("data");
         assertEquals("SETTLEMENT", history.path("items").get(0).path("type").asText());
         assertEquals(id.toString(), history.path("items").get(0).path("orderId").asText());
+        String path = "/api/v1/admin/system-wallet/transactions";
+        mvc.perform(get(path).header("Authorization", bearer(admin)).param("orderId", id.toString())
+                        .param("type", "SETTLEMENT").param("fundCategory", "PRODUCT_ESCROW"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.items[0].totalDelta").value(950000))
+                .andExpect(jsonPath("$.data.items[0].deltaAction").value("MINUS"));
+        mvc.perform(get(path).header("Authorization", bearer(admin)).param("orderId", id.toString())
+                        .param("type", "SETTLEMENT").param("fundCategory", "COMMISSION"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.items[0].totalDelta").value(50000))
+                .andExpect(jsonPath("$.data.items[0].deltaAction").value("PLUS"))
+                .andExpect(jsonPath("$.data.items[0].userShippingFee").value(27000));
+        mvc.perform(get(path).header("Authorization", bearer(admin)).param("fundCategory", "UNKNOWN"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test void buyerConfirmationAndAutomaticSettlementRacingPaySellerOnlyOnce() throws Exception {

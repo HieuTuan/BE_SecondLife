@@ -17,16 +17,19 @@ import com.secondlife.secondlife.service.InspectionService;
 import com.secondlife.secondlife.service.MarketplaceListingService;
 import com.secondlife.secondlife.service.NegotiationService;
 import com.secondlife.secondlife.service.OrderService;
+import com.secondlife.secondlife.service.OrderFeedService;
 import com.secondlife.secondlife.service.SellerReputationService;
 import com.secondlife.secondlife.service.SellerVerificationService;
 import com.secondlife.secondlife.service.UserService;
 import jakarta.persistence.EntityManagerFactory;
 import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.domain.PageRequest;
@@ -37,9 +40,6 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
@@ -51,7 +51,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@Testcontainers(disabledWithoutDocker = true)
+@EnabledIf("databaseAvailable")
 @SpringBootTest
 @TestPropertySource(locations = "classpath:application-test.properties", properties = {
         "spring.flyway.enabled=true", "spring.jpa.hibernate.ddl-auto=none", "app.seeder.enabled=false",
@@ -59,12 +59,21 @@ import static org.junit.jupiter.api.Assertions.*;
         "spring.jpa.properties.hibernate.query.fail_on_pagination_over_collection_fetch=true"
 })
 class ReadQueryIntegrationTest {
-    @Container static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
+    private static final String DATABASE_ENV = "READ_QUERY_TEST_JDBC_URL";
+    private static final GhnTestDatabase database = new GhnTestDatabase(DATABASE_ENV);
+
+    static boolean databaseAvailable() {
+        return GhnTestDatabase.available(DATABASE_ENV);
+    }
 
     @DynamicPropertySource static void database(DynamicPropertyRegistry properties) {
-        properties.add("spring.datasource.url", postgres::getJdbcUrl);
-        properties.add("spring.datasource.username", postgres::getUsername);
-        properties.add("spring.datasource.password", postgres::getPassword);
+        properties.add("spring.datasource.url", database::getJdbcUrl);
+        properties.add("spring.datasource.username", database::getUsername);
+        properties.add("spring.datasource.password", database::getPassword);
+    }
+
+    @AfterAll static void closeDatabase() {
+        database.close();
     }
 
     @Autowired JdbcTemplate jdbc;
@@ -73,6 +82,7 @@ class ReadQueryIntegrationTest {
     @Autowired ChatService chats;
     @Autowired CreditPurchaseService credits;
     @Autowired OrderService orders;
+    @Autowired OrderFeedService orderFeed;
     @Autowired NegotiationService negotiations;
     @Autowired MarketplaceListingService marketplace;
     @Autowired InspectionService inspections;
@@ -190,6 +200,52 @@ class ReadQueryIntegrationTest {
         jdbc.update("DELETE FROM deposit_requests WHERE order_id=?", order);
         assertThrows(NotFoundException.class,
                 () -> orders.getBuyerOrders(buyer, PageRequest.of(0, 5)));
+    }
+
+    @Test void orderFeedFiltersBeforePaginationAndKeepsLinkedInspectionsOnOneRow() {
+        UUID seller = user("Nguyễn Văn An");
+        UUID linkedOrder = order(seller, 0, false);
+        UUID directOrder = order(seller, 1, false);
+        jdbc.update("UPDATE orders SET status='SHIPPED' WHERE id=?", linkedOrder);
+        UUID linkedInspection = UUID.randomUUID();
+        UUID standaloneInspection = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO inspection_orders(id,post_id,buyer_id,seller_id,order_id,status,inspection_fee,shipping_fee,created_at,updated_at)
+                SELECT ?,post_id,buyer_id,seller_id,id,'DELIVERING_TO_BUYER',0,0,?,? FROM orders WHERE id=?
+                """, linkedInspection, time(0), time(0), linkedOrder);
+        jdbc.update("""
+                INSERT INTO inspection_orders(id,post_id,buyer_id,seller_id,status,inspection_fee,shipping_fee,created_at,updated_at)
+                VALUES (?,?,?,?,'INSPECTING',0,0,?,?)
+                """, standaloneInspection, post(seller, 2), buyer, seller, time(2), time(2));
+
+        var page = orderFeed.read(buyer, "buyer", "all", "nguyễn văn an", 1, 1, null);
+        assertEquals(3, page.totalElements());
+        assertEquals(3, page.totalPages());
+        assertEquals(directOrder, page.items().getFirst().order().id());
+        assertEquals(2L, page.counts().get("with_inspection"));
+        assertEquals(1L, page.counts().get("inspecting"));
+
+        var pickup = orderFeed.read(buyer, "buyer", "awaiting_pickup", "Post 1", 0, 10, null);
+        assertEquals(1, pickup.totalElements());
+        assertEquals(directOrder, pickup.items().getFirst().order().id());
+        assertNull(pickup.items().getFirst().inspection());
+
+        statistics.clear();
+        var shipping = orderFeed.read(buyer, "buyer", "shipping", "Post 0", 0, 10, standaloneInspection);
+        assertEquals(1, shipping.totalElements());
+        assertEquals(linkedOrder, shipping.items().getFirst().order().id());
+        assertEquals(linkedInspection, shipping.items().getFirst().inspection().id());
+        assertEquals(standaloneInspection, shipping.detail().inspection().id());
+        assertEquals("Nguyễn Văn An", shipping.items().getFirst().sellerName());
+        assertEquals(category, shipping.items().getFirst().categoryId());
+        assertEquals(List.of("https://image/0/0", "https://image/0/1"),
+                shipping.items().getFirst().inspection().postImageUrls());
+        boundedQueries(4);
+
+        var unrelated = orderFeed.read(user("Other"), "all", "all", "", 0, 10, linkedInspection);
+        assertEquals(0, unrelated.totalElements());
+        assertNull(unrelated.detail());
+        assertEquals(0, orderFeed.read(seller, "buyer", "all", "", 0, 10, null).totalElements());
     }
 
     @Test void marketplaceKeepsDatabasePaginationImagesAndSellerProfilesWithBoundedQueries() {

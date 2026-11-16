@@ -4,7 +4,9 @@ import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.PostMapper;
+import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
+import com.secondlife.secondlife.service.impl.MarketplaceListingServiceImpl;
 import jakarta.persistence.criteria.*;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -21,7 +23,9 @@ import static org.mockito.Mockito.*;
 
 class MarketplaceListingServiceTest {
     private final PostRepository posts = mock(PostRepository.class);
-    private final MarketplaceListingService service = new com.secondlife.secondlife.service.impl.MarketplaceListingServiceImpl(posts, MapperTestSupport.mapper(PostMapper.class));
+    private final InspectionOrderRepository inspections = mock(InspectionOrderRepository.class);
+    private final MarketplaceListingService service = new MarketplaceListingServiceImpl(
+            posts, inspections, MapperTestSupport.mapper(PostMapper.class));
 
     @Test
     void unavailableListingReturnsNotFound() {
@@ -45,6 +49,9 @@ class MarketplaceListingServiceTest {
         assertEquals(post.getUser().getId(), result.sellerId());
         assertEquals(List.of(post.getImageUrl()), result.imageUrls());
         assertEquals("ACTIVE", result.status());
+        assertEquals(Boolean.FALSE, result.isInspected());
+        assertNull(result.tamperSealId());
+        assertNull(result.conditionGrade());
         assertEquals(2000, result.shippingWeight());
         assertEquals(160, result.shippingLength());
         assertEquals(43, result.shippingWidth());
@@ -111,6 +118,7 @@ class MarketplaceListingServiceTest {
         Post post = listing(); post.setStatus(status);
         when(posts.findById(post.getId())).thenReturn(Optional.of(post));
         assertThrows(NotFoundException.class, () -> service.get(post.getId()));
+        verifyNoInteractions(inspections);
     }
 
     @ParameterizedTest

@@ -17,6 +17,7 @@ import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.InspectionEscrowService;
 import com.secondlife.secondlife.service.InspectionFeeSettlementService;
 import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.service.SystemWalletService;
 import com.secondlife.secondlife.service.WalletService;
 
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +35,7 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
 
     private final InspectionOrderRepository inspectionOrderRepository;
     private final WalletService walletService;
+    private final SystemWalletService systemWallet;
     private final PostRepository postRepository;
     private final InspectionOrderMapper inspectionOrderMapper;
     private final NotificationService notificationService;
@@ -42,6 +44,7 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
 
     public InspectionEscrowServiceImpl(InspectionOrderRepository inspectionOrderRepository,
                                        WalletService walletService,
+                                       SystemWalletService systemWallet,
                                        PostRepository postRepository,
                                        InspectionOrderMapper inspectionOrderMapper,
                                        NotificationService notificationService,
@@ -49,6 +52,7 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
                                        InspectionFeeSettlementService feeSettlementService) {
         this.inspectionOrderRepository = inspectionOrderRepository;
         this.walletService = walletService;
+        this.systemWallet = systemWallet;
         this.postRepository = postRepository;
         this.inspectionOrderMapper = inspectionOrderMapper;
         this.notificationService = notificationService;
@@ -73,7 +77,6 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
         }
 
         if (order.getPaymentDeadline() != null && order.getPaymentDeadline().isBefore(Instant.now())) {
-            refundExpiredOrder(order);
             throw new ConflictException("Thời hạn thanh toán phí kiểm định đã hết");
         }
 
@@ -91,7 +94,8 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
             BigDecimal feeShare = order.getBuyerFeeShare() != null ? order.getBuyerFeeShare() : BigDecimal.ZERO;
             BigDecimal commitmentDeposit = order.getBuyerCommitmentDeposit() != null ? order.getBuyerCommitmentDeposit() : BigDecimal.ZERO;
             BigDecimal totalBuyerPayment = feeShare.add(commitmentDeposit);
-            if (totalBuyerPayment.compareTo(BigDecimal.ZERO) > 0) {
+            if (totalBuyerPayment.signum() > 0) {
+                systemWallet.holdInspectionFee(order, true, feeShare, commitmentDeposit);
                 walletService.processPayment(userId, totalBuyerPayment, order.getId(), WalletTransactionReferenceType.INSPECTION_ORDER);
             }
             order.setBuyerPaidAt(Instant.now());
@@ -102,7 +106,8 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
                 throw new ConflictException("Người bán đã thanh toán phí kiểm định rồi");
             }
             BigDecimal amount = order.getSellerFeeShare() != null ? order.getSellerFeeShare() : BigDecimal.ZERO;
-            if (amount.compareTo(BigDecimal.ZERO) > 0) {
+            if (amount.signum() > 0) {
+                systemWallet.holdInspectionFee(order, false, amount, BigDecimal.ZERO);
                 walletService.processPayment(userId, amount, order.getId(), WalletTransactionReferenceType.INSPECTION_ORDER);
             }
             order.setSellerPaidAt(Instant.now());
@@ -142,6 +147,13 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
     @Override
     @Transactional
     public void refundExpiredOrder(InspectionOrder order) {
+        if (order.getPost() != null) {
+            postRepository.findByIdForUpdate(order.getPost().getId());
+        }
+        inspectionOrderRepository.findByIdForUpdate(order.getId()).ifPresent(this::expireOrder);
+    }
+
+    private void expireOrder(InspectionOrder order) {
         if (!"WAITING_FEE_PAYMENT".equals(order.getStatus())) return;
 
         log.info("Refunding and expiring unpaid inspection order: {}", order.getId());

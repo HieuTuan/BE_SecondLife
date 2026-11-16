@@ -106,6 +106,25 @@ class ForwardGeocodingServiceTest {
     }
 
     @Test
+    void streetLookupAcceptsPreciseResultsAndRejectsCityCentroids() {
+        reply("""
+                {"features":[{"properties":{"lat":21.0333,"lon":105.7937,
+                "country_code":"vn","result_type":"city"}}]}
+                """);
+        assertThrows(BadRequestException.class, () -> service.geocodeStreetAddress("Hà Nội"));
+        server.verify();
+
+        server.reset();
+        reply("""
+                {"features":[{"properties":{"lat":21.0333,"lon":105.7937,
+                "country_code":"vn","result_type":"building"}}]}
+                """);
+        assertEquals(ShippingCatalogProperties.City.HANOI,
+                service.geocodeStreetAddress("12 Cầu Giấy, Hà Nội").city());
+        server.verify();
+    }
+
+    @Test
     void sanitizesProviderFailure() {
         server.expect(requestTo(startsWith(URL))).andRespond(withStatus(HttpStatus.UNAUTHORIZED)
                 .body("test-secret").contentType(MediaType.APPLICATION_JSON));

@@ -42,11 +42,20 @@ public class GeoapifyGeocodingClient {
     private final GeocodedLocationCacheRepository cacheRepository;
     private volatile RestClient client;
 
+    private static final Set<String> STREET_RESULT_TYPES = Set.of("street", "building", "amenity");
     private static final String SEARCH_URL = "https://api.geoapify.com/v1/geocode/search";
     private static final String SEARCH_ERROR =
             "Không tìm thấy tọa độ GPS cho địa chỉ này. Vui lòng nhập chi tiết hơn.";
 
     public GeocodedAddressResponse geocode(String address) {
+        return geocode(address, false);
+    }
+
+    public GeocodedAddressResponse geocodeStreetAddress(String address) {
+        return geocode(address, true);
+    }
+
+    private GeocodedAddressResponse geocode(String address, boolean requireStreetAddress) {
         if (address == null || address.isBlank() || address.strip().length() > 500) {
             throw new BadRequestException("Vui lòng nhập địa chỉ từ 1 đến 500 ký tự.");
         }
@@ -75,7 +84,10 @@ public class GeoapifyGeocodingClient {
             }
             JsonNode feature = root.path("features").get(0);
             JsonNode fields = feature.path("properties");
-            if (!fields.isObject()) throw new BadRequestException(SEARCH_ERROR);
+            if (!fields.isObject() || (requireStreetAddress
+                    && !STREET_RESULT_TYPES.contains(fields.path("result_type").asText()))) {
+                throw new BadRequestException(SEARCH_ERROR);
+            }
             JsonNode coordinates = feature.path("geometry").path("coordinates");
             BigDecimal latitude = null;
             BigDecimal longitude = null;
@@ -198,7 +210,7 @@ public class GeoapifyGeocodingClient {
 
             for (var result : root.path("results")) {
                 if (!result.isObject()) throw malformed();
-                if (!Set.of("street", "building", "amenity").contains(result.path("result_type").asText())) continue;
+                if (!STREET_RESULT_TYPES.contains(result.path("result_type").asText())) continue;
                 String country = result.path("country_code").asText().strip().toUpperCase(Locale.ROOT);
                 if (!"VN".equals(country) || division == null || policy.allowedCity(division.city().name()) == null)
                     throw new BadRequestException("Địa chỉ nằm ngoài khu vực phục vụ Hà Nội và Thành phố Hồ Chí Minh");

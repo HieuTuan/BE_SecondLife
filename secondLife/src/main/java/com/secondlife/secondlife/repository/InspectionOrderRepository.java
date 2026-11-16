@@ -28,8 +28,18 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
     Optional<UUID> findPostId(@Param("id") UUID id);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select o from InspectionOrder o where o.id = :id")
+    @Query("select o from InspectionOrder o where o.id = :id or (o.order is not null and o.order.id = :id)")
     Optional<InspectionOrder> findByIdForUpdate(@Param("id") UUID id);
+
+    @Query("""
+            select distinct i from InspectionOrder i
+            join fetch i.post p left join fetch p.images
+            left join fetch i.buyer b left join fetch b.profile
+            left join fetch i.seller s left join fetch s.profile
+            left join fetch i.inspector t left join fetch t.profile
+            where i.id in :ids
+            """)
+    List<InspectionOrder> findFeedInspectionsByIds(@Param("ids") List<UUID> ids);
 
     List<InspectionOrder> findByInspectorId(UUID inspectorId);
 
@@ -56,6 +66,30 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
     @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
     @Query("select o from InspectionOrder o where o.inspector.id=:inspectorId and (:status is null or o.status=:status)")
     Page<InspectionOrder> findVisibleToInspector(@Param("inspectorId") UUID inspectorId, @Param("status") String status, Pageable pageable);
+
+    @Query(value = """
+            SELECT DISTINCT ON (o.post_id) o.post_id AS "postId",
+                   o.tamper_seal_id AS "tamperSealId", o.condition_grade AS "conditionGrade"
+            FROM inspection_orders o
+            WHERE o.post_id IN (:postIds)
+              AND (o.tamper_seal_id IS NOT NULL OR o.status = 'PASSED'
+                OR (o.status = 'CANCELLED' AND EXISTS (
+                    SELECT 1 FROM inspection_fee_settlements s
+                    WHERE s.inspection_order_id = o.id
+                      AND s.outcome = 'PASSED_BUYER_DEFAULTED'
+                      AND s.return_shipping_settled_at IS NOT NULL
+                )))
+            ORDER BY o.post_id, o.created_at DESC NULLS LAST, o.id DESC
+            """, nativeQuery = true)
+    List<ListingInspection> findLatestListingInspections(@Param("postIds") Collection<UUID> postIds);
+
+    interface ListingInspection {
+        UUID getPostId();
+
+        String getTamperSealId();
+
+        String getConditionGrade();
+    }
 
     List<InspectionOrder> findAllByPostIdOrderByCreatedAtDesc(UUID postId);
 

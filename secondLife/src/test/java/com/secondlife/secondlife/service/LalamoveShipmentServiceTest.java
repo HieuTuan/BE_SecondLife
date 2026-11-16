@@ -72,8 +72,8 @@ class LalamoveShipmentServiceTest {
         when(lala.create(anyMap())).thenReturn(mapper.valueToTree(Map.of("order_code","1234567890123456789","status","ASSIGNING_DRIVER","total_fee",27000,"share_link","https://web.lalamove.com/track/example")));
         service = new ShipmentServiceImpl(shipments, events, orders, inspections, quotes, quoteService,
                 mock(ReverseGeocodingService.class), router, mapper, wallets, transactions,
-                mock(SystemWalletService.class), mock(SellerReputationService.class), new ListingFingerprintImpl(),
-                MapperTestSupport.mapper(ShipmentMapper.class), mock(OrderDisputeService.class), mock(ReturnShippingFeeService.class), mock(InspectionCenterProfileService.class), mock(InspectionShippingQuoteService.class), inspectionFeeSettlement);
+                mock(SystemWalletService.class), mock(SellerReputationService.class), null, null, new ListingFingerprintImpl(),
+                MapperTestSupport.mapper(ShipmentMapper.class), mock(OrderDisputeService.class), mock(ReturnShippingFeeService.class), mock(InspectionCenterProfileService.class), mock(InspectionShippingQuoteService.class), inspectionFeeSettlement, true);
     }
     private CreateShipmentRequest request(UUID id) { return new CreateShipmentRequest(id,"SELLER_TO_BUYER",null,null,null); }
     private Shipment booked() { service.createForOrder(seller,false,order.getId(),request(UUID.randomUUID())); return rows.values().iterator().next(); }
@@ -126,7 +126,7 @@ class LalamoveShipmentServiceTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void assignedCenterCanReturnFailedGoodsWithoutClosingAppealWindow(boolean cashShipping) {
+    void assignedCenterCanReturnFailedGoodsWithoutClosingAppealWindow(boolean legacyCashOrder) {
         User center = new User();
         center.setId(UUID.randomUUID());
         InspectionOrder inspection = new InspectionOrder();
@@ -138,7 +138,7 @@ class LalamoveShipmentServiceTest {
         order.getPost().setPrice(order.getFinalPrice());
         inspection.setOrderType(InspectionOrderType.AT_CENTER);
         inspection.setStatus("FAILED");
-        inspection.setCashShippingSimulation(cashShipping);
+        inspection.setCashShippingSimulation(legacyCashOrder);
         inspection.setFeeSettledAt(Instant.now());
         inspection.setReturnShippingReserveFee(new BigDecimal("36000"));
         Instant appealDeadline = Instant.now().plusSeconds(3600);
@@ -187,22 +187,27 @@ class LalamoveShipmentServiceTest {
         assertEquals(result.shipmentId(), service.createCenterDelivery(center.getId(), inspection.getId(), request).shipmentId());
         verify(lala, times(1)).create(anyMap());
 
-        service.receiveLalamove(mapper.valueToTree(Map.of("event_id", "return-completed",
-                "event_type", "ORDER_STATUS_CHANGED", "order_code", result.orderCode(),
-                "occurred_at", Instant.now().plusSeconds(1).toString(), "status", "COMPLETED", "fee", 32000)));
+        var completion = mapper.createObjectNode().put("event_id", "return-completed")
+                .put("event_type", "ORDER_STATUS_CHANGED").put("order_code", result.orderCode())
+                .put("occurred_at", Instant.now().plusSeconds(1).toString()).put("status", "COMPLETED");
+        BigDecimal finalFee = new BigDecimal("32000");
+        assertNull(result.cashPayerId());
+        verify(lala).create(argThat(payload -> !payload.containsKey("inspection_cash_simulation")
+                && inspection.getPost().getTitle().equals(payload.get("content"))));
+
+        clearInvocations(transactions);
+        when(lala.detail(result.orderCode())).thenAnswer(invocation -> {
+            verify(transactions).commit(any());
+            verify(events, never()).save(any());
+            return mapper.valueToTree(Map.of("order_code", result.orderCode(), "status", "COMPLETED", "total_fee", finalFee));
+        });
+        service.receiveLalamove(completion);
 
         assertEquals("FAILED", inspection.getStatus());
         assertEquals(appealDeadline, inspection.getAppealDeadline());
         assertEquals("DELIVERED", rows.get(result.shipmentId()).getStatus());
-        if (cashShipping) {
-            assertEquals(center.getId(), result.cashPayerId());
-            verify(lala).create(argThat(payload -> Boolean.TRUE.equals(payload.get("inspection_cash_simulation"))
-                    && payload.get("content").toString().startsWith("Trung tâm kiểm định")));
-            verifyNoInteractions(inspectionFeeSettlement);
-        } else {
-            assertNull(result.cashPayerId());
-            verify(inspectionFeeSettlement).settleReturnShipping(inspection, new BigDecimal("32000"));
-        }
+        verify(inspectionFeeSettlement).settleReturnShipping(inspection, finalFee);
+        verify(inspectionFeeSettlement, never()).reimburseDeliveredReturn(any(), any(), any());
     }
 
     @Test void carrierIdentityPersistsAndReplayDoesNotCreateTwice() {

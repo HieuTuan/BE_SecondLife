@@ -1,6 +1,8 @@
 package com.secondlife.secondlife.dto.request;
 
-import java.util.UUID;
-
-public record InspectionStartRequest(UUID checkInCode) {
+public record InspectionStartRequest(
+        String checkInCode,
+        String orderCode,
+        String barcodeInput
+) {
 }

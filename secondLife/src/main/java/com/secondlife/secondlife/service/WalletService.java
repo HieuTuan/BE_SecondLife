@@ -23,6 +23,7 @@ public interface WalletService {
     void processRefund(UUID userId, BigDecimal amount, UUID orderId);
     void processRefund(UUID userId, BigDecimal amount, UUID referenceId, WalletTransactionReferenceType referenceType);
     void reimburseShipping(UUID userId, BigDecimal amount, UUID shipmentId);
+    BigDecimal collectFailedInspectionFee(UUID sellerId, BigDecimal fee, UUID inspectionOrderId);
     BigDecimal collectReturnShippingFee(UUID sellerId, BigDecimal fee, UUID shipmentId);
     Page<WalletTransaction> getTransactions(UUID userId, Pageable pageable);
 

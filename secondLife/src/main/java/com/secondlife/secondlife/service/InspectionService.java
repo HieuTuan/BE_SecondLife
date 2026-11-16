@@ -2,6 +2,8 @@ package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.dto.request.ConfirmInspectionPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionAppealRequest;
+import com.secondlife.secondlife.dto.request.InspectionAppointmentCounterRequest;
+import com.secondlife.secondlife.dto.request.InspectionAppointmentRejectRequest;
 import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyerRespondRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
@@ -38,10 +40,15 @@ public interface InspectionService {
      */
     InspectionOrderResponse respondInspectionByBuyer(UUID buyerId, UUID orderId, InspectionBuyerRespondRequest request);
 
-    /**
-     * KTV hoặc Người bán chốt lịch hẹn đến nhà kiểm định (gói AT_HOME)
-     */
-    InspectionOrderResponse scheduleAppointment(UUID actorId, UUID orderId, InspectionAppointmentRequest request);
+    InspectionOrderResponse scheduleAppointment(UUID sellerId, UUID orderId, InspectionAppointmentRequest request);
+
+    InspectionOrderResponse confirmAppointment(UUID actorId, UUID orderId);
+
+    InspectionOrderResponse counterAppointment(UUID actorId, UUID orderId, InspectionAppointmentCounterRequest request);
+
+    InspectionOrderResponse acceptAppointmentCounter(UUID sellerId, UUID orderId);
+
+    InspectionOrderResponse rejectAppointment(UUID actorId, UUID orderId, InspectionAppointmentRejectRequest request);
 
     /**
      * Xem chi tiết 1 đơn kiểm định theo ID

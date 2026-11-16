@@ -8,7 +8,9 @@ import com.secondlife.secondlife.entity.ShippingPickupAddress;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.entity.UserProfile;
 import com.secondlife.secondlife.enums.AccountStatus;
+import com.secondlife.secondlife.enums.InspectionAppointmentStatus;
 import com.secondlife.secondlife.enums.InspectionOrderType;
+import com.secondlife.secondlife.enums.NotificationType;
 import com.secondlife.secondlife.enums.InspectionScope;
 import com.secondlife.secondlife.integration.shipping.ShippingProviderRouter;
 import com.secondlife.secondlife.repository.CategoryRepository;
@@ -52,6 +54,8 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +68,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -332,11 +338,118 @@ class InspectionCenterProfileIntegrationTest {
     }
 
     @Test
+    void homeAppointmentNegotiatesAcrossAccountsAndGatesAssignment() throws Exception {
+        InspectionOrder order = inspection(center);
+        order.setOrderType(InspectionOrderType.AT_HOME);
+        order.setStatus("CONFIRMED_PENDING_DISPATCH");
+        inspections.saveAndFlush(order);
+        User technician = actor("INSPECTOR");
+        technician.setManager(center);
+        users.saveAndFlush(technician);
+        User otherSeller = actor("SELLER");
+        ZoneId vietnam = ZoneId.of("Asia/Ho_Chi_Minh");
+        LocalDate day = LocalDate.now(vietnam).plusDays(1);
+        Instant morning = day.atTime(9, 0).atZone(vietnam).toInstant();
+        Instant afternoon = day.atTime(14, 0).atZone(vietnam).toInstant();
+        String path = "/api/v1/inspector/orders/" + order.getId();
+        String appointment = path + "/appointment";
+        Map<String, Object> proposal = Map.of("scheduledAt", morning, "shift", "MORNING", "note", "Căn hộ 402");
+        Map<String, Object> counter = Map.of("counterScheduledAt", afternoon, "counterShift", "AFTERNOON",
+                "counterNote", "KTV bận ca sáng");
+
+        appointmentRequest(path + "/schedule", otherSeller, proposal).andExpect(status().isForbidden());
+        appointmentRequest(path + "/schedule", seller, Map.of("scheduledAt", morning, "shift", "AFTERNOON"))
+                .andExpect(status().isBadRequest());
+        appointmentRequest(path + "/schedule", seller, proposal)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.appointmentStatus").value("PENDING_CENTER_CONFIRMATION"))
+                .andExpect(jsonPath("$.status").value("CONFIRMED_PENDING_DISPATCH"));
+        verify(notifications).notifyInApp(eq(center.getId()), anyString(), anyString(),
+                eq(NotificationType.INSPECTION), eq(order.getId()),
+                eq("INSPECTION_ORDER"), eq("/inspection-center/orders"));
+
+        appointmentRequest(appointment + "/confirm", otherCenter, null).andExpect(status().isForbidden());
+        appointmentRequest(appointment + "/confirm", staff, null).andExpect(status().isForbidden());
+        mvc.perform(post(path + "/assign").header("Authorization", auth(center))
+                        .param("inspectorId", technician.getId().toString()))
+                .andExpect(status().isConflict());
+        mvc.perform(post("/api/v1/inspection/orders/{id}/check-in-code", order.getId()).header("Authorization", auth(seller)))
+                .andExpect(status().isConflict());
+        appointmentRequest(appointment + "/counter", center, counter)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.appointmentStatus").value("COUNTERED_BY_CENTER"))
+                .andExpect(jsonPath("$.counterScheduledAt").value(afternoon.toString()))
+                .andExpect(jsonPath("$.appointmentRejectionReason").value("KTV bận ca sáng"));
+        appointmentRequest(appointment + "/confirm", center, null).andExpect(status().isConflict());
+        appointmentRequest(appointment + "/accept-counter", otherSeller, null).andExpect(status().isForbidden());
+        appointmentRequest(appointment + "/accept-counter", seller, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.appointmentStatus").value("CONFIRMED"))
+                .andExpect(jsonPath("$.status").value("SCHEDULED"))
+                .andExpect(jsonPath("$.appointmentScheduledAt").value(afternoon.toString()))
+                .andExpect(jsonPath("$.appointmentShift").value("AFTERNOON"))
+                .andExpect(jsonPath("$.appointmentNote").value("Căn hộ 402"))
+                .andExpect(jsonPath("$.counterScheduledAt").doesNotExist());
+
+        mvc.perform(post(path + "/assign").header("Authorization", auth(center))
+                        .param("inspectorId", technician.getId().toString()))
+                .andExpect(status().isOk());
+        entityManager.flush();
+        entityManager.clear();
+        mvc.perform(get(path).header("Authorization", auth(technician)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.appointmentStatus").value("CONFIRMED"))
+                .andExpect(jsonPath("$.appointmentScheduledAt").value(afternoon.toString()));
+        mvc.perform(get("/api/v1/inspector/orders").header("Authorization", auth(technician)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].appointmentShift").value("AFTERNOON"));
+        mvc.perform(post("/api/v1/inspection/orders/{id}/check-in-code", order.getId()).header("Authorization", auth(seller)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void centerCanRejectAndAdminCanConfirmTheReplacementAppointment() throws Exception {
+        InspectionOrder order = inspection(center);
+        order.setOrderType(InspectionOrderType.AT_HOME);
+        order.setStatus("WAITING_FEE_PAYMENT");
+        inspections.saveAndFlush(order);
+        ZoneId vietnam = ZoneId.of("Asia/Ho_Chi_Minh");
+        Instant morning = LocalDate.now(vietnam).plusDays(1).atTime(9, 0).atZone(vietnam).toInstant();
+        String path = "/api/v1/inspector/orders/" + order.getId();
+        Map<String, Object> proposal = Map.of("scheduledAt", morning, "note", "Căn hộ 402");
+
+        appointmentRequest(path + "/schedule", seller, proposal).andExpect(status().isConflict());
+        order.setStatus("CONFIRMED_PENDING_DISPATCH");
+        inspections.saveAndFlush(order);
+        appointmentRequest(path + "/schedule", seller, proposal).andExpect(status().isOk());
+        appointmentRequest(path + "/appointment/reject", center, Map.of("reason", "Không có KTV ca sáng"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.appointmentStatus").value("REJECTED"))
+                .andExpect(jsonPath("$.appointmentRejectionReason").value("Không có KTV ca sáng"));
+        appointmentRequest(path + "/schedule", seller, proposal)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.appointmentShift").value("MORNING"))
+                .andExpect(jsonPath("$.appointmentRejectionReason").doesNotExist());
+        appointmentRequest(path + "/appointment/confirm", actor("ADMIN"), null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.appointmentStatus").value("CONFIRMED"));
+    }
+
+    private ResultActions appointmentRequest(String path, User actor, Map<String, Object> body) throws Exception {
+        var request = post(path).header("Authorization", auth(actor));
+        if (body != null) {
+            request.contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body));
+        }
+        return mvc.perform(request);
+    }
+
+    @Test
     void homeCheckInPersistsOnceAndKeepsCodeOutOfOrderDetails() throws Exception {
         InspectionOrder order = inspection(null);
         order.setOrderType(InspectionOrderType.AT_HOME);
         order.setStatus("SCHEDULED");
         order.setAppointmentScheduledAt(Instant.now().plusSeconds(300));
+        order.setAppointmentStatus(InspectionAppointmentStatus.CONFIRMED);
         User inspector = assignInspector(order, center);
         String path = "/api/v1/inspection/orders/" + order.getId();
         String start = "/api/v1/inspector/orders/" + order.getId() + "/start";
@@ -364,6 +477,47 @@ class InspectionCenterProfileIntegrationTest {
         entityManager.flush();
         entityManager.clear();
         var checkedIn = inspections.findById(order.getId()).orElseThrow();
+        assertNotNull(checkedIn.getHomeCheckedInAt());
+        assertNull(checkedIn.getHomeCheckInCode());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"checkInCode", "orderCode", "barcodeInput"})
+    void homeCheckInAcceptsOrderBarcodeOnlyFromTheAssignedTechnician(String field) throws Exception {
+        InspectionOrder order = inspection(center);
+        order.setOrderType(InspectionOrderType.AT_HOME);
+        order.setStatus("SCHEDULED");
+        order.setAppointmentScheduledAt(Instant.now().plusSeconds(300));
+        order.setAppointmentStatus(InspectionAppointmentStatus.CONFIRMED);
+        order.setHomeCheckInCode(UUID.randomUUID());
+        User inspector = assignInspector(order, center);
+        User otherInspector = actor("INSPECTOR");
+        String start = "/api/v1/inspector/orders/" + order.getId() + "/start";
+        String orderId = order.getId().toString();
+        String shortId = orderId.substring(0, 8);
+        String code = switch (field) {
+            case "checkInCode" -> shortId;
+            case "orderCode" -> orderId;
+            default -> " SL-ATHOME-" + shortId + " ";
+        };
+        String request = json.writeValueAsString(Map.of(field, code));
+
+        mvc.perform(post(start).header("Authorization", auth(otherInspector))
+                        .contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isForbidden());
+        mvc.perform(post(start).header("Authorization", auth(inspector))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of(field, shortId.substring(0, 7)))))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post(start).header("Authorization", auth(inspector))
+                        .contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("INSPECTING"))
+                .andExpect(jsonPath("$.homeCheckedInAt").isNotEmpty());
+
+        entityManager.flush();
+        entityManager.clear();
+        InspectionOrder checkedIn = inspections.findById(order.getId()).orElseThrow();
         assertNotNull(checkedIn.getHomeCheckedInAt());
         assertNull(checkedIn.getHomeCheckInCode());
     }

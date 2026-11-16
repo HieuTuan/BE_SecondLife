@@ -1,6 +1,5 @@
 package com.secondlife.secondlife.service.impl;
 
-import com.secondlife.secondlife.config.LalamoveProperties;
 import com.secondlife.secondlife.dto.request.InspectionFeeProposalRequest;
 import com.secondlife.secondlife.dto.request.InspectionQuoteRequest;
 import com.secondlife.secondlife.dto.request.ShippingAddress;
@@ -8,6 +7,7 @@ import com.secondlife.secondlife.dto.response.InspectionCenterOptionResponse;
 import com.secondlife.secondlife.dto.response.InspectionConfigurationResponse;
 import com.secondlife.secondlife.dto.response.InspectionFeeProposalResponse;
 import com.secondlife.secondlife.dto.response.InspectionQuoteResponse;
+import com.secondlife.secondlife.dto.response.InspectionShippingQuoteResponse;
 import com.secondlife.secondlife.dto.response.InspectionTravelTierDto;
 import com.secondlife.secondlife.entity.InspectionFeeProposal;
 import com.secondlife.secondlife.entity.InspectionOrder;
@@ -15,6 +15,7 @@ import com.secondlife.secondlife.entity.InspectionTravelTier;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.InspectionFeeProposalStatus;
+import com.secondlife.secondlife.enums.InspectionOrderType;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.ForbiddenException;
@@ -24,20 +25,16 @@ import com.secondlife.secondlife.repository.CategoryRepository;
 import com.secondlife.secondlife.repository.InspectionFeeProposalRepository;
 import com.secondlife.secondlife.repository.InspectionTravelTierRepository;
 import com.secondlife.secondlife.repository.PostRepository;
-import com.secondlife.secondlife.repository.UserRepository;
-import com.secondlife.secondlife.service.InspectionConfigurationService;
 import com.secondlife.secondlife.service.InspectionCenterProfileService;
-import com.secondlife.secondlife.service.InspectionShippingQuoteService;
-import com.secondlife.secondlife.dto.response.InspectionShippingQuoteResponse;
-import com.secondlife.secondlife.enums.InspectionOrderType;
+import com.secondlife.secondlife.service.InspectionConfigurationService;
 import com.secondlife.secondlife.service.InspectionGovernanceAccessService;
+import com.secondlife.secondlife.service.InspectionLocationService;
 import com.secondlife.secondlife.service.InspectionPricingService;
-import com.secondlife.secondlife.service.ShippingQuoteService;
+import com.secondlife.secondlife.service.InspectionShippingQuoteService;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,8 +49,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -63,35 +60,33 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
     private final InspectionTravelFeeCalculator travelFeeCalculator;
     private final InspectionFeeProposalRepository proposalRepository;
     private final InspectionTravelTierRepository travelTierRepository;
-    private final UserRepository userRepository;
     private final CategoryRepository categoryRepository;
-    private final ShippingQuoteService shippingQuoteService;
+    private final InspectionLocationService locations;
     private final ObjectMapper objectMapper;
     private final InspectionPricingMapper inspectionPricingMapper;
     private final InspectionConfigurationService configurations;
     private final InspectionGovernanceAccessService access;
     private final InspectionCenterProfileService centerProfiles;
     private final InspectionShippingQuoteService inspectionShipping;
-    private final boolean cashShippingSimulationEnabled;
 
-    public InspectionPricingServiceImpl(PostRepository postRepository, InspectionTravelFeeCalculator travelFeeCalculator, InspectionFeeProposalRepository proposalRepository, InspectionTravelTierRepository travelTierRepository, UserRepository userRepository, CategoryRepository categoryRepository, ShippingQuoteService shippingQuoteService, ObjectMapper objectMapper, InspectionPricingMapper inspectionPricingMapper, InspectionConfigurationService configurations, InspectionGovernanceAccessService access, InspectionCenterProfileService centerProfiles, InspectionShippingQuoteService inspectionShipping, LalamoveProperties lalamove, @Value("${app.inspection.cash-shipping-simulation-enabled:false}") boolean cashShippingSimulationEnabled) {
+    public InspectionPricingServiceImpl(PostRepository postRepository, InspectionTravelFeeCalculator travelFeeCalculator,
+            InspectionFeeProposalRepository proposalRepository, InspectionTravelTierRepository travelTierRepository,
+            CategoryRepository categoryRepository, InspectionLocationService locations, ObjectMapper objectMapper,
+            InspectionPricingMapper inspectionPricingMapper, InspectionConfigurationService configurations,
+            InspectionGovernanceAccessService access, InspectionCenterProfileService centerProfiles,
+            InspectionShippingQuoteService inspectionShipping) {
         this.postRepository = postRepository;
         this.travelFeeCalculator = travelFeeCalculator;
         this.proposalRepository = proposalRepository;
         this.travelTierRepository = travelTierRepository;
-        this.userRepository = userRepository;
         this.categoryRepository = categoryRepository;
-        this.shippingQuoteService = shippingQuoteService;
+        this.locations = locations;
         this.objectMapper = objectMapper;
         this.inspectionPricingMapper = inspectionPricingMapper;
         this.configurations = configurations;
         this.access = access;
         this.centerProfiles = centerProfiles;
         this.inspectionShipping = inspectionShipping;
-        if (cashShippingSimulationEnabled && !lalamove.isSandbox()) {
-            throw new IllegalStateException("Inspection cash shipping simulation requires Lalamove Sandbox");
-        }
-        this.cashShippingSimulationEnabled = cashShippingSimulationEnabled;
     }
 
     @Override
@@ -111,34 +106,24 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
     public InspectionQuoteResponse quote(InspectionQuoteRequest request) {
         Post post = postRepository.findById(request.postId()).orElseThrow(() -> new NotFoundException("Post not found"));
 
-        InspectionConfigurationResponse configuration = configurations.resolve(post, request.inspectionCenterId());
-        if ((request.expectedFeeProposalId() != null && !request.expectedFeeProposalId().equals(configuration.feeProposalId())) || (request.expectedChecklistTemplateId() != null && !request.expectedChecklistTemplateId().equals(configuration.checklistTemplateId()))) {
+        ShippingAddress sellerPickup = locations.sellerPickup(post);
+        var hub = locations.selectHub(sellerPickup, request.inspectionCenterId());
+        InspectionConfigurationResponse configuration = configurations.resolve(post, hub.id());
+        if ((request.expectedFeeProposalId() != null && !request.expectedFeeProposalId().equals(configuration.feeProposalId()))
+                || (request.expectedChecklistTemplateId() != null
+                && !request.expectedChecklistTemplateId().equals(configuration.checklistTemplateId()))) {
             throw new ConflictException("Biểu phí hoặc checklist đã thay đổi; vui lòng lấy báo giá mới trước khi xác nhận");
         }
         BigDecimal baseFee = configuration.inspectionFee();
 
-        // Lấy tọa độ Seller từ pickup address
-        ShippingAddress sellerPickup = shippingQuoteService.pickup(post.getUser().getId());
-        if (sellerPickup == null || sellerPickup.latitude() == null || sellerPickup.longitude() == null || sellerPickup.latitude().abs().compareTo(BigDecimal.valueOf(90)) > 0 || sellerPickup.longitude().abs().compareTo(BigDecimal.valueOf(180)) > 0) {
-            throw new ConflictException("Người bán cần cấu hình địa chỉ lấy hàng và GPS trước khi báo phí kiểm định");
-        }
-        User center = userRepository.findById(configuration.inspectionCenterId()).orElseThrow(() -> new NotFoundException("Inspection center not found"));
-        if (center.getProfile() == null || center.getProfile().getLatitude() == null || center.getProfile().getLongitude() == null || !Double.isFinite(center.getProfile().getLatitude()) || !Double.isFinite(center.getProfile().getLongitude()) || Math.abs(center.getProfile().getLatitude()) > 90 || Math.abs(center.getProfile().getLongitude()) > 180) {
-            throw new ConflictException("Trung tâm cần cập nhật địa chỉ và GPS trong hồ sơ trước khi báo phí kiểm định");
-        }
-        BigDecimal sellerLat = sellerPickup.latitude();
-        BigDecimal sellerLon = sellerPickup.longitude();
-        BigDecimal centerLat = BigDecimal.valueOf(center.getProfile().getLatitude());
-        BigDecimal centerLon = BigDecimal.valueOf(center.getProfile().getLongitude());
-
-        // 1. Tính toán gói AT_HOME
-        InspectionTravelFeeCalculator.TravelFeeResult travelResult = travelFeeCalculator.calculate(sellerLat, sellerLon, centerLat, centerLon);
+        InspectionTravelFeeCalculator.TravelFeeResult travelResult =
+                travelFeeCalculator.calculateWithDirectDistance(hub.distanceKm());
 
         BigDecimal atHomeTotal = baseFee.add(travelResult.getRoundTripFee());
         Map<String, BigDecimal> atHomeSplits = calculateSplits(atHomeTotal);
 
-        // 2. Tính toán gói AT_CENTER
-        InspectionShippingQuoteResponse shippingQuote = request.orderType() == InspectionOrderType.AT_HOME ? null : inspectionShipping.quote(post.getId(), configuration.inspectionCenterId(), request.inspectionShippingQuoteId());
+        InspectionShippingQuoteResponse shippingQuote = request.orderType() == InspectionOrderType.AT_HOME
+                ? null : inspectionShipping.quote(post, hub.id(), request.inspectionShippingQuoteId(), sellerPickup);
         BigDecimal shippingToCenterFee = shippingQuote == null ? null : shippingQuote.outbound().shippingFee();
         BigDecimal returnReserveFee = shippingQuote == null ? null : shippingQuote.returnReserve().shippingFee();
         BigDecimal atCenterTotal = shippingQuote == null ? null : baseFee.add(shippingToCenterFee).add(returnReserveFee);
@@ -151,7 +136,30 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
 
         InspectionQuoteResponse.AtCenterPackageDto atCenterPkg = shippingQuote == null ? null : InspectionQuoteResponse.AtCenterPackageDto.builder().shippingToCenterFee(shippingToCenterFee).returnReserveFee(returnReserveFee).totalFee(atCenterTotal).suggestedSplit50(atCenterSplit50).build();
 
-        return InspectionQuoteResponse.builder().postId(post.getId()).postTitle(post.getTitle()).postPrice(post.getPrice()).baseInspectionFee(baseFee).travelDistanceKm(travelResult.getDistanceKm()).travelFeeOneWay(travelResult.getOneWayFee()).travelFeeRoundTrip(travelResult.getRoundTripFee()).atHomeTotalFee(atHomeTotal).appliedTiers(travelResult.getAppliedTiers()).atHomeSplitOptions(atHomeSplits).shippingToCenterFee(shippingToCenterFee).returnShippingReserveFee(returnReserveFee).atCenterTotalFee(atCenterTotal).atCenterSplitOptions(atCenterSplits).atHomePackage(atHomePkg).atCenterPackage(atCenterPkg).inspectionConfiguration(configuration).shippingQuote(shippingQuote).cashShippingSimulationEnabled(shippingQuote != null && cashShippingSimulationEnabled).build();
+        return InspectionQuoteResponse.builder()
+                .postId(post.getId())
+                .postTitle(post.getTitle())
+                .postPrice(post.getPrice())
+                .inspectionCenterId(hub.id())
+                .inspectionCenterName(hub.name())
+                .distanceKm(hub.distanceKm().setScale(2, RoundingMode.HALF_UP))
+                .baseInspectionFee(baseFee)
+                .travelDistanceKm(travelResult.getDistanceKm())
+                .travelFeeOneWay(travelResult.getOneWayFee())
+                .travelFeeRoundTrip(travelResult.getRoundTripFee())
+                .atHomeTotalFee(atHomeTotal)
+                .appliedTiers(travelResult.getAppliedTiers())
+                .atHomeSplitOptions(atHomeSplits)
+                .shippingToCenterFee(shippingToCenterFee)
+                .returnShippingReserveFee(returnReserveFee)
+                .atCenterTotalFee(atCenterTotal)
+                .atCenterSplitOptions(atCenterSplits)
+                .atHomePackage(atHomePkg)
+                .atCenterPackage(atCenterPkg)
+                .inspectionConfiguration(configuration)
+                .shippingQuote(shippingQuote)
+                .cashShippingSimulationEnabled(false)
+                .build();
     }
 
     @Override

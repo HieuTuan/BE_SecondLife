@@ -1,12 +1,15 @@
 package com.secondlife.secondlife.mapper;
 
 import com.secondlife.secondlife.config.MapStructConfiguration;
+import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.dto.response.OrderBankPaymentResponse;
+import com.secondlife.secondlife.dto.response.OrderFeedItemResponse;
 import com.secondlife.secondlife.dto.response.OrderFulfillmentResponse;
 import com.secondlife.secondlife.dto.response.OrderResponseDTO;
 import com.secondlife.secondlife.entity.DepositRequest;
 import com.secondlife.secondlife.entity.Order;
 import com.secondlife.secondlife.enums.OrderPaymentMethod;
+import com.secondlife.secondlife.repository.OrderRepository.FeedRow;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.springframework.stereotype.Component;
@@ -23,6 +26,10 @@ public class OrderMapper {
 
     public OrderResponseDTO toResponse(Order order, OrderBankPaymentResponse payment, BigDecimal totalAmount) {
         return delegate.toResponse(order, payment, totalAmount);
+    }
+
+    public OrderFeedItemResponse toFeedItem(FeedRow row, OrderResponseDTO order, InspectionOrderResponse inspection) {
+        return delegate.toFeedItem(row, order, inspection);
     }
 
     public OrderFulfillmentResponse toFulfillmentResponse(Order order) {
@@ -62,6 +69,16 @@ public class OrderMapper {
         @Mapping(target = "totalPaid", expression = "java(order.getPaymentMethod() == OrderPaymentMethod.BANK_TRANSFER && order.getPaidAt() == null ? BigDecimal.ZERO : totalAmount)")
         @Mapping(target = "confirmationStatus", expression = "java(OrderConfirmationMapper.confirmationStatus(order))")
         OrderResponseDTO toResponse(Order order, OrderBankPaymentResponse payment, BigDecimal totalAmount);
+
+        @Mapping(target = "order", source = "order")
+        @Mapping(target = "inspection", source = "inspection")
+        @Mapping(target = "buyerName", source = "row.buyerName")
+        @Mapping(target = "sellerName", source = "row.sellerName")
+        @Mapping(target = "postImageUrl", source = "row.postImageUrl")
+        @Mapping(target = "categoryId", source = "row.categoryId")
+        @Mapping(target = "itemId", source = "row.itemId")
+        @Mapping(target = "itemCondition", source = "row.itemCondition")
+        OrderFeedItemResponse toFeedItem(FeedRow row, OrderResponseDTO order, InspectionOrderResponse inspection);
 
         @Mapping(target = "orderId", source = "id")
         @Mapping(target = "lateHandoverCandidate", expression = "java(order.getHandoverDeadline() != null && order.getCarrierPickedUpAt() != null && order.getCarrierPickedUpAt().isAfter(order.getHandoverDeadline()))")

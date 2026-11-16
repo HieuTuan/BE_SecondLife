@@ -1,5 +1,6 @@
 package com.secondlife.secondlife.dto.request;
 
+import com.secondlife.secondlife.common.InspectionCenterIdDeserializer;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionOrderType;
 
@@ -8,6 +9,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.Valid;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -28,6 +30,7 @@ public record InspectionBuyRequest(
     BigDecimal buyerLatitude,
     BigDecimal buyerLongitude,
     UUID negotiationId,
+    @JsonDeserialize(using = InspectionCenterIdDeserializer.class)
     UUID inspectionCenterId,
     UUID expectedFeeProposalId,
     UUID expectedChecklistTemplateId,

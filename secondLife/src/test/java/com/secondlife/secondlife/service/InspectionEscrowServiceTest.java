@@ -58,6 +58,9 @@ class InspectionEscrowServiceTest {
     @Mock
     private InspectionFeeSettlementService feeSettlementService;
 
+    @Mock
+    private SystemWalletService systemWallet;
+
     @InjectMocks
     private InspectionEscrowServiceImpl escrowService;
 
@@ -153,7 +156,7 @@ class InspectionEscrowServiceTest {
     }
 
     @Test
-    @DisplayName("Quá hạn 6 tiếng: Nộp tiền thất bại và kích hoạt hoàn tiền tự động qua feeSettlementService")
+    @DisplayName("Quá hạn: Từ chối nộp thêm phí và để tác vụ hết hạn thực hiện hoàn tiền")
     void testPaymentDeadlineExpired() {
         order.setPaymentDeadline(Instant.now().minus(1, ChronoUnit.MINUTES));
         order.setBuyerPaidAt(Instant.now().minus(2, ChronoUnit.HOURS)); // Buyer đã nộp trước
@@ -161,8 +164,8 @@ class InspectionEscrowServiceTest {
 
         assertThrows(ConflictException.class, () -> escrowService.payInspectionFee(sellerId, orderId));
 
-        verify(feeSettlementService, times(1)).settle(eq(order), eq(InspectionSettlementOutcome.PAYMENT_EXPIRED), any());
-        assertEquals(InspectionOrderStatus.PAYMENT_EXPIRED.name(), order.getStatus());
+        verifyNoInteractions(walletService, systemWallet, feeSettlementService);
+        assertEquals(InspectionOrderStatus.WAITING_FEE_PAYMENT.name(), order.getStatus());
     }
 
     @Test
@@ -174,6 +177,7 @@ class InspectionEscrowServiceTest {
         post.setStatus("RESERVED");
         order.setPost(post);
 
+        when(inspectionOrderRepository.findByIdForUpdate(orderId)).thenReturn(Optional.of(order));
         when(postRepository.findById(post.getId())).thenReturn(Optional.of(post));
 
         escrowService.refundExpiredOrder(order);

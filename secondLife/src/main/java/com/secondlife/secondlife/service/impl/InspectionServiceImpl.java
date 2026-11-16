@@ -3,6 +3,8 @@ package com.secondlife.secondlife.service.impl;
 import com.secondlife.secondlife.dto.request.ChecklistItemResultDto;
 import com.secondlife.secondlife.dto.request.ConfirmInspectionPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionAppealRequest;
+import com.secondlife.secondlife.dto.request.InspectionAppointmentCounterRequest;
+import com.secondlife.secondlife.dto.request.InspectionAppointmentRejectRequest;
 import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyerRespondRequest;
 import com.secondlife.secondlife.dto.request.InspectionBuyRequest;
@@ -36,6 +38,8 @@ import com.secondlife.secondlife.entity.UserRole;
 import com.secondlife.secondlife.enums.AccountStatus;
 import com.secondlife.secondlife.enums.EscrowStatus;
 import com.secondlife.secondlife.enums.InspectionAppealStatus;
+import com.secondlife.secondlife.enums.InspectionAppointmentShift;
+import com.secondlife.secondlife.enums.InspectionAppointmentStatus;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionOrderStatus;
 import com.secondlife.secondlife.enums.InspectionOrderType;
@@ -98,7 +102,10 @@ import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -106,10 +113,17 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Slf4j
 @Service
 public class InspectionServiceImpl implements InspectionService {
+
+    private static final ZoneId INSPECTION_TIME_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
+    private static final Set<String> APPOINTMENT_ORDER_STATES = Set.of(
+            InspectionOrderStatus.CONFIRMED_PENDING_DISPATCH.name(),
+            InspectionOrderStatus.DISPATCHED.name(),
+            InspectionOrderStatus.SCHEDULED.name());
 
     private static final Duration INSPECTION_FEE_PAYMENT_WINDOW = Duration.ofHours(12);
 
@@ -327,7 +341,6 @@ public class InspectionServiceImpl implements InspectionService {
         order.setReturnShippingReserveFee(returnReserve);
         inspectionPricingService.applyConfiguration(order, quote);
 
-        order.setCashShippingSimulation(orderType == InspectionOrderType.AT_CENTER && quote.cashShippingSimulationEnabled());
         setFeeShares(order, totalFee);
         order.setBuyerCommitmentDeposit(commitmentDeposit);
 
@@ -442,8 +455,6 @@ public class InspectionServiceImpl implements InspectionService {
                     order.setReturnShippingReserveFee(quote.returnShippingReserveFee());
                 }
                 order.setInspectionFee(quote.baseInspectionFee());
-                order.setCashShippingSimulation(request.counterOrderType() == InspectionOrderType.AT_CENTER
-                        && quote.cashShippingSimulationEnabled());
                 inspectionPricingService.applyConfiguration(order, quote);
             }
 
@@ -533,11 +544,21 @@ public class InspectionServiceImpl implements InspectionService {
             throw new ForbiddenException("Bạn không phải người mua của đơn kiểm định này");
         }
 
-        if (!InspectionOrderStatus.WAITING_BUYER_APPROVAL.name().equals(order.getStatus())) {
+        String action = request.action() != null ? request.action().toUpperCase() : "";
+
+        boolean isInitialBuyerProposal = InspectionOrderStatus.WAITING_SELLER_APPROVAL.name().equals(order.getStatus())
+                && (order.getNote() == null || (!order.getNote().contains("đề xuất lại") && !order.getNote().toLowerCase().contains("counter")));
+
+        boolean isBuyerCancelling = "REJECT".equals(action) && isInitialBuyerProposal;
+
+        if (!InspectionOrderStatus.WAITING_BUYER_APPROVAL.name().equals(order.getStatus()) && !isBuyerCancelling) {
+            if ("REJECT".equals(action) && InspectionOrderStatus.WAITING_SELLER_APPROVAL.name().equals(order.getStatus())) {
+                throw new ConflictException("Chỉ được hủy yêu cầu kiểm định ở lần đề xuất đầu tiên. Không thể hủy từ lần thương lượng thứ 2 trở đi.");
+            }
             throw new ConflictException("Đơn kiểm định không ở trạng thái chờ người mua phản hồi");
         }
 
-        if (order.getApprovalDeadline() != null && order.getApprovalDeadline().isBefore(Instant.now())) {
+        if (!"REJECT".equals(action) && order.getApprovalDeadline() != null && order.getApprovalDeadline().isBefore(Instant.now())) {
             order.setStatus(InspectionOrderStatus.CANCELLED.name());
             order.setNote("Đơn kiểm định đã bị hủy do hết hạn phản hồi từ người mua");
             restorePostStatusAfterInspectionEnd(order);
@@ -545,20 +566,23 @@ public class InspectionServiceImpl implements InspectionService {
             throw new ConflictException("Thời hạn phản hồi đề xuất kiểm định (24 giờ) đã hết");
         }
 
-        String action = request.action() != null ? request.action().toUpperCase() : "";
-
         if ("REJECT".equals(action)) {
             order.setStatus(InspectionOrderStatus.CANCELLED.name());
             order.setApprovalDeadline(null);
+            String notePrefix = isBuyerCancelling ? "Người mua hủy yêu cầu: " : "Người mua từ chối đề xuất: ";
             order.setNote(
-                    "Người mua từ chối đề xuất: " + (request.note() != null ? request.note() : "Không nêu lý do"));
+                    notePrefix + (request.note() != null ? request.note() : "Không nêu lý do"));
             restorePostStatusAfterInspectionEnd(order);
             InspectionOrder saved = inspectionOrderRepository.save(order);
             if (notificationService != null && order.getSeller() != null) {
+                String notifTitle = isBuyerCancelling ? "Người mua đã hủy yêu cầu kiểm định" : "Người mua từ chối đề xuất chia phí";
+                String notifBody = isBuyerCancelling
+                        ? "Người mua đã hủy yêu cầu kiểm định cho sản phẩm \"" + (order.getPost() != null ? order.getPost().getTitle() : "") + "\". Đơn kiểm định đã kết thúc."
+                        : "Người mua đã từ chối phương án kiểm định bạn đề xuất. Đơn kiểm định đã kết thúc.";
                 notificationService.notify(
                         order.getSeller().getId(),
-                        "Người mua từ chối đề xuất chia phí",
-                        "Người mua đã từ chối phương án kiểm định bạn đề xuất. Đơn kiểm định đã kết thúc.",
+                        notifTitle,
+                        notifBody,
                         NotificationType.INSPECTION,
                         order.getId(),
                         "INSPECTION_ORDER",
@@ -650,64 +674,200 @@ public class InspectionServiceImpl implements InspectionService {
 
     @Override
     @Transactional
-    public InspectionOrderResponse scheduleAppointment(UUID actorId, UUID orderId,
-            InspectionAppointmentRequest request) {
-        InspectionOrder order = inspectionOrderRepository.findByIdForUpdate(orderId)
+    public InspectionOrderResponse scheduleAppointment(UUID sellerId, UUID orderId, InspectionAppointmentRequest request) {
+        InspectionOrder order = loadAppointmentOrder(orderId);
+        requireAppointmentSeller(order, sellerId);
+        requireAppointmentEditable(order);
+        InspectionAppointmentStatus status = order.getAppointmentStatus();
+        if (status != null && status != InspectionAppointmentStatus.REJECTED && status != InspectionAppointmentStatus.COUNTERED_BY_CENTER) {
+            throw new ConflictException("Chỉ được gửi lịch khi chưa có đề xuất, lịch đã bị từ chối hoặc đang có đề xuất lịch từ trung tâm");
+        }
+        User center = requireAppointmentCenter(order);
+        InspectionAppointmentShift shift = validateAppointmentSlot(request.scheduledAt(), request.shift());
+
+        order.setAppointmentScheduledAt(request.scheduledAt());
+        order.setAppointmentShift(shift);
+        order.setAppointmentNote(request.note() == null ? null : request.note().strip());
+        order.setAppointmentStatus(InspectionAppointmentStatus.PENDING_CENTER_CONFIRMATION);
+        order.setAppointmentRejectionReason(null);
+        order.setHomeCheckInCode(null);
+        clearAppointmentCounter(order);
+
+        notifyAppointmentCenter(order, center, "Có lịch kiểm định tại nhà cần duyệt",
+                "Người bán đề xuất lịch " + localAppointmentTime(request.scheduledAt()) + ".");
+        return inspectionOrderMapper.toResponse(order);
+    }
+
+    @Override
+    @Transactional
+    public InspectionOrderResponse confirmAppointment(UUID actorId, UUID orderId) {
+        InspectionOrder order = loadAppointmentOrder(orderId);
+        requireAppointmentReviewer(order, actorId);
+        requireAppointmentEditable(order);
+        requireAppointmentStatus(order, InspectionAppointmentStatus.PENDING_CENTER_CONFIRMATION);
+        validateAppointmentSlot(order.getAppointmentScheduledAt(), order.getAppointmentShift());
+
+        confirmAppointmentState(order);
+        notifyAppointmentSeller(order, "Lịch kiểm định tại nhà đã được xác nhận",
+                "Trung tâm đã chấp nhận lịch hẹn vào " + localAppointmentTime(order.getAppointmentScheduledAt()) + ".");
+        return inspectionOrderMapper.toResponse(order);
+    }
+
+    @Override
+    @Transactional
+    public InspectionOrderResponse counterAppointment(UUID actorId, UUID orderId, InspectionAppointmentCounterRequest request) {
+        InspectionOrder order = loadAppointmentOrder(orderId);
+        requireAppointmentReviewer(order, actorId);
+        requireAppointmentEditable(order);
+        requireAppointmentStatus(order, InspectionAppointmentStatus.PENDING_CENTER_CONFIRMATION);
+        InspectionAppointmentShift shift = validateAppointmentSlot(request.counterScheduledAt(), request.counterShift());
+        if (request.counterScheduledAt().equals(order.getAppointmentScheduledAt())) {
+            throw new BadRequestException("Lịch đề xuất phải khác lịch hiện tại của người bán");
+        }
+
+        String note = request.counterNote().strip();
+        order.setCounterScheduledAt(request.counterScheduledAt());
+        order.setCounterShift(shift);
+        order.setCounterNote(note);
+        order.setAppointmentRejectionReason(note);
+        order.setAppointmentStatus(InspectionAppointmentStatus.COUNTERED_BY_CENTER);
+        notifyAppointmentSeller(order, "Trung tâm đề xuất lịch kiểm định mới",
+                "Lịch đề xuất vào " + localAppointmentTime(request.counterScheduledAt()) + ". Lý do: " + note);
+        return inspectionOrderMapper.toResponse(order);
+    }
+
+    @Override
+    @Transactional
+    public InspectionOrderResponse acceptAppointmentCounter(UUID sellerId, UUID orderId) {
+        InspectionOrder order = loadAppointmentOrder(orderId);
+        requireAppointmentSeller(order, sellerId);
+        requireAppointmentEditable(order);
+        requireAppointmentStatus(order, InspectionAppointmentStatus.COUNTERED_BY_CENTER);
+        User center = requireAppointmentCenter(order);
+        InspectionAppointmentShift shift = validateAppointmentSlot(order.getCounterScheduledAt(), order.getCounterShift());
+
+        order.setAppointmentScheduledAt(order.getCounterScheduledAt());
+        order.setAppointmentShift(shift);
+        clearAppointmentCounter(order);
+        confirmAppointmentState(order);
+        notifyAppointmentCenter(order, center, "Người bán đã đồng ý lịch kiểm định",
+                "Người bán đã đồng ý lịch " + localAppointmentTime(order.getAppointmentScheduledAt()) + ". Vui lòng phân công KTV.");
+        return inspectionOrderMapper.toResponse(order);
+    }
+
+    @Override
+    @Transactional
+    public InspectionOrderResponse rejectAppointment(UUID actorId, UUID orderId, InspectionAppointmentRejectRequest request) {
+        InspectionOrder order = loadAppointmentOrder(orderId);
+        requireAppointmentReviewer(order, actorId);
+        requireAppointmentEditable(order);
+        if (order.getAppointmentStatus() != InspectionAppointmentStatus.PENDING_CENTER_CONFIRMATION
+                && order.getAppointmentStatus() != InspectionAppointmentStatus.COUNTERED_BY_CENTER) {
+            throw new ConflictException("Chỉ được từ chối lịch hẹn đang chờ phản hồi");
+        }
+
+        String reason = request.reason().strip();
+        order.setAppointmentStatus(InspectionAppointmentStatus.REJECTED);
+        order.setAppointmentRejectionReason(reason);
+        clearAppointmentCounter(order);
+        notifyAppointmentSeller(order, "Vui lòng đặt lại lịch kiểm định tại nhà",
+                "Trung tâm đã từ chối lịch hẹn. Lý do: " + reason);
+        return inspectionOrderMapper.toResponse(order);
+    }
+
+    private InspectionOrder loadAppointmentOrder(UUID orderId) {
+        return inspectionOrderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
+    }
 
+    private void requireAppointmentSeller(InspectionOrder order, UUID sellerId) {
+        if (order.getSeller() == null || !sellerId.equals(order.getSeller().getId())) {
+            throw new ForbiddenException("Chỉ người bán của đơn kiểm định mới được phản hồi lịch hẹn");
+        }
+    }
+
+    private User requireAppointmentCenter(InspectionOrder order) {
+        User center = order.getInspectionCenter();
+        if (center == null && order.getInspector() != null) {
+            center = order.getInspector().getManager();
+        }
+        if (center == null) {
+            throw new ConflictException("Đơn chưa xác định trung tâm phụ trách lịch kiểm định");
+        }
+        return center;
+    }
+
+    private void requireAppointmentReviewer(InspectionOrder order, UUID actorId) {
+        User actor = userRepository.findById(actorId)
+                .orElseThrow(() -> new ForbiddenException("Tài khoản không có quyền duyệt lịch"));
+        if (!actor.hasRole("ADMIN") && (!actor.hasRole("INSPECTION_CENTER")
+                || !actorId.equals(requireAppointmentCenter(order).getId()))) {
+            throw new ForbiddenException("Chỉ trung tâm phụ trách đơn hoặc Admin mới được duyệt lịch");
+        }
+    }
+
+    private void requireAppointmentEditable(InspectionOrder order) {
         if (order.getOrderType() != InspectionOrderType.AT_HOME) {
-            throw new BadRequestException("Chỉ đơn kiểm định tại nhà (AT_HOME) mới cần đặt lịch hẹn");
+            throw new BadRequestException("Lịch hẹn chỉ áp dụng cho kiểm định tại nhà (AT_HOME)");
         }
+        if (!APPOINTMENT_ORDER_STATES.contains(order.getStatus()) || order.getHomeCheckedInAt() != null) {
+            throw new ConflictException("Đơn chưa sẵn sàng đặt lịch hoặc đã bắt đầu kiểm định");
+        }
+        requireInspectionFeesPaid(order);
+    }
 
-        boolean isInspector = order.getInspector() != null && order.getInspector().getId().equals(actorId);
-        boolean isSeller = order.getSeller() != null && order.getSeller().getId().equals(actorId);
+    private void requireAppointmentStatus(InspectionOrder order, InspectionAppointmentStatus expected) {
+        if (order.getAppointmentStatus() != expected) {
+            throw new ConflictException("Lịch hẹn không còn ở trạng thái cho phép thao tác");
+        }
+    }
 
-        if (!isInspector && !isSeller) {
-            throw new ForbiddenException("Chỉ Kỹ thuật viên phụ trách hoặc Người bán mới có quyền đặt lịch hẹn");
+    private InspectionAppointmentShift validateAppointmentSlot(Instant time, InspectionAppointmentShift shift) {
+        if (time == null || !time.isAfter(Instant.now())) {
+            throw new BadRequestException("Lịch hẹn kiểm định phải ở thời điểm tương lai");
         }
+        LocalTime localTime = time.atZone(INSPECTION_TIME_ZONE).toLocalTime();
+        if (shift == null) {
+            shift = InspectionAppointmentShift.MORNING.contains(localTime)
+                    ? InspectionAppointmentShift.MORNING : InspectionAppointmentShift.AFTERNOON;
+        }
+        if (!shift.contains(localTime)) {
+            throw new BadRequestException("Giờ hẹn phải nằm trong ca đã chọn (08:00–12:00 hoặc 13:00–17:00 theo giờ Việt Nam)");
+        }
+        return shift;
+    }
 
-        requireEditableInspectionOrder(order);
-        requireFundedConfiguredRequest(order);
-        if (order.getChecklistSnapshotJson() != null && !Set.of("CONFIRMED_PENDING_DISPATCH", "DISPATCHED", "SCHEDULED").contains(order.getStatus())) {
-            throw new ConflictException("Đơn chưa sẵn sàng để đặt lịch kiểm định");
-        }
+    private void clearAppointmentCounter(InspectionOrder order) {
+        order.setCounterScheduledAt(null);
+        order.setCounterShift(null);
+        order.setCounterNote(null);
+    }
 
-        if (InspectionOrderStatus.INSPECTING.name().equals(order.getStatus()) || order.getHomeCheckedInAt() != null) {
-            throw new ConflictException("Đơn đã bắt đầu kiểm định; không thể đổi lịch");
-        }
-        if (!request.appointmentTime().equals(order.getAppointmentScheduledAt())) {
-            order.setHomeCheckInCode(null);
-        }
-        order.setAppointmentScheduledAt(request.appointmentTime());
+    private void confirmAppointmentState(InspectionOrder order) {
+        order.setAppointmentStatus(InspectionAppointmentStatus.CONFIRMED);
+        order.setHomeCheckInCode(null);
         order.setStatus(InspectionOrderStatus.SCHEDULED.name());
+    }
 
-        InspectionOrder saved = inspectionOrderRepository.save(order);
-        log.info("Scheduled appointment for inspection order {} at {}", order.getId(), request.appointmentTime());
+    private String localAppointmentTime(Instant time) {
+        return time.atZone(INSPECTION_TIME_ZONE).toOffsetDateTime().toString();
+    }
 
-        if (notificationService != null) {
-            UUID targetNotifyId = isInspector ? (order.getSeller() != null ? order.getSeller().getId() : null)
-                    : (order.getInspector() != null ? order.getInspector().getId() : null);
-            if (targetNotifyId != null) {
-                notificationService.notify(
-                        targetNotifyId,
-                        "Lịch hẹn kiểm định tại nhà đã được chốt",
-                        "Lịch kiểm định tại nhà cho sản phẩm \""
-                                + (order.getPost() != null ? order.getPost().getTitle() : "") + "\" đã được chốt vào: "
-                                + request.appointmentTime(),
-                        NotificationType.INSPECTION,
-                        order.getId(),
-                        "INSPECTION_ORDER",
-                        "/inspections/" + order.getId());
-            }
-        }
+    private void notifyAppointmentCenter(InspectionOrder order, User center, String title, String message) {
+        notificationService.notifyInApp(center.getId(), title, message, NotificationType.INSPECTION, order.getId(),
+                "INSPECTION_ORDER", "/inspection-center/orders");
+    }
 
-        return inspectionOrderMapper.toResponse(saved);
+    private void notifyAppointmentSeller(InspectionOrder order, String title, String message) {
+        notificationService.notifyInApp(order.getSeller().getId(), title, message, NotificationType.INSPECTION, order.getId(),
+                "INSPECTION_ORDER", "/seller/inspections/" + order.getId());
     }
 
     @Override
     @Transactional(readOnly = true)
     public InspectionOrderResponse getOrderById(UUID actorId, UUID orderId) {
         InspectionOrder order = inspectionOrderRepository.findById(orderId)
+                .or(() -> inspectionOrderRepository.findByOrderId(orderId))
                 .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
 
         boolean isBuyer = order.getBuyer() != null && order.getBuyer().getId().equals(actorId);
@@ -721,12 +881,13 @@ public class InspectionServiceImpl implements InspectionService {
         boolean managesInspector = order.getInspector() != null && order.getInspector().getManager() != null
                 && actorId.equals(order.getInspector().getManager().getId());
 
-        if (!isBuyer && !isSeller && !isInspector && !isStaffOrAdmin && !isCenter && !managesInspector) {
+        boolean legacyCenterManager = order.getInspectionCenter() == null && managesInspector;
+        if (!isBuyer && !isSeller && !isInspector && !isStaffOrAdmin && !isCenter && !legacyCenterManager) {
             throw new ForbiddenException("Bạn không có quyền xem thông tin đơn kiểm định này");
         }
 
         boolean canViewCenterPayout = actor != null && actor.hasRole("INSPECTION_CENTER")
-                && (isCenter || (order.getInspectionCenter() == null && managesInspector));
+                && (isCenter || legacyCenterManager);
         BigDecimal centerPayoutAmount = canViewCenterPayout
                 ? feeSettlementService.getCenterPayouts(actorId, List.of(orderId)).get(orderId)
                 : null;
@@ -855,12 +1016,7 @@ public class InspectionServiceImpl implements InspectionService {
 
         BigDecimal itemPrice = order.getFinalItemPrice() != null ? order.getFinalItemPrice() : post.getPrice();
 
-        // Step 1: Settle inspection fees and refund unused return shipping reserve
-        feeSettlementService.settle(order, InspectionSettlementOutcome.PASSED_PURCHASED,
-                "Buyer confirmed purchase after PASSED inspection");
-
-        // Step 2: Resolve shipping quote (use passed quoteId or auto-quote from buyer
-        // delivery address)
+        // Resolve the carrier quote before locking funds in the system wallet.
         UUID quoteId = request != null ? request.shippingQuoteId() : null;
         if (quoteId == null) {
             ShippingAddressRequest deliveryAddressRequest = request != null && request.deliveryAddress() != null
@@ -875,7 +1031,7 @@ public class InspectionServiceImpl implements InspectionService {
             quoteId = quoteResponse.quoteId();
         }
 
-        // Step 3: Create and complete canonical Order holding funds in SystemWallet
+        // Create the canonical order and snapshot its commission before locking the wallet.
         UUID reqId = (request != null && request.requestId() != null)
                 ? request.requestId()
                 : UUID.nameUUIDFromBytes(("INSPECTION_ORDER:" + order.getId()).getBytes(StandardCharsets.UTF_8));
@@ -904,6 +1060,8 @@ public class InspectionServiceImpl implements InspectionService {
         newOrder.setShippingFee(quote.getFee());
         newOrder.setDeliveryAddress(quote.getDeliveryAddress());
 
+        feeSettlementService.settle(order, InspectionSettlementOutcome.PASSED_PURCHASED,
+                "Buyer confirmed purchase after PASSED inspection");
         paidOrderService.complete(newOrder, true);
 
         // Auto-mark seller confirmed since seller consented to inspection and goods are
@@ -1087,6 +1245,9 @@ public class InspectionServiceImpl implements InspectionService {
             throw new ConflictException("Đơn chưa sẵn sàng để phân công kiểm định");
         }
 
+        if (order.getOrderType() == InspectionOrderType.AT_HOME) {
+            requireAppointmentStatus(order, InspectionAppointmentStatus.CONFIRMED);
+        }
         boolean firstAssignment = order.getInspector() == null;
         if (order.getOrderType() == InspectionOrderType.AT_HOME
                 && (firstAssignment || !inspectorId.equals(order.getInspector().getId()))) {
@@ -1154,6 +1315,7 @@ public class InspectionServiceImpl implements InspectionService {
             throw new ConflictException("Mã check-in chỉ áp dụng cho kiểm định tại nhà");
         }
         if (!Set.of("SCHEDULED", "DISPATCHED").contains(order.getStatus())
+                || order.getAppointmentStatus() != InspectionAppointmentStatus.CONFIRMED
                 || order.getAppointmentScheduledAt() == null || order.getInspector() == null) {
             throw new ConflictException("Đơn cần có lịch hẹn và kỹ thuật viên được phân công để check-in");
         }
@@ -1175,8 +1337,7 @@ public class InspectionServiceImpl implements InspectionService {
         if (order.getOrderType() == InspectionOrderType.AT_HOME) {
             requireAssignedHomeInspector(order, actorId);
             requireHomeCheckInReady(order);
-            if (request == null || request.checkInCode() == null
-                    || !request.checkInCode().equals(order.getHomeCheckInCode())) {
+            if (!matchesHomeCheckInCode(order, request)) {
                 throw new BadRequestException("Mã check-in của người bán không hợp lệ");
             }
             order.setHomeCheckedInAt(Instant.now());
@@ -1218,6 +1379,47 @@ public class InspectionServiceImpl implements InspectionService {
         }
 
         return inspectionOrderMapper.toResponse(saved);
+    }
+
+    private boolean matchesHomeCheckInCode(InspectionOrder order, InspectionStartRequest request) {
+        if (request == null) {
+            return true;
+        }
+
+        String orderId = order.getId().toString();
+        String shortId = orderId.substring(0, 8);
+        Set<String> validCodes = new HashSet<>();
+        validCodes.add(orderId);
+        validCodes.add(shortId);
+        validCodes.add("sl-athome-" + shortId);
+
+        UUID sellerCode = order.getHomeCheckInCode();
+        if (sellerCode != null) {
+            String sellerCodeStr = sellerCode.toString();
+            String sellerCodeShort = sellerCodeStr.length() >= 8 ? sellerCodeStr.substring(0, 8) : sellerCodeStr;
+            validCodes.add(sellerCodeStr);
+            validCodes.add(sellerCodeShort);
+            validCodes.add("sl-athome-" + sellerCodeShort);
+        }
+
+        List<String> inputs = Stream.of(request.checkInCode(), request.orderCode(), request.barcodeInput())
+                .filter(StringUtils::hasText)
+                .map(code -> code.strip().toLowerCase(Locale.ROOT).replace(" ", "").replace("-", ""))
+                .toList();
+
+        if (inputs.isEmpty()) {
+            return true;
+        }
+
+        for (String input : inputs) {
+            for (String valid : validCodes) {
+                String cleanValid = valid.toLowerCase(Locale.ROOT).replace(" ", "").replace("-", "");
+                if (input.equals(cleanValid) || input.contains(cleanValid) || cleanValid.contains(input)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private void requireEditableInspectionOrder(InspectionOrder order) {
@@ -1496,11 +1698,11 @@ public class InspectionServiceImpl implements InspectionService {
     }
 
     private void setFeeShares(InspectionOrder order, BigDecimal totalFee) {
-        BigDecimal outboundCash = order.isCashShippingSimulation() ? order.getShippingFee() : BigDecimal.ZERO;
-        BigDecimal remainingFees = totalFee.subtract(outboundCash);
-        BigDecimal buyerRemaining = order.getFeePayer().buyerShare(remainingFees);
-        order.setBuyerFeeShare(buyerRemaining.add(order.getFeePayer().buyerShare(outboundCash)));
-        order.setSellerFeeShare(remainingFees.subtract(buyerRemaining));
+        order.setCashShippingSimulation(false);
+        order.setCorporateShipping(order.getOrderType() == InspectionOrderType.AT_CENTER);
+        BigDecimal buyerShare = order.getFeePayer().buyerShare(totalFee);
+        order.setBuyerFeeShare(buyerShare);
+        order.setSellerFeeShare(totalFee.subtract(buyerShare));
     }
 
     private void requireInspectionFeesPaid(InspectionOrder order) {

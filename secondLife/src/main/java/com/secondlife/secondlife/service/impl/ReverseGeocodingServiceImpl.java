@@ -20,6 +20,11 @@ public class ReverseGeocodingServiceImpl implements ReverseGeocodingService {
     }
 
     @Override
+    public GeocodedAddressResponse geocodeStreetAddress(String address) {
+        return geocoding.geocodeStreetAddress(address);
+    }
+
+    @Override
     public ShippingAddress shipping(ShippingAddressRequest request) { return geocoding.shipping(request); }
 
     @Override

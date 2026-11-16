@@ -2,6 +2,8 @@ package com.secondlife.secondlife.dto.response;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.secondlife.secondlife.enums.InspectionAppointmentShift;
+import com.secondlife.secondlife.enums.InspectionAppointmentStatus;
 import com.secondlife.secondlife.enums.InspectionComplexityLevel;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionOrderStatus;
@@ -53,6 +55,13 @@ public record InspectionOrderResponse(
     Instant sellerPaidAt,
     Instant feeSettledAt,
     Instant appointmentScheduledAt,
+    InspectionAppointmentShift appointmentShift,
+    String appointmentNote,
+    InspectionAppointmentStatus appointmentStatus,
+    Instant counterScheduledAt,
+    InspectionAppointmentShift counterShift,
+    String counterNote,
+    String appointmentRejectionReason,
     Instant homeCheckedInAt,
     List<String> evidencePhotoUrls,
     String checklistResultJson,
