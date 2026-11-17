@@ -729,7 +729,7 @@ public class InspectionServiceImpl implements InspectionService {
         order.setCounterScheduledAt(request.counterScheduledAt());
         order.setCounterShift(shift);
         order.setCounterNote(note);
-        order.setAppointmentRejectionReason(note);
+        order.setAppointmentRejectionReason(null);
         order.setAppointmentStatus(InspectionAppointmentStatus.COUNTERED_BY_CENTER);
         notifyAppointmentSeller(order, "Trung tâm đề xuất lịch kiểm định mới",
                 "Lịch đề xuất vào " + localAppointmentTime(request.counterScheduledAt()) + ". Lý do: " + note);
@@ -748,6 +748,7 @@ public class InspectionServiceImpl implements InspectionService {
 
         order.setAppointmentScheduledAt(order.getCounterScheduledAt());
         order.setAppointmentShift(shift);
+        order.setAppointmentRejectionReason(null);
         clearAppointmentCounter(order);
         confirmAppointmentState(order);
         notifyAppointmentCenter(order, center, "Người bán đã đồng ý lịch kiểm định",
@@ -769,6 +770,9 @@ public class InspectionServiceImpl implements InspectionService {
         String reason = request.reason().strip();
         order.setAppointmentStatus(InspectionAppointmentStatus.REJECTED);
         order.setAppointmentRejectionReason(reason);
+        order.setAppointmentScheduledAt(null);
+        order.setAppointmentShift(null);
+        order.setAppointmentNote(null);
         clearAppointmentCounter(order);
         notifyAppointmentSeller(order, "Vui lòng đặt lại lịch kiểm định tại nhà",
                 "Trung tâm đã từ chối lịch hẹn. Lý do: " + reason);
@@ -894,6 +898,10 @@ public class InspectionServiceImpl implements InspectionService {
         return toOrderDetail(order, centerPayoutAmount);
     }
 
+    private InspectionOrderResponse toOrderDetail(InspectionOrder inspection) {
+        return toOrderDetail(inspection, null);
+    }
+
     private InspectionOrderResponse toOrderDetail(InspectionOrder inspection, BigDecimal centerPayoutAmount) {
         Order purchase = inspection.getOrder();
         List<Shipment> route = shipments.findInspectionRoute(inspection.getId(), purchase == null ? null : purchase.getId());
@@ -927,8 +935,22 @@ public class InspectionServiceImpl implements InspectionService {
         if (buyerContact == null && purchase != null) buyerContact = readShippingContact(purchase.getDeliveryAddress());
         if (buyerContact == null) buyerContact = readShippingContact(inspection.getBuyerDeliveryAddressJson());
 
-        return inspectionOrderMapper.toResponse(inspection, withProfilePhone(sellerContact, seller),
+        return inspectionOrderMapper.toResponse(inspection, withSellerContact(sellerContact, seller),
                 withProfilePhone(buyerContact, inspection.getBuyer()), centerContact, centerPayoutAmount);
+    }
+
+    private ShippingAddress withSellerContact(ShippingAddress contact, User seller) {
+        if ((contact == null || !StringUtils.hasText(contact.address())) && seller != null) {
+            contact = shippingQuoteService.pickup(seller.getId());
+        }
+        if (seller == null) return contact;
+        var profile = seller.getProfile();
+        String phone = (contact != null && StringUtils.hasText(contact.phone())) ? contact.phone() : (profile != null ? profile.getPhone() : null);
+        String name = (contact != null && StringUtils.hasText(contact.name())) ? contact.name() : (profile != null ? profile.getFullName() : null);
+        String address = (contact != null && StringUtils.hasText(contact.address())) ? contact.address() : null;
+        BigDecimal lat = contact != null ? contact.latitude() : null;
+        BigDecimal lng = contact != null ? contact.longitude() : null;
+        return new ShippingAddress(name, phone, address, lat, lng);
     }
 
     private Shipment latestShipment(List<Shipment> route, String leg) {
@@ -955,12 +977,26 @@ public class InspectionServiceImpl implements InspectionService {
     }
 
     private ShippingAddress withProfilePhone(ShippingAddress contact, User user) {
-        if (user == null || user.getProfile() == null || (contact != null && StringUtils.hasText(contact.phone()))) {
+        if (user == null || user.getProfile() == null) {
             return contact;
         }
-        String phone = user.getProfile().getPhone();
-        if (contact == null) return new ShippingAddress(null, phone, null, null, null);
-        return new ShippingAddress(contact.name(), phone, contact.address(), contact.latitude(), contact.longitude());
+        var profile = user.getProfile();
+        String phone = (contact != null && StringUtils.hasText(contact.phone())) ? contact.phone() : profile.getPhone();
+        String address = (contact != null && StringUtils.hasText(contact.address())) ? contact.address() : formatProfileAddress(profile);
+        BigDecimal lat = contact != null ? contact.latitude() : (profile.getLatitude() != null ? BigDecimal.valueOf(profile.getLatitude()) : null);
+        BigDecimal lng = contact != null ? contact.longitude() : (profile.getLongitude() != null ? BigDecimal.valueOf(profile.getLongitude()) : null);
+        String name = contact != null && StringUtils.hasText(contact.name()) ? contact.name() : profile.getFullName();
+        return new ShippingAddress(name, phone, address, lat, lng);
+    }
+
+    private String formatProfileAddress(UserProfile profile) {
+        if (profile == null) return null;
+        java.util.List<String> parts = new java.util.ArrayList<>();
+        if (StringUtils.hasText(profile.getStreetAddress())) parts.add(profile.getStreetAddress().trim());
+        if (StringUtils.hasText(profile.getWard())) parts.add(profile.getWard().trim());
+        if (StringUtils.hasText(profile.getDistrict())) parts.add(profile.getDistrict().trim());
+        if (StringUtils.hasText(profile.getProvince())) parts.add(profile.getProvince().trim());
+        return parts.isEmpty() ? null : String.join(", ", parts);
     }
 
     @Override
@@ -1071,6 +1107,7 @@ public class InspectionServiceImpl implements InspectionService {
         orderRepository.save(newOrder);
 
         order.setOrder(newOrder);
+        order.setBuyerDeliveryAddressJson(quote.getDeliveryAddress());
         order.setFinalShippingFee(quote.getFee());
         order.setFinalPaymentPaidAt(Instant.now());
         order.setStatus(InspectionOrderStatus.DELIVERING_TO_BUYER.name());
@@ -1195,10 +1232,10 @@ public class InspectionServiceImpl implements InspectionService {
             Page<InspectionOrder> orders = inspectionOrderRepository.findVisibleToCenter(actorId, normalized, pageable);
             List<UUID> orderIds = orders.getContent().stream().map(InspectionOrder::getId).toList();
             Map<UUID, BigDecimal> payouts = feeSettlementService.getCenterPayouts(actorId, orderIds);
-            return orders.map(order -> inspectionOrderMapper.toResponse(order, payouts.get(order.getId())));
+            return orders.map(order -> toOrderDetail(order, payouts.get(order.getId())));
         }
         if (actor.hasRole("INSPECTOR")) {
-            return inspectionOrderRepository.findVisibleToInspector(actorId, normalized, pageable).map(inspectionOrderMapper::toResponse);
+            return inspectionOrderRepository.findVisibleToInspector(actorId, normalized, pageable).map(this::toOrderDetail);
         }
         throw new ForbiddenException("Bạn không có quyền xem danh sách đơn kiểm định");
     }

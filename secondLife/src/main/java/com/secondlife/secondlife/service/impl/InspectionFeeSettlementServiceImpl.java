@@ -129,9 +129,11 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
             case PASSED_PURCHASED -> {
                 centerPayout = computeCenterPayout(inspectionOrder, serviceFee);
                 outboundShipping = outboundPrepaid;
-                BigDecimal buyerReserveShare = inspectionOrder.isCorporateShipping()
-                        ? InspectionFeePayer.SPLIT_50_50.buyerShare(returnReserveFee)
-                        : buyerShare(inspectionOrder, returnReserveFee);
+                BigDecimal buyerReserveShare = inspectionOrder.getFeePayer() != null
+                        ? buyerShare(inspectionOrder, returnReserveFee)
+                        : (inspectionOrder.isCorporateShipping()
+                            ? InspectionFeePayer.SPLIT_50_50.buyerShare(returnReserveFee)
+                            : buyerShare(inspectionOrder, returnReserveFee));
                 buyerRefund = buyerDeposit.add(buyerReserveShare);
                 sellerRefund = returnReserveFee.subtract(buyerReserveShare);
             }

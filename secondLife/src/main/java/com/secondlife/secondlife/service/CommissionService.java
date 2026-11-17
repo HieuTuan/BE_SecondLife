@@ -7,10 +7,12 @@ import com.secondlife.secondlife.entity.Order;
 import com.secondlife.secondlife.entity.OrderCommissionSnapshot;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import java.util.Optional;
 import java.util.UUID;
 public interface CommissionService {
     Page<CommissionRuleResponse> list(Pageable pageable);
     CommissionRuleResponse get(UUID id);
+    Optional<CommissionRuleResponse> findActiveDefaultRule();
     CommissionRuleResponse create(UUID actorId, CommissionRuleRequest request);
     CommissionRuleResponse update(UUID actorId, UUID id, CommissionRuleRequest request);
     CommissionRuleResponse deactivate(UUID actorId, UUID id, String reason);

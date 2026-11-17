@@ -14,6 +14,7 @@ import com.secondlife.secondlife.enums.RoleCode;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.RoleRepository;
+import com.secondlife.secondlife.repository.ShippingPickupAddressRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.userdetails.UserPrincipalCache;
 import com.secondlife.secondlife.service.NotificationService;
@@ -23,8 +24,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import tools.jackson.databind.ObjectMapper;
 
 import java.lang.reflect.Field;
 import java.util.Optional;
@@ -60,6 +63,12 @@ class UserServiceTest {
 
     @Mock
     private UserPrincipalCache userPrincipalCache;
+
+    @Mock
+    private ShippingPickupAddressRepository shippingPickupAddressRepository;
+
+    @Spy
+    private ObjectMapper objectMapper = new ObjectMapper();
 
     @InjectMocks
     private UserServiceImpl userService;

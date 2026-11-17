@@ -6,6 +6,7 @@ import com.secondlife.secondlife.dto.response.OrderBankPaymentResponse;
 import com.secondlife.secondlife.dto.response.OrderFeedItemResponse;
 import com.secondlife.secondlife.dto.response.OrderFulfillmentResponse;
 import com.secondlife.secondlife.dto.response.OrderResponseDTO;
+import com.secondlife.secondlife.dto.response.SellerCommissionPreviewResponse;
 import com.secondlife.secondlife.entity.DepositRequest;
 import com.secondlife.secondlife.entity.Order;
 import com.secondlife.secondlife.enums.OrderPaymentMethod;
@@ -28,8 +29,9 @@ public class OrderMapper {
         return delegate.toResponse(order, payment, totalAmount);
     }
 
-    public OrderFeedItemResponse toFeedItem(FeedRow row, OrderResponseDTO order, InspectionOrderResponse inspection) {
-        return delegate.toFeedItem(row, order, inspection);
+    public OrderFeedItemResponse toFeedItem(FeedRow row, OrderResponseDTO order, InspectionOrderResponse inspection,
+                                            SellerCommissionPreviewResponse sellerCommissionPreview) {
+        return delegate.toFeedItem(row, order, inspection, sellerCommissionPreview);
     }
 
     public OrderFulfillmentResponse toFulfillmentResponse(Order order) {
@@ -59,6 +61,7 @@ public class OrderMapper {
         @Mapping(target = "sellerReadyAt", source = "order.sellerReadyAt")
         @Mapping(target = "carrierPickedUpAt", source = "order.carrierPickedUpAt")
         @Mapping(target = "cancellationReasonCode", source = "order.cancellationReasonCode")
+        @Mapping(target = "deliveryAddress", source = "order.deliveryAddress")
         @Mapping(target = "postId", source = "order.post.id")
         @Mapping(target = "postTitle", source = "order.post.title")
         @Mapping(target = "buyerId", source = "order.buyer.id")
@@ -78,7 +81,9 @@ public class OrderMapper {
         @Mapping(target = "categoryId", source = "row.categoryId")
         @Mapping(target = "itemId", source = "row.itemId")
         @Mapping(target = "itemCondition", source = "row.itemCondition")
-        OrderFeedItemResponse toFeedItem(FeedRow row, OrderResponseDTO order, InspectionOrderResponse inspection);
+        @Mapping(target = "sellerCommissionPreview", source = "sellerCommissionPreview")
+        OrderFeedItemResponse toFeedItem(FeedRow row, OrderResponseDTO order, InspectionOrderResponse inspection,
+                                         SellerCommissionPreviewResponse sellerCommissionPreview);
 
         @Mapping(target = "orderId", source = "id")
         @Mapping(target = "lateHandoverCandidate", expression = "java(order.getHandoverDeadline() != null && order.getCarrierPickedUpAt() != null && order.getCarrierPickedUpAt().isAfter(order.getHandoverDeadline()))")

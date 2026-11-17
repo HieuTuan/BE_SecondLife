@@ -1,24 +1,39 @@
 package com.secondlife.secondlife.mapper;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.secondlife.secondlife.config.MapStructConfiguration;
 import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.repository.ShippingPickupAddressRepository;
 
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.Named;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 
 @Component
 public class InspectionOrderMapper {
     private final Delegate delegate;
+    private final ShippingPickupAddressRepository shippingPickupAddressRepository;
+    private final ObjectMapper objectMapper;
 
     public InspectionOrderMapper(Delegate delegate) {
+        this(delegate, null, null);
+    }
+
+    @Autowired
+    public InspectionOrderMapper(Delegate delegate,
+                                 @Autowired(required = false) ShippingPickupAddressRepository shippingPickupAddressRepository,
+                                 @Autowired(required = false) ObjectMapper objectMapper) {
         this.delegate = delegate;
+        this.shippingPickupAddressRepository = shippingPickupAddressRepository;
+        this.objectMapper = objectMapper;
     }
 
     public InspectionOrderResponse toResponse(InspectionOrder order) {
@@ -32,6 +47,53 @@ public class InspectionOrderMapper {
     public InspectionOrderResponse toResponse(InspectionOrder order, ShippingAddress sellerContact,
                                               ShippingAddress buyerContact, ShippingAddress centerContact,
                                               BigDecimal centerPayoutAmount) {
+        if (order != null) {
+            if ((sellerContact == null || !StringUtils.hasText(sellerContact.address()))
+                    && shippingPickupAddressRepository != null && objectMapper != null) {
+                User seller = order.getSeller() != null ? order.getSeller() : (order.getPost() != null ? order.getPost().getUser() : null);
+                if (seller != null && seller.getId() != null) {
+                    try {
+                        var pickupRow = shippingPickupAddressRepository.findById(seller.getId()).orElse(null);
+                        if (pickupRow != null && StringUtils.hasText(pickupRow.getAddressJson())) {
+                            var parsed = objectMapper.readValue(pickupRow.getAddressJson(), ShippingAddress.class);
+                            if (parsed != null && StringUtils.hasText(parsed.address())) {
+                                var profile = seller.getProfile();
+                                String name = StringUtils.hasText(parsed.name())
+                                        ? parsed.name() : (profile != null && StringUtils.hasText(profile.getFullName()) ? profile.getFullName() : "Gian Hàng");
+                                String phone = StringUtils.hasText(parsed.phone())
+                                        ? parsed.phone() : (profile != null && StringUtils.hasText(profile.getPhone()) ? profile.getPhone() : null);
+                                sellerContact = new ShippingAddress(name, phone, parsed.address(), parsed.latitude(), parsed.longitude());
+                            }
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+
+            if ((buyerContact == null || !StringUtils.hasText(buyerContact.address()))
+                    && objectMapper != null) {
+                String rawBuyerDelivery = StringUtils.hasText(order.getBuyerDeliveryAddressJson())
+                        ? order.getBuyerDeliveryAddressJson()
+                        : (order.getOrder() != null && StringUtils.hasText(order.getOrder().getDeliveryAddress())
+                                ? order.getOrder().getDeliveryAddress()
+                                : null);
+                if (StringUtils.hasText(rawBuyerDelivery)) {
+                    try {
+                        var parsed = objectMapper.readValue(rawBuyerDelivery, ShippingAddress.class);
+                        if (parsed != null && StringUtils.hasText(parsed.address())) {
+                            var profile = order.getBuyer() != null ? order.getBuyer().getProfile() : null;
+                            String name = StringUtils.hasText(parsed.name())
+                                    ? parsed.name() : (profile != null && StringUtils.hasText(profile.getFullName()) ? profile.getFullName() : null);
+                            String phone = StringUtils.hasText(parsed.phone())
+                                    ? parsed.phone() : (profile != null && StringUtils.hasText(profile.getPhone()) ? profile.getPhone() : null);
+                            buyerContact = new ShippingAddress(name, phone, parsed.address(), parsed.latitude(), parsed.longitude());
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+        }
+
         return delegate.toResponse(order, sellerContact, buyerContact, centerContact, centerPayoutAmount);
     }
 

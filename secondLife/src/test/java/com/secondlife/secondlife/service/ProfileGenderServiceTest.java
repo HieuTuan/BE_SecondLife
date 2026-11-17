@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import com.secondlife.secondlife.mapper.MapperTestSupport;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.*;
 
@@ -25,7 +26,10 @@ class ProfileGenderServiceTest {
     @BeforeEach void setup() {
         user.setId(UUID.randomUUID()); user.setProfile(new UserProfile(user,"Nguyễn Test",null,null)); user.getProfile().setGender(Gender.MALE);
         when(users.findByIdWithProfileDetails(user.getId())).thenReturn(Optional.of(user)); when(users.save(user)).thenReturn(user);
-        service=new UserServiceImpl(users,mock(RoleRepository.class),mock(PasswordEncoder.class),mock(TokenService.class),mapper,mock(NotificationService.class),mock(SellerReputationService.class),mock(UserPrincipalCache.class));
+        service = new UserServiceImpl(
+                users, mock(RoleRepository.class), mock(PasswordEncoder.class), mock(TokenService.class), mapper,
+                mock(NotificationService.class), mock(SellerReputationService.class), mock(UserPrincipalCache.class),
+                mock(ShippingPickupAddressRepository.class), new ObjectMapper());
     }
     @Test void chosenGenderCanBeUpdatedAndReadFromProfileAndAuthSummary() {
         var result=service.updateProfile(user.getId(),new UpdateProfileRequest(null,null,null,null,null,null,null,null,null,Gender.FEMALE));

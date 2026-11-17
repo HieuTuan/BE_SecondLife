@@ -47,9 +47,6 @@ public class InspectionLocationServiceImpl implements InspectionLocationService 
         var seller = post.getUser();
         ShippingAddress pickup = shipping.pickup(seller.getId());
         if (pickup == null || pickup.address() == null || pickup.address().isBlank()) {
-            pickup = profilePickup(seller.getProfile());
-        }
-        if (pickup == null || pickup.address().isBlank()) {
             throw new ConflictException(PICKUP_REQUIRED);
         }
 
@@ -97,19 +94,6 @@ public class InspectionLocationServiceImpl implements InspectionLocationService 
         } catch (BadRequestException unresolvedAddress) {
             throw new ConflictException(PICKUP_REQUIRED);
         }
-    }
-
-    private ShippingAddress profilePickup(UserProfile profile) {
-        if (profile == null || profile.getStreetAddress() == null || profile.getStreetAddress().isBlank()) {
-            return null;
-        }
-        String address = Stream.of(profile.getStreetAddress(), profile.getWard(), profile.getDistrict(), profile.getProvince())
-                .filter(Objects::nonNull)
-                .map(String::strip)
-                .filter(part -> !part.isEmpty())
-                .collect(Collectors.joining(", "));
-        return new ShippingAddress(profile.getFullName(), profile.getPhone(), address,
-                decimalCoordinate(profile.getLatitude()), decimalCoordinate(profile.getLongitude()));
     }
 
     private BigDecimal decimalCoordinate(Double value) {
