@@ -124,9 +124,14 @@ class InspectionFeeSettlementServiceImplTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"BUYER_PAYS,160000,0", "SELLER_PAYS,0,160000", "SPLIT_50_50,80000,80000"})
-    void corporatePurchasedRefundsHalfTheReserveToEachParty(InspectionFeePayer payer, BigDecimal buyerFee,
-                                                             BigDecimal sellerFee) {
+    @CsvSource({
+            "BUYER_PAYS,160000,0,30000,0",
+            "SELLER_PAYS,0,160000,0,30000",
+            "SPLIT_50_50,80000,80000,15000,15000"
+    })
+    void corporatePurchasedRefundsReserveAccordingToFeePayer(InspectionFeePayer payer, BigDecimal buyerFee,
+                                                             BigDecimal sellerFee, BigDecimal expectedBuyerRefund,
+                                                             BigDecimal expectedSellerRefund) {
         order.setCorporateShipping(true);
         order.setFeePayer(payer);
         order.setBuyerFeeShare(buyerFee);
@@ -136,12 +141,16 @@ class InspectionFeeSettlementServiceImplTest {
         var settlement = settlementService.settle(order, InspectionSettlementOutcome.PASSED_PURCHASED, "Test");
 
         assertEquals(0, new BigDecimal("30000").compareTo(settlement.getOutboundShippingAllocated()));
-        assertEquals(0, new BigDecimal("15000").compareTo(settlement.getBuyerRefundAmount()));
-        assertEquals(0, new BigDecimal("15000").compareTo(settlement.getSellerRefundAmount()));
-        verify(walletService).processRefund(eq(buyer.getId()), any(), eq(order.getId()),
-                eq(WalletTransactionReferenceType.INSPECTION_ORDER));
-        verify(walletService).processRefund(eq(seller.getId()), any(), eq(order.getId()),
-                eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+        assertEquals(0, expectedBuyerRefund.compareTo(settlement.getBuyerRefundAmount()));
+        assertEquals(0, expectedSellerRefund.compareTo(settlement.getSellerRefundAmount()));
+        if (expectedBuyerRefund.signum() > 0) {
+            verify(walletService).processRefund(eq(buyer.getId()), any(), eq(order.getId()),
+                    eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+        }
+        if (expectedSellerRefund.signum() > 0) {
+            verify(walletService).processRefund(eq(seller.getId()), any(), eq(order.getId()),
+                    eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+        }
     }
 
     @Test

@@ -51,6 +51,10 @@ public class CommissionServiceImpl implements CommissionService {
     }
     @Override @Transactional(readOnly = true)
     public CommissionRuleResponse get(UUID id) { return commissionMapper.toRuleResponse(defaultRule(id)); }
+    @Override @Transactional(readOnly = true)
+    public Optional<CommissionRuleResponse> findActiveDefaultRule() {
+        return activeDefaultRule().map(commissionMapper::toRuleResponse);
+    }
     @Override @Transactional
     public CommissionRuleResponse create(UUID actorId, CommissionRuleRequest request) {
         rules.lockPolicy(); validate(request, null);
@@ -89,7 +93,7 @@ public class CommissionServiceImpl implements CommissionService {
         UUID categoryId = order.getPost().getCategoryId();
         BigDecimal price = order.getFinalPrice();
         if (price == null || price.signum() <= 0) throw new ConflictException("Order price must be positive");
-        var selected = rules.findByTypeAndActiveTrue(CommissionRuleType.DEFAULT)
+        var selected = activeDefaultRule()
                 .orElseThrow(() -> new ConflictException("Default commission policy is not configured"));
         var snapshot = new OrderCommissionSnapshot();
         snapshot.setOrderId(order.getId()); snapshot.setRuleId(selected.getId()); snapshot.setRuleRevision(selected.getRevision());
@@ -108,6 +112,9 @@ public class CommissionServiceImpl implements CommissionService {
     @Override public OrderCommissionResponse describe(OrderCommissionSnapshot s) {
         var amounts = calculator.calculate(s.getCommissionBase(), s.getRate(), s.getMinCommission(), s.getMaxCommission());
         return commissionMapper.toOrderResponse(s, amounts.rawCommission(), amounts.platformCommission(), amounts.sellerPayout());
+    }
+    private Optional<CommissionRule> activeDefaultRule() {
+        return rules.findByTypeAndActiveTrue(CommissionRuleType.DEFAULT);
     }
     private CommissionRule rule(UUID id) { return rules.findById(id).orElseThrow(() -> new NotFoundException("Commission rule not found")); }
     private CommissionRule defaultRule(UUID id) {

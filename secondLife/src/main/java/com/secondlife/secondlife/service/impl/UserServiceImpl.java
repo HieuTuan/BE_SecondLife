@@ -4,12 +4,14 @@ import com.secondlife.secondlife.common.PageResponse;
 import com.secondlife.secondlife.dto.request.AdminStatusUpdateRequest;
 import com.secondlife.secondlife.dto.request.ChangePasswordRequest;
 import com.secondlife.secondlife.dto.request.CreateInspectionCenterRequest;
+import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.request.UpdateProfileRequest;
 import com.secondlife.secondlife.dto.response.ReputationResponse;
 import com.secondlife.secondlife.dto.response.UserAdminResponse;
 import com.secondlife.secondlife.dto.response.UserProfileResponse;
 import com.secondlife.secondlife.dto.response.UserSummaryResponse;
 import com.secondlife.secondlife.entity.Role;
+import com.secondlife.secondlife.entity.ShippingPickupAddress;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.entity.UserProfile;
 import com.secondlife.secondlife.enums.AccountStatus;
@@ -19,6 +21,7 @@ import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.RoleRepository;
+import com.secondlife.secondlife.repository.ShippingPickupAddressRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.userdetails.UserPrincipalCache;
 import com.secondlife.secondlife.service.NotificationService;
@@ -39,7 +42,9 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -57,6 +62,8 @@ public class UserServiceImpl implements UserService {
     private final NotificationService notificationService;
     private final SellerReputationService sellerReputationService;
     private final UserPrincipalCache userPrincipalCache;
+    private final ShippingPickupAddressRepository shippingPickupAddressRepository;
+    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional(readOnly = true)
@@ -90,23 +97,58 @@ public class UserServiceImpl implements UserService {
         if (request.gender() != null) {
             profile.setGender(request.gender());
         }
-        if (request.province() != null) {
-            profile.setProvince(request.province().trim());
+
+        // ĐỊA CHỈ HỒ SƠ CÁ NHÂN KHÔNG ĐƯỢC CHỈNH SỬA:
+        // Giữ nguyên các trường profile.province, district, ward, streetAddress, latitude, longitude
+        // (chỉ khởi tạo nếu profile mới toanh chưa từng có địa chỉ và request có dữ liệu, còn khi đã có thì không chỉnh sửa)
+        boolean profileHasAddress = (profile.getStreetAddress() != null && !profile.getStreetAddress().isBlank())
+                || (profile.getProvince() != null && !profile.getProvince().isBlank());
+        if (!profileHasAddress) {
+            if (request.province() != null) profile.setProvince(request.province().trim());
+            if (request.district() != null) profile.setDistrict(request.district().trim());
+            if (request.ward() != null) profile.setWard(request.ward().trim());
+            if (request.streetAddress() != null) profile.setStreetAddress(request.streetAddress().trim());
+            if (request.latitude() != null) profile.setLatitude(request.latitude());
+            if (request.longitude() != null) profile.setLongitude(request.longitude());
         }
-        if (request.district() != null) {
-            profile.setDistrict(request.district().trim());
-        }
-        if (request.ward() != null) {
-            profile.setWard(request.ward().trim());
-        }
-        if (request.streetAddress() != null) {
-            profile.setStreetAddress(request.streetAddress().trim());
-        }
-        if (request.latitude() != null) {
-            profile.setLatitude(request.latitude());
-        }
-        if (request.longitude() != null) {
-            profile.setLongitude(request.longitude());
+
+        // CẬP NHẬT ĐỊA CHỈ KHO LẤY HÀNG (shipping_pickup_addresses):
+        // Khi gọi update profile với thông tin địa chỉ, luôn cập nhật vào Địa chỉ Kho lấy hàng của người dùng.
+        boolean hasAddressInput = (request.streetAddress() != null && !request.streetAddress().isBlank()) ||
+                (request.ward() != null && !request.ward().isBlank()) ||
+                (request.district() != null && !request.district().isBlank()) ||
+                (request.province() != null && !request.province().isBlank()) ||
+                request.latitude() != null || request.longitude() != null;
+
+        if (hasAddressInput) {
+            List<String> parts = new ArrayList<>();
+            if (request.streetAddress() != null && !request.streetAddress().isBlank()) parts.add(request.streetAddress().trim());
+            if (request.ward() != null && !request.ward().isBlank()) parts.add(request.ward().trim());
+            if (request.district() != null && !request.district().isBlank()) parts.add(request.district().trim());
+            if (request.province() != null && !request.province().isBlank()) parts.add(request.province().trim());
+            String fullAddr = String.join(", ", parts);
+
+            if (!fullAddr.isBlank()) {
+                String contactName = (request.fullName() != null && !request.fullName().isBlank())
+                        ? request.fullName().trim() : (profile.getFullName() != null && !profile.getFullName().isBlank() ? profile.getFullName() : "Gian Hàng");
+                String contactPhone = (request.phone() != null && !request.phone().isBlank())
+                        ? request.phone().trim() : (profile.getPhone() != null && !profile.getPhone().isBlank() ? profile.getPhone() : "0900000000");
+                BigDecimal lat = request.latitude() != null
+                        ? BigDecimal.valueOf(request.latitude()) : BigDecimal.valueOf(21.0333);
+                BigDecimal lng = request.longitude() != null
+                        ? BigDecimal.valueOf(request.longitude()) : BigDecimal.valueOf(105.7937);
+
+                try {
+                    ShippingAddress shippingAddr = new ShippingAddress(contactName, contactPhone, fullAddr, lat, lng);
+                    var row = new ShippingPickupAddress();
+                    row.setUserId(userId);
+                    row.setAddressJson(objectMapper.writeValueAsString(shippingAddr));
+                    shippingPickupAddressRepository.save(row);
+                    log.info("Saved warehouse pickup address for user {}: {}", user.getEmail(), fullAddr);
+                } catch (Exception ex) {
+                    log.warn("Failed to update shipping pickup address for user {}: {}", user.getEmail(), ex.getMessage());
+                }
+            }
         }
 
         User savedUser = userRepository.save(user);

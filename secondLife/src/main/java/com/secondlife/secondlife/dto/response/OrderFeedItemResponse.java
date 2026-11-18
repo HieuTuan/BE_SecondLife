@@ -1,5 +1,7 @@
 package com.secondlife.secondlife.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.util.UUID;
 
 public record OrderFeedItemResponse(
@@ -10,6 +12,7 @@ public record OrderFeedItemResponse(
         String postImageUrl,
         UUID categoryId,
         UUID itemId,
-        String itemCondition
+        String itemCondition,
+        @JsonInclude(JsonInclude.Include.NON_NULL) SellerCommissionPreviewResponse sellerCommissionPreview
 ) {
 }

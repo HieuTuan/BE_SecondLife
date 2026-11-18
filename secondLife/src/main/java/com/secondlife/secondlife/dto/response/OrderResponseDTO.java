@@ -36,6 +36,7 @@ public record OrderResponseDTO(
     Instant handoverDeadline,
     Instant sellerReadyAt,
     Instant carrierPickedUpAt,
-    String cancellationReasonCode
+    String cancellationReasonCode,
+    String deliveryAddress
 ) {
 }
