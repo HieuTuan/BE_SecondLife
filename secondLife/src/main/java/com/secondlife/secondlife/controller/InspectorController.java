@@ -145,6 +145,16 @@ public class InspectorController {
         return ResponseEntity.ok(orderChecklistService.getForOrder(currentUserProvider.resolveUserId(principal), orderId));
     }
 
+    @PostMapping("/orders/{orderId}/confirm-task")
+    @PreAuthorize("hasAuthority('INSPECTION_REPORT_SUBMIT')")
+    @Operation(summary = "Kỹ thuật viên xác nhận tiếp nhận đơn và khóa quyền đổi kỹ thuật viên")
+    public ResponseEntity<InspectionOrderResponse> confirmTask(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID orderId) {
+        UUID inspectorId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(inspectionService.confirmTask(inspectorId, orderId));
+    }
+
     @PostMapping("/orders/{orderId}/start")
     @PreAuthorize("hasAuthority('INSPECTION_REPORT_SUBMIT')")
     @Operation(summary = "Kỹ thuật viên bắt đầu tiến hành kiểm định sản phẩm (chuyển trạng thái sang INSPECTING)")

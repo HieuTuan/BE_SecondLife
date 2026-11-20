@@ -13,6 +13,7 @@ public record PostDto(
     UUID categoryId,
     UUID itemId,
     String title,
+    String brand,
     String description,
     List<String> imageUrls,
     String status,

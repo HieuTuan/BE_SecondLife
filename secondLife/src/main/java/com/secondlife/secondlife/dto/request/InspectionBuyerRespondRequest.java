@@ -5,6 +5,8 @@ import com.secondlife.secondlife.enums.InspectionFeePayer;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 
+import java.math.BigDecimal;
+
 public record InspectionBuyerRespondRequest(
         @NotBlank(message = "action is required (ACCEPT, REJECT, or COUNTER)")
         @Pattern(regexp = "^(ACCEPT|REJECT|COUNTER)$", message = "action must be ACCEPT, REJECT, or COUNTER")
@@ -15,7 +17,12 @@ public record InspectionBuyerRespondRequest(
         @JsonAlias({"buyerConsentZinLoss", "buyerConsentZin"})
         Boolean buyerConsentZin,
 
-        String note
+        String note,
+        BigDecimal counterBuyerFeePercent
 ) {
+    public InspectionBuyerRespondRequest(String action, InspectionFeePayer counterFeePayer,
+            Boolean buyerConsentZin, String note) {
+        this(action, counterFeePayer, buyerConsentZin, note, null);
+    }
 }
 

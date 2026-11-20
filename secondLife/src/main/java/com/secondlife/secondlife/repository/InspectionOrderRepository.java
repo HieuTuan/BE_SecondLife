@@ -55,7 +55,7 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
     @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
     Page<InspectionOrder> findAll(Pageable pageable);
 
-    @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
+    @EntityGraph(attributePaths = {"post", "post.user", "buyer.profile", "seller.profile", "inspector.profile", "order", "inspectionCenter.profile"})
     @Query("""
             select o from InspectionOrder o left join o.inspector i left join i.manager m
             where (o.inspectionCenter.id=:centerId or (o.inspectionCenter is null and m.id=:centerId))
@@ -63,7 +63,7 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
             """)
     Page<InspectionOrder> findVisibleToCenter(@Param("centerId") UUID centerId, @Param("status") String status, Pageable pageable);
 
-    @EntityGraph(attributePaths = {"post", "buyer.profile", "seller.profile", "inspector.profile"})
+    @EntityGraph(attributePaths = {"post", "post.user", "buyer.profile", "seller.profile", "inspector.profile", "order", "inspectionCenter.profile"})
     @Query("select o from InspectionOrder o where o.inspector.id=:inspectorId and (:status is null or o.status=:status)")
     Page<InspectionOrder> findVisibleToInspector(@Param("inspectorId") UUID inspectorId, @Param("status") String status, Pageable pageable);
 

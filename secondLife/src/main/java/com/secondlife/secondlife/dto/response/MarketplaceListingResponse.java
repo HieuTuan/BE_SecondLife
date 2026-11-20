@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.UUID;
 
 public record MarketplaceListingResponse(UUID id, UUID postId, UUID sellerId, String sellerName, String sellerAvatar, String sellerAddress, UUID categoryId, UUID itemId,
-        String title, String description, String itemCondition, String imageUrl, List<String> imageUrls,
+        String title, String brand, String description, String itemCondition, String imageUrl, List<String> imageUrls,
         BigDecimal price, String status, Instant publishedAt,
         Integer shippingWeight, Integer shippingLength, Integer shippingWidth, Integer shippingHeight,
         Boolean isInspected, String tamperSealId, String conditionGrade) {}

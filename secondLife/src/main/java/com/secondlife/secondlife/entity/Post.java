@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.Formula;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -31,6 +32,9 @@ public class Post {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    @Formula("(select cast(pickup.address_json as jsonb) ->> 'address' from shipping_pickup_addresses pickup where pickup.user_id = user_id)")
+    private String sellerPickupAddress;
+
     @Column(name = "category_id")
     private UUID categoryId;
 
@@ -39,6 +43,9 @@ public class Post {
 
     @Column(name = "title", length = 255)
     private String title;
+
+    @Column(name = "brand", length = 120)
+    private String brand;
 
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;

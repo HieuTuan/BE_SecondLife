@@ -139,7 +139,7 @@ class ShippingQuoteExplanationApiTest {
     void firstSuitableVehicleKeepsExistingQuoteFieldsAndHasNoFallbackWarning() throws Exception {
         catalogue();
         quotation("MOTORCYCLE", "29000", "8300", "m");
-        request().andExpect(status().isOk())
+        request().andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print()).andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.quoteId").isString())
                 .andExpect(jsonPath("$.data.leg").value("SELLER_TO_BUYER"))
@@ -164,7 +164,7 @@ class ShippingQuoteExplanationApiTest {
         reject("ERR_OUT_OF_SERVICE_AREA");
         quotation("LD_PICKUP_TRUCK", "6164800", "1498600", "m");
         for (int repeat = 0; repeat < 2; repeat++) {
-            request().andExpect(status().isOk())
+            request().andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print()).andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.serviceType").value("LD_PICKUP_TRUCK"))
                     .andExpect(jsonPath("$.data.shippingFee").value(6164800))
                     .andExpect(jsonPath("$.data.totalPayable").value(7564800))
@@ -242,7 +242,7 @@ class ShippingQuoteExplanationApiTest {
         catalogue();
         reject("ERR_INVALID_SERVICE_TYPE");
         quotation("LD_PICKUP_TRUCK", "60000", null, null);
-        request().andExpect(status().isOk())
+        request().andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print()).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.vehicleSelection.fallbackUsed").value(true))
                 .andExpect(jsonPath("$.data.vehicleSelection.reasonCode").value("PREFERRED_VEHICLE_UNAVAILABLE"))
                 .andExpect(jsonPath("$.data.vehicleSelection.message").value(containsString("không khả dụng")))
@@ -269,7 +269,7 @@ class ShippingQuoteExplanationApiTest {
         listing.setShippingWeight(40000);
         catalogue();
         quotation("LD_PICKUP_TRUCK", "60000", "10000", "m");
-        request().andExpect(status().isOk())
+        request().andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print()).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.vehicleSelection.preferredServiceType").value("LD_PICKUP_TRUCK"))
                 .andExpect(jsonPath("$.data.vehicleSelection.fallbackUsed").value(false))
                 .andExpect(jsonPath("$.data.vehicleSelection.message").doesNotExist());
@@ -292,7 +292,7 @@ class ShippingQuoteExplanationApiTest {
         catalogue();
         reject("ERR_OUT_OF_SERVICE_AREA");
         quotation("LD_PICKUP_TRUCK", "1000000", "950", "km");
-        request().andExpect(status().isOk())
+        request().andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print()).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.leg").value("CENTER_TO_BUYER"))
                 .andExpect(jsonPath("$.data.vehicleSelection.pickupCity").value("Thành phố Đà Nẵng"))
                 .andExpect(jsonPath("$.data.vehicleSelection.deliveryCity").value("Thành phố Hồ Chí Minh"))
@@ -306,7 +306,7 @@ class ShippingQuoteExplanationApiTest {
     void invalidOrUnknownCarrierDistanceIsNotInvented(String distance, String unit) throws Exception {
         catalogue();
         quotation("MOTORCYCLE", "29000", distance, unit);
-        request().andExpect(status().isOk())
+        request().andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print()).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.vehicleSelection.distanceKm").doesNotExist());
         carrier.verify();
     }

@@ -149,10 +149,58 @@ class MarketplaceListingQueryIntegrationTest {
                 .andExpect(jsonPath("$.data.content[4].conditionGrade").value(nullValue()))
                 .andExpect(jsonPath("$.data.content[3].isInspected").value(false))
                 .andExpect(jsonPath("$.data.content[0].isInspected").value(false));
+        mvc.perform(get("/api/v1/posts/search").param("categoryId", categoryId.toString())
+                        .param("inspected", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(3));
         mvc.perform(get("/api/v1/posts/{postId}", passedPost))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.isInspected").value(true))
                 .andExpect(jsonPath("$.data.conditionGrade").value("A"));
+    }
+
+    @Test void marketplaceSearchCombinesFiltersBeforeSortingAndPaging() throws Exception {
+        jdbc.update("INSERT INTO user_profiles (id, user_id, full_name, province) VALUES (?, ?, 'Seller', 'Hà Nội')",
+                UUID.randomUUID(), sellerId);
+        String warehouse = "Kho Dịch vụ, Đà Nẵng, Việt Nam";
+        jdbc.update("INSERT INTO shipping_pickup_addresses (user_id, address_json) VALUES (?, ?)",
+                sellerId, "{\"address\":\"" + warehouse + "\"}");
+        mvc.perform(get("/api/v1/posts/{postId}", activeIds.getFirst()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sellerAddress").value(warehouse));
+        mvc.perform(get("/api/v1/posts/search").param("categoryId", categoryId.toString()).param("location", "Hà Nội"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(0));
+        jdbc.update("UPDATE posts SET title = ?, brand = ?, description = ?, item_condition = ?, price = ? WHERE id = ?",
+                "Máy giặt cửa trước", "LG", "Động cơ inverter", "USED_GOOD", 3000000, activeIds.get(0));
+        jdbc.update("UPDATE posts SET title = ?, description = ?, item_condition = ?, price = ? WHERE id = ?",
+                "Máy giặt LG", "Động cơ inverter", "GOOD", 2500000, activeIds.get(1));
+        jdbc.update("UPDATE posts SET title = ?, brand = ?, description = ?, item_condition = ?, price = ? WHERE id = ?",
+                "Máy giặt", "Samsung", "Động cơ inverter, tương đương LG", "USED_GOOD", 2500000, activeIds.get(2));
+        jdbc.update("UPDATE posts SET title = ?, description = ?, item_condition = ?, price = ? WHERE id = ?",
+                "Máy giặt LGX", "Động cơ inverter", "USED_GOOD", 2500000, activeIds.get(3));
+        jdbc.update("UPDATE posts SET title = ?, brand = ?, description = ?, item_condition = ?, price = ? WHERE id = ?",
+                "Máy giặt", "LG", "Động cơ inverter", "LIKE_NEW", 2000000, activeIds.get(4));
+
+        var filters = get("/api/v1/posts/search").param("categoryId", categoryId.toString())
+                .param("q", " inverter ").param("brand", "lg").param("condition", "USED_GOOD")
+                .param("minPrice", "2500000").param("maxPrice", "3000000")
+                .param("location", "đà nẵng").param("sort", "priceAsc").param("size", "1");
+        mvc.perform(filters)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(2))
+                .andExpect(jsonPath("$.data.totalPages").value(2))
+                .andExpect(jsonPath("$.data.content[0].postId").value(activeIds.get(1).toString()));
+        mvc.perform(filters.param("page", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].postId").value(activeIds.get(0).toString()))
+                .andExpect(jsonPath("$.data.content[0].brand").value("LG"));
+        mvc.perform(get("/api/v1/posts/search").param("categoryId", categoryId.toString())
+                        .param("q", "_").param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(0));
+        mvc.perform(get("/api/v1/posts/search").param("minPrice", "100").param("maxPrice", "90"))
+                .andExpect(status().isBadRequest());
     }
 
     private UUID addInspection(UUID postId, UUID buyerId, String status, String seal, String grade, long sequence) {

@@ -6,13 +6,9 @@ import com.secondlife.secondlife.dto.response.PostDto;
 import com.secondlife.secondlife.dto.response.PostDto.SellerSummary;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
-import com.secondlife.secondlife.entity.UserProfile;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.springframework.stereotype.Component;
-
-import java.util.ArrayList;
-import java.util.List;
 
 @Component
 public class PostMapper {
@@ -31,42 +27,25 @@ public class PostMapper {
         return delegate.toResponse(post);
     }
 
-    protected SellerSummary toSellerSummary(User user) {
-        return delegate.toSellerSummary(user);
-    }
-
-    public static String profileAddress(UserProfile profile) {
-        if (profile == null) return null;
-        List<String> parts = new ArrayList<>();
-        if (profile.getStreetAddress() != null && !profile.getStreetAddress().isBlank()) parts.add(profile.getStreetAddress());
-        if (profile.getWard() != null && !profile.getWard().isBlank()) parts.add(profile.getWard());
-        if (profile.getDistrict() != null && !profile.getDistrict().isBlank()) parts.add(profile.getDistrict());
-        if (profile.getProvince() != null && !profile.getProvince().isBlank()) parts.add(profile.getProvince());
-        return parts.isEmpty() ? null : String.join(", ", parts);
-    }
-
     @Mapper(config = MapStructConfiguration.class)
     public interface Delegate {
         @Mapping(target = "postId", source = "post.id")
         @Mapping(target = "sellerId", source = "post.user.id")
         @Mapping(target = "sellerName", source = "post.user.profile.fullName")
         @Mapping(target = "sellerAvatar", source = "post.user.profile.avatarUrl")
-        @Mapping(target = "sellerAddress", expression = "java(profileAddress(post.getUser() == null ? null : post.getUser().getProfile()))")
+        @Mapping(target = "sellerAddress", source = "post.sellerPickupAddress")
         @Mapping(target = "isInspected", source = "isInspected")
         @Mapping(target = "tamperSealId", source = "tamperSealId")
         @Mapping(target = "conditionGrade", source = "conditionGrade")
         MarketplaceListingResponse toMarketplaceResponse(Post post, boolean isInspected,
                                                         String tamperSealId, String conditionGrade);
 
+        @Mapping(target = "user", expression = "java(toSellerSummary(post.getUser(), post.getSellerPickupAddress()))")
         PostDto toResponse(Post post);
 
-        @Mapping(target = "fullName", source = "profile.fullName")
-        @Mapping(target = "avatarUrl", source = "profile.avatarUrl")
-        @Mapping(target = "address", expression = "java(profileAddress(user.getProfile()))")
-        SellerSummary toSellerSummary(User user);
-
-        default String profileAddress(UserProfile profile) {
-            return PostMapper.profileAddress(profile);
-        }
+        @Mapping(target = "fullName", source = "user.profile.fullName")
+        @Mapping(target = "avatarUrl", source = "user.profile.avatarUrl")
+        @Mapping(target = "address", source = "warehouseAddress")
+        SellerSummary toSellerSummary(User user, String warehouseAddress);
     }
 }

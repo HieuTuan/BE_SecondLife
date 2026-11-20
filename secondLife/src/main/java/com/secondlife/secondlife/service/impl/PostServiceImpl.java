@@ -212,6 +212,7 @@ public class PostServiceImpl implements PostService {
             }
         }
 
+        String declaredBrand = request.brand() == null || request.brand().isBlank() ? null : request.brand().strip();
         Post post;
         List<CloudinaryService.UploadedImage> uploads = new ArrayList<>();
         try {
@@ -225,6 +226,7 @@ public class PostServiceImpl implements PostService {
                 p.setUser(userRepository.getReferenceById(userId));
                 p.setCategoryId(request.categoryId());
                 p.setItemId(request.itemId());
+                p.setBrand(declaredBrand);
                 p.setStatus("DRAFT");
                 p.getImages().addAll(postImages);
                 if (!postImages.isEmpty()) {
@@ -259,7 +261,6 @@ public class PostServiceImpl implements PostService {
             // 3. Call AI to analyze image
             String selectedCategoryName = categoryRepository.findById(request.categoryId()).orElseThrow().getName();
             String selectedItemName = request.itemId() == null ? "Không xác định" : itemRepository.findById(request.itemId()).orElseThrow().getName();
-            String declaredBrand = request.brand() != null && !request.brand().isBlank() ? request.brand().trim() : null;
 
             StringBuilder visionCheckPrompt = new StringBuilder();
             visionCheckPrompt.append("Người bán đang đăng bài với thông tin khai báo ở Bước 1:\n");

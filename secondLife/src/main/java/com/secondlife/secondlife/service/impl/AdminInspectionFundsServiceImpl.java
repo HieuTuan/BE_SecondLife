@@ -50,14 +50,14 @@ public class AdminInspectionFundsServiceImpl implements AdminInspectionFundsServ
                 : settlement.getTotalCollected().add(settlement.getSellerAdditionalCollected());
         InspectionFeePayer feePayer = order.getFeePayer() == null ? InspectionFeePayer.BUYER_PAYS : order.getFeePayer();
         BigDecimal shippingFee = amount(order.getShippingFee());
-        BigDecimal outboundCashPending = outboundCashPending(order, settlement, route, feePayer, shippingFee);
-        ReturnReserve reserve = returnReserve(order, settlement, route, feePayer);
+        BigDecimal outboundCashPending = outboundCashPending(order, settlement, route, shippingFee);
+        ReturnReserve reserve = returnReserve(order, settlement, route);
         BigDecimal unsettled = settlement == null
-                ? totalCollected.subtract(releasedOutboundCash(order, route, feePayer, shippingFee)).max(BigDecimal.ZERO)
+                ? totalCollected.subtract(releasedOutboundCash(order, route, shippingFee)).max(BigDecimal.ZERO)
                 : reserve.heldAmount().add(outboundCashPending);
 
         return new AdminInspectionFundsResponse(inspectionOrderId, order.getStatus(), order.getInspectionScope(),
-                order.getOrderType(), feePayer, order.isCashShippingSimulation(), "VND", amount(order.getInspectionFee()),
+                order.getOrderType(), feePayer, order.resolveBuyerFeePercent(), order.isCashShippingSimulation(), "VND", amount(order.getInspectionFee()),
                 amount(order.getTravelFee()), shippingFee, deposit, buyer, seller, collectionStatus(order, buyer, seller),
                 totalCollected, unsettled, outboundCashPending, reserve, mapper.toSettlement(settlement),
                 route.stream().map(mapper::toShipping).toList());
@@ -79,21 +79,21 @@ public class AdminInspectionFundsServiceImpl implements AdminInspectionFundsServ
     }
 
     private BigDecimal outboundCashPending(InspectionOrder order, InspectionFeeSettlement settlement,
-                                           List<Shipment> route, InspectionFeePayer feePayer, BigDecimal shippingFee) {
+                                           List<Shipment> route, BigDecimal shippingFee) {
         if (!order.isCashShippingSimulation() || order.getBuyerPaidAt() == null || outboundCashConfirmed(route)
                 || route.stream().anyMatch(shipment -> "SELLER_TO_CENTER".equals(shipment.getLeg())
                     && shipment.getCashPayerId() == null && !"CANCELLED".equals(shipment.getStatus())
                     && !"FAILED".equals(shipment.getStatus()))) {
             return BigDecimal.ZERO;
         }
-        return settlement == null ? feePayer.buyerShare(shippingFee) : settlement.getOutboundShippingAllocated();
+        return settlement == null ? order.buyerShareOf(shippingFee) : settlement.getOutboundShippingAllocated();
     }
 
     private BigDecimal releasedOutboundCash(InspectionOrder order, List<Shipment> route,
-                                             InspectionFeePayer feePayer, BigDecimal shippingFee) {
+                                             BigDecimal shippingFee) {
         // Confirmation resolves the full buyer-funded amount through reimbursement and any excess refund.
         return order.isCashShippingSimulation() && outboundCashConfirmed(route)
-                ? feePayer.buyerShare(shippingFee) : BigDecimal.ZERO;
+                ? order.buyerShareOf(shippingFee) : BigDecimal.ZERO;
     }
 
     private boolean outboundCashConfirmed(List<Shipment> route) {
@@ -102,12 +102,12 @@ public class AdminInspectionFundsServiceImpl implements AdminInspectionFundsServ
     }
 
     private ReturnReserve returnReserve(InspectionOrder order, InspectionFeeSettlement settlement,
-                                        List<Shipment> route, InspectionFeePayer feePayer) {
+                                        List<Shipment> route) {
         BigDecimal planned = amount(order.getReturnShippingReserveFee());
         if (planned.signum() == 0) {
             return new ReturnReserve(planned, BigDecimal.ZERO, ReturnReserveStatus.NOT_REQUIRED);
         }
-        BigDecimal collectedReserve = collectedReturnReserve(order, feePayer, planned);
+        BigDecimal collectedReserve = collectedReturnReserve(order, planned);
         if (settlement == null) {
             return new ReturnReserve(planned, collectedReserve, collectedReserve.signum() == 0
                     ? ReturnReserveStatus.NOT_COLLECTED : ReturnReserveStatus.HELD_PENDING_INSPECTION);
@@ -131,8 +131,8 @@ public class AdminInspectionFundsServiceImpl implements AdminInspectionFundsServ
         };
     }
 
-    private BigDecimal collectedReturnReserve(InspectionOrder order, InspectionFeePayer feePayer, BigDecimal planned) {
-        BigDecimal buyerShare = feePayer.buyerShare(planned);
+    private BigDecimal collectedReturnReserve(InspectionOrder order, BigDecimal planned) {
+        BigDecimal buyerShare = order.buyerShareOf(planned);
         BigDecimal fromBuyer = order.getBuyerPaidAt() == null
                 ? BigDecimal.ZERO : buyerShare.min(amount(order.getBuyerFeeShare()));
         BigDecimal fromSeller = order.getSellerPaidAt() == null

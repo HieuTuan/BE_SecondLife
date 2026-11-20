@@ -31,6 +31,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -153,8 +154,88 @@ class InspectionFeeSettlementServiceImplTest {
         }
     }
 
+    @ParameterizedTest
+    @CsvSource({"0,0,528260", "35,184891,343369", "65,343369,184891", "100,528260,0"})
+    void failedCorporateInspectionKeepsAgreedFeesAndHoldsReturnReserve(
+            int buyerPercent, BigDecimal buyerFee, BigDecimal sellerFee) {
+        order.setCorporateShipping(true);
+        order.setFeePayer(InspectionFeePayer.CUSTOM);
+        order.setBuyerFeePercent(buyerPercent);
+        order.setInspectionFee(new BigDecimal("290000"));
+        order.setShippingFee(new BigDecimal("108300"));
+        order.setReturnShippingReserveFee(new BigDecimal("129960"));
+        order.setPlatformFeeRateSnapshot(BigDecimal.ZERO);
+        order.setBuyerCommitmentDeposit(BigDecimal.ZERO);
+        order.setBuyerFeeShare(buyerFee);
+        order.setSellerFeeShare(sellerFee);
+        when(systemWallet.lockInspectionFunds(order.getId())).thenReturn(true);
+
+        var settlement = settlementService.settle(order, InspectionSettlementOutcome.FAILED_INSPECTION, "Failed");
+
+        assertEquals(new BigDecimal("528260"), settlement.getTotalCollected());
+        assertEquals(new BigDecimal("129960"), settlement.getReturnReserveAllocated());
+        assertEquals(BigDecimal.ZERO, settlement.getBuyerRefundAmount());
+        assertEquals(BigDecimal.ZERO, settlement.getSellerRefundAmount());
+        assertEquals(BigDecimal.ZERO, settlement.getSellerAdditionalCollected());
+        assertEquals(BigDecimal.ZERO, settlement.getSellerOutstandingAmount());
+        assertNull(settlement.getReturnShippingSettledAt());
+        assertEquals(buyerFee, order.getBuyerFeeShare());
+        assertEquals(sellerFee, order.getSellerFeeShare());
+        verify(walletService).processEarning(manager.getId(), new BigDecimal("290000.00"), order.getId(),
+                WalletTransactionReferenceType.INSPECTION_ORDER);
+        verifyNoMoreInteractions(walletService);
+        verify(systemWallet).settleInspectionFees(settlement);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"0,129960,108300,0,21660", "35,129960,108300,7581,14079",
+            "50,129960,108300,10830,10830", "100,129960,108300,21660,0",
+            "35,129960.02,108300.01,7581.00,14079.01"})
+    void failedCorporateReturnRefundsOnlySurplusAtTheAgreedPercentageOnce(
+            int buyerPercent, BigDecimal reserve, BigDecimal actualFee,
+            BigDecimal buyerRefund, BigDecimal sellerRefund) {
+        order.setCorporateShipping(true);
+        order.setFeePayer(InspectionFeePayer.CUSTOM);
+        order.setBuyerFeePercent(buyerPercent);
+        var settlement = new InspectionFeeSettlement();
+        settlement.setOutcome(InspectionSettlementOutcome.FAILED_INSPECTION);
+        settlement.setReturnReserveAllocated(reserve);
+        when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.of(settlement));
+        when(systemWallet.lockInspectionFunds(order.getId())).thenReturn(true);
+
+        settlementService.settleReturnShipping(order, actualFee);
+        settlementService.settleReturnShipping(order, actualFee);
+
+        assertEquals(0, buyerRefund.compareTo(settlement.getBuyerRefundAmount()));
+        assertEquals(0, sellerRefund.compareTo(settlement.getSellerRefundAmount()));
+        assertEquals(actualFee, settlement.getReturnReserveAllocated());
+        assertNotNull(settlement.getReturnShippingSettledAt());
+        verify(walletService, times(buyerRefund.signum())).processRefund(eq(buyer.getId()), any(), eq(order.getId()),
+                eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+        verify(walletService, times(sellerRefund.signum())).processRefund(eq(seller.getId()), any(), eq(order.getId()),
+                eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+        verifyNoMoreInteractions(walletService);
+        verify(systemWallet).settleInspectionReturn(eq(order.getId()), eq(actualFee), eq(BigDecimal.ZERO),
+                argThat(amount -> amount.compareTo(reserve.subtract(actualFee)) == 0));
+    }
+
     @Test
-    void corporateFailedReturnOverageCollectsAvailableFundsAndRecordsRemainingDebtOnce() {
+    void newCorporateReturnAboveReserveRemainsUnsettledWithoutChargingSeller() {
+        order.setCorporateShipping(true);
+        var settlement = new InspectionFeeSettlement();
+        settlement.setOutcome(InspectionSettlementOutcome.FAILED_INSPECTION);
+        settlement.setReturnReserveAllocated(new BigDecimal("30000"));
+        when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.of(settlement));
+
+        settlementService.settleReturnShipping(order, new BigDecimal("40000"));
+
+        assertNull(settlement.getReturnShippingSettledAt());
+        assertEquals(new BigDecimal("30000"), settlement.getReturnReserveAllocated());
+        verifyNoInteractions(walletService);
+    }
+
+    @Test
+    void legacySellerPaidReturnOverageCollectsAvailableFundsAndRecordsRemainingDebtOnce() {
         order.setCorporateShipping(true);
         var settlement = new InspectionFeeSettlement();
         settlement.setOutcome(InspectionSettlementOutcome.FAILED_INSPECTION);
@@ -334,6 +415,19 @@ class InspectionFeeSettlementServiceImplTest {
                 eq(WalletTransactionReferenceType.INSPECTION_ORDER));
         verify(walletService, times(1)).processRefund(eq(seller.getId()), eq(new BigDecimal("15000.00")), eq(order.getId()),
                 eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+    }
+
+    @Test
+    void completedPurchaseRefundsUnusedReserveAtTheAgreedPercentage() {
+        order.setFeePayer(InspectionFeePayer.CUSTOM);
+        order.setBuyerFeePercent(55);
+        when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.empty());
+
+        InspectionFeeSettlement settlement =
+                settlementService.settle(order, InspectionSettlementOutcome.PASSED_PURCHASED, "Purchased");
+
+        assertEquals(new BigDecimal("66500.00"), settlement.getBuyerRefundAmount());
+        assertEquals(new BigDecimal("13500.00"), settlement.getSellerRefundAmount());
     }
 
     @Test
