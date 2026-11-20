@@ -16,6 +16,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -217,4 +218,53 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, RefreshOper
         Instant getDeliveredAt();
     }
 
+    @EntityGraph(attributePaths = {"post", "buyer", "seller"})
+    @Query("""
+        select o from Order o
+        where (:status is null or o.status = :status)
+          and (:escrowStatus is null or o.escrowStatus = :escrowStatus)
+          and (:orderId is null or o.id = :orderId)
+          and (:search is null or :search = ''
+               or lower(o.post.title) like lower(concat('%', :search, '%'))
+               or lower(o.buyer.email) like lower(concat('%', :search, '%'))
+               or lower(o.seller.email) like lower(concat('%', :search, '%'))
+              )
+        order by o.createdAt desc
+    """)
+    Page<Order> findAdminOrders(
+        @Param("status") OrderStatus status,
+        @Param("escrowStatus") EscrowStatus escrowStatus,
+        @Param("orderId") UUID orderId,
+        @Param("search") String search,
+        Pageable pageable
+    );
+
+    @Query("""
+        select
+            count(o) as totalOrders,
+            count(case when o.status = com.secondlife.secondlife.enums.OrderStatus.CONFIRMED then 1 end) as confirmedOrders,
+            count(case when o.status = com.secondlife.secondlife.enums.OrderStatus.PROCESSING then 1 end) as processingOrders,
+            count(case when o.status = com.secondlife.secondlife.enums.OrderStatus.SHIPPED then 1 end) as shippingOrders,
+            count(case when o.status = com.secondlife.secondlife.enums.OrderStatus.DELIVERED then 1 end) as deliveredOrders,
+            count(case when o.status = com.secondlife.secondlife.enums.OrderStatus.COMPLETED then 1 end) as completedOrders,
+            count(case when o.status = com.secondlife.secondlife.enums.OrderStatus.CANCELLED then 1 end) as cancelledOrders,
+            count(case when o.escrowStatus = com.secondlife.secondlife.enums.EscrowStatus.FROZEN then 1 end) as disputedOrders,
+            coalesce(sum(case when o.status != com.secondlife.secondlife.enums.OrderStatus.CANCELLED then o.finalPrice else 0 end), 0) as totalGmv,
+            coalesce(sum(case when o.escrowStatus = com.secondlife.secondlife.enums.EscrowStatus.HELD then o.finalPrice else 0 end), 0) as heldEscrowAmount
+        from Order o
+    """)
+    AdminOrderStatsProjection getAdminOrderStats();
+
+    interface AdminOrderStatsProjection {
+        long getTotalOrders();
+        long getConfirmedOrders();
+        long getProcessingOrders();
+        long getShippingOrders();
+        long getDeliveredOrders();
+        long getCompletedOrders();
+        long getCancelledOrders();
+        long getDisputedOrders();
+        BigDecimal getTotalGmv();
+        BigDecimal getHeldEscrowAmount();
+    }
 }
