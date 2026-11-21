@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class OrderFeedServiceImpl implements OrderFeedService {
     private static final Set<String> FILTERS = Set.of("all", "awaiting_pickup", "inspecting", "shipping",
-            "delivered", "completed", "cancelled", "disputed", "with_inspection");
+            "delivered", "completed", "cancelled", "disputed", "with_inspection", "pre_listing");
     private static final Set<String> PERSPECTIVES = Set.of("all", "buyer", "seller");
     private static final Set<String> INSPECTION_PREVIEW_STATUSES = Set.of(
             "PENDING", "WAITING_SELLER_APPROVAL", "WAITING_BUYER_APPROVAL", "WAITING_FEE_PAYMENT",
@@ -150,6 +150,7 @@ public class OrderFeedServiceImpl implements OrderFeedService {
         counts.put("cancelled", result.getCancelled());
         counts.put("disputed", result.getDisputed());
         counts.put("with_inspection", result.getWithInspection());
+        counts.put("pre_listing", result.getPreListing());
         return counts;
     }
 }

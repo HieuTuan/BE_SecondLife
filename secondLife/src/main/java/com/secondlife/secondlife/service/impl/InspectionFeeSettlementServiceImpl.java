@@ -113,7 +113,7 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
                 buyerRefund = buyerFee.add(buyerDeposit);
                 sellerRefund = sellerFee;
             }
-            case FAILED_INSPECTION -> {
+            case FAILED_INSPECTION, PRE_LISTING_PASSED -> {
                 centerPayout = computeCenterPayout(inspectionOrder, serviceFee);
                 outboundShipping = outboundPrepaid;
                 returnReserve = returnReserveFee;
@@ -309,7 +309,8 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
     private boolean hasUnsettledReturnReserve(InspectionFeeSettlement settlement) {
         return settlement != null && settlement.getReturnShippingSettledAt() == null
                 && (settlement.getOutcome() == InspectionSettlementOutcome.FAILED_INSPECTION
-                    || settlement.getOutcome() == InspectionSettlementOutcome.PASSED_BUYER_DEFAULTED);
+                    || settlement.getOutcome() == InspectionSettlementOutcome.PASSED_BUYER_DEFAULTED
+                    || settlement.getOutcome() == InspectionSettlementOutcome.PRE_LISTING_PASSED);
     }
 
     private void applyReturnShippingSettlement(InspectionOrder order, InspectionFeeSettlement settlement,

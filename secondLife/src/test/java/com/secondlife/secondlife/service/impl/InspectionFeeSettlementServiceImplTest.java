@@ -393,6 +393,26 @@ class InspectionFeeSettlementServiceImplTest {
     }
 
     @Test
+    void preListingSuccessPaysCenterAndKeepsReturnReserveForSellerWithoutABuyer() {
+        order.setBuyer(null);
+        order.setBuyerPaidAt(null);
+        order.setBuyerFeeShare(BigDecimal.ZERO);
+        order.setBuyerCommitmentDeposit(BigDecimal.ZERO);
+        order.setFeePayer(InspectionFeePayer.SELLER_PAYS);
+        order.setBuyerFeePercent(0);
+        order.setSellerFeeShare(new BigDecimal("160000"));
+        when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.empty());
+
+        var result = settlementService.settle(order, InspectionSettlementOutcome.PRE_LISTING_PASSED, "Passed");
+
+        assertEquals(new BigDecimal("90000.00"), result.getCenterPayoutAmount());
+        assertEquals(new BigDecimal("30000"), result.getOutboundShippingAllocated());
+        assertEquals(new BigDecimal("30000"), result.getReturnReserveAllocated());
+        assertEquals(BigDecimal.ZERO, result.getBuyerRefundAmount());
+        assertEquals(BigDecimal.ZERO, result.getSellerRefundAmount());
+    }
+
+    @Test
     @DisplayName("PASSED_PURCHASED: Trả phí kiểm định cho trung tâm, hoàn cọc cam kết và tiền ship hoàn dự phòng chưa dùng")
     void testPassedPurchasedSettlement() {
         when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.empty());

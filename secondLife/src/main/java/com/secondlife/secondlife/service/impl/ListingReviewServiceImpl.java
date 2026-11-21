@@ -63,7 +63,9 @@ public class ListingReviewServiceImpl implements ListingReviewService {
             notificationService.notify(
                 post.getUser().getId(),
                 "Tin đăng đã được duyệt",
-                "Tin đăng \"" + post.getTitle() + "\" của bạn đã được duyệt và đang hiển thị trên sàn.",
+                "Tin đăng \"" + post.getTitle() + "\"" + ("PENDING_INSPECTION".equals(post.getStatus())
+                        ? " đã được duyệt nội dung và đang chờ kiểm định."
+                        : " đã được duyệt và đang hiển thị trên sàn."),
                 NotificationType.LISTING,
                 post.getId(),
                 "POST",

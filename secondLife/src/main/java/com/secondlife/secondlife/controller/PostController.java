@@ -144,6 +144,15 @@ public class PostController {
         return ResponseEntity.ok(postService.submitPost(userId, postId, request));
     }
 
+    @PostMapping("/{postId}/publish-inspected")
+    @PreAuthorize("hasAuthority('LISTING_PUBLISH_SELF')")
+    public ResponseEntity<PostDto> publishInspectedPost(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID postId) {
+        UUID userId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(postService.publishInspectedPost(userId, postId));
+    }
+
     @GetMapping("/my-posts")
     @PreAuthorize("hasAuthority('PROFILE_READ_SELF')")
     public ResponseEntity<PageResponse<PostDto>> getMyPosts(

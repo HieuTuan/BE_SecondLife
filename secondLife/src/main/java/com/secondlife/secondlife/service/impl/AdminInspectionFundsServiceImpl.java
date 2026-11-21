@@ -119,7 +119,7 @@ public class AdminInspectionFundsServiceImpl implements AdminInspectionFundsServ
             case PAYMENT_EXPIRED, CANCELLED_BEFORE_INSPECTION, PASSED_PURCHASED ->
                     new ReturnReserve(planned, BigDecimal.ZERO, collectedReserve.signum() == 0
                             ? ReturnReserveStatus.NOT_COLLECTED : ReturnReserveStatus.REFUNDED_UNUSED);
-            case FAILED_INSPECTION, PASSED_BUYER_DEFAULTED -> {
+            case FAILED_INSPECTION, PASSED_BUYER_DEFAULTED, PRE_LISTING_PASSED -> {
                 BigDecimal allocated = settlement.getReturnReserveAllocated();
                 BigDecimal held = allocated.subtract(settlement.getSellerOutstandingAmount()).max(BigDecimal.ZERO);
                 Shipment returning = route.reversed().stream()

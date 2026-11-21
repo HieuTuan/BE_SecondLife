@@ -155,7 +155,7 @@ public class SystemWalletServiceImpl implements SystemWalletService {
         BigDecimal shippingRefund = switch (settlement.getOutcome()) {
             case PAYMENT_EXPIRED, CANCELLED_BEFORE_INSPECTION -> balances.getShipping();
             case PASSED_PURCHASED -> inspectionAmount(order.getReturnShippingReserveFee());
-            case FAILED_INSPECTION, PASSED_BUYER_DEFAULTED -> BigDecimal.ZERO;
+            case FAILED_INSPECTION, PASSED_BUYER_DEFAULTED, PRE_LISTING_PASSED -> BigDecimal.ZERO;
         };
         BigDecimal heldRefund = refunds.subtract(shippingRefund);
         BigDecimal payout = settlement.getCenterPayoutAmount().add(settlement.getSellerCompensationAmount());

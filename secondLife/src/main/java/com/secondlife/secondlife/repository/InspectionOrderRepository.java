@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.repository;
 
 import com.secondlife.secondlife.entity.InspectionOrder;
+import com.secondlife.secondlife.enums.InspectionScope;
 
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
@@ -20,6 +21,18 @@ import java.util.UUID;
 public interface InspectionOrderRepository extends JpaRepository<InspectionOrder, UUID> {
 
     Optional<InspectionOrder> findByInspectionShippingQuoteId(UUID quoteId);
+
+    Optional<InspectionOrder> findByPreListingQuoteId(UUID quoteId);
+
+    @Query("""
+            select o.id from InspectionOrder o where o.post.id = :postId
+            and o.inspectionScope = com.secondlife.secondlife.enums.InspectionScope.PRE_LISTING
+            and o.status not in ('CANCELLED', 'FAILED', 'PAYMENT_EXPIRED', 'COMPLETED')
+            """)
+    Optional<UUID> findActivePreListingIdByPostId(@Param("postId") UUID postId);
+
+    boolean existsByPostIdAndInspectionScopeAndStatusIn(UUID postId,
+            InspectionScope scope, Collection<String> statuses);
 
     @Query("select o.post.user.id from InspectionOrder o where o.id = :id")
     Optional<UUID> findOwnerId(@Param("id") UUID id);
@@ -73,6 +86,7 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
             FROM inspection_orders o
             WHERE o.post_id IN (:postIds)
               AND (o.tamper_seal_id IS NOT NULL OR o.status = 'PASSED'
+                OR (o.status = 'COMPLETED' AND o.inspection_scope = 'PRE_LISTING')
                 OR (o.status = 'CANCELLED' AND EXISTS (
                     SELECT 1 FROM inspection_fee_settlements s
                     WHERE s.inspection_order_id = o.id

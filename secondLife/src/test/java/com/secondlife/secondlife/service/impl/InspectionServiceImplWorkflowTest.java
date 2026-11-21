@@ -485,7 +485,13 @@ class InspectionServiceImplWorkflowTest {
     @DisplayName("WP-2: Pre-listing inspection FAILED -> Bài đăng chuyển REJECTED và thiết lập hạn khiếu nại 24h")
     void testPreListingInspectionFailedRejectsPostAndSetsAppealWindow() {
         order.setInspectionScope(InspectionScope.PRE_LISTING);
+        order.setSellerPaidAt(Instant.now());
+        order.setBuyerPaidAt(Instant.now());
         order.setStatus("INSPECTING");
+        com.secondlife.secondlife.entity.Shipment inbound = new com.secondlife.secondlife.entity.Shipment();
+        inbound.setLeg("SELLER_TO_CENTER");
+        inbound.setStatus("DELIVERED");
+        when(shipments.findByInspectionOrderIdOrderByCreatedAtAsc(order.getId())).thenReturn(List.of(inbound));
 
         when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
         when(postRepository.findByIdForUpdate(post.getId())).thenReturn(Optional.of(post));

@@ -250,6 +250,43 @@ class ReadQueryIntegrationTest {
         assertEquals(0, orderFeed.read(seller, "buyer", "all", "", 0, 10, null).totalElements());
     }
 
+    @Test void orderFeedSeparatesPreListingInspectionsFromPurchaseCountsAndPages() {
+        UUID seller = user("Seller");
+        UUID purchase = order(seller, 0, false);
+        UUID buyerInspection = UUID.randomUUID();
+        UUID preListingPending = UUID.randomUUID();
+        UUID preListingCompleted = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO inspection_orders
+                (id,post_id,buyer_id,seller_id,status,inspection_scope,inspection_fee,shipping_fee,created_at)
+                VALUES (?,?,?,?,'INSPECTING','BUYER_REQUEST',0,0,?),
+                       (?,?,null,?,'PENDING','PRE_LISTING',0,0,?),
+                       (?,?,null,?,'COMPLETED','PRE_LISTING',0,0,?)
+                """, buyerInspection, post(seller, 1), buyer, seller, time(1),
+                preListingPending, post(seller, 2), seller, time(2),
+                preListingCompleted, post(seller, 3), seller, time(3));
+
+        var all = orderFeed.read(seller, "seller", "all", "", 1, 1, null);
+        assertEquals(2, all.totalElements());
+        assertEquals(purchase, all.items().getFirst().order().id());
+        assertEquals(1L, all.counts().get("inspecting"));
+        assertEquals(1L, all.counts().get("with_inspection"));
+        assertEquals(0L, all.counts().get("completed"));
+        assertEquals(2L, all.counts().get("pre_listing"));
+
+        var preListing = orderFeed.read(seller, "seller", "pre_listing", "", 1, 1, preListingCompleted);
+        assertEquals(2, preListing.totalElements());
+        assertEquals(2, preListing.totalPages());
+        assertNull(preListing.items().getFirst().order());
+        assertEquals(preListingPending, preListing.items().getFirst().inspection().id());
+        assertEquals(preListingCompleted, preListing.detail().inspection().id());
+
+        var purchaseInspections = orderFeed.read(seller, "all", "with_inspection", "", 0, 10, null);
+        assertEquals(1, purchaseInspections.totalElements());
+        assertEquals(buyerInspection, purchaseInspections.items().getFirst().inspection().id());
+        assertEquals(0, orderFeed.read(buyer, "all", "pre_listing", "", 0, 10, null).totalElements());
+    }
+
     @Test void marketplaceKeepsDatabasePaginationImagesAndSellerProfilesWithBoundedQueries() {
         for (int i = 0; i < 6; i++) post(user("Seller " + i), i);
         jdbc.update("UPDATE posts SET status='DRAFT' WHERE category_id=? AND title='Post 0'", category);

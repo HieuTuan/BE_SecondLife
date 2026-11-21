@@ -83,6 +83,15 @@ public class Post {
     @Column(name = "price", precision = 18, scale = 2)
     private BigDecimal price; // Giá người dùng chốt
 
+    @Column(name = "mandatory_inspection")
+    private Boolean mandatoryInspection;
+
+    @Column(name = "inspection_threshold_snapshot", precision = 18, scale = 2)
+    private BigDecimal inspectionThresholdSnapshot;
+
+    @Column(name = "inspection_policy_version")
+    private Long inspectionPolicyVersion;
+
     @Column(name = "item_condition", length = 50)
     private String itemCondition; // Tình trạng (Mới, cũ, xước xát...) do AI quét
 

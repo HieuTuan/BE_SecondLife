@@ -34,6 +34,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -103,9 +104,12 @@ public class InspectionController {
     @Operation(summary = "Người mua hoặc Người bán nộp phần phí kiểm định ký quỹ từ ví SecondLife trước paymentDeadline")
     public ResponseEntity<InspectionOrderResponse> payInspectionFee(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @PathVariable UUID orderId) {
+            @PathVariable UUID orderId,
+            @RequestParam(required = false) UUID preListingQuoteId) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        return ResponseEntity.ok(escrowService.payInspectionFeeResponse(userId, orderId));
+        return ResponseEntity.ok(preListingQuoteId == null
+                ? escrowService.payInspectionFeeResponse(userId, orderId)
+                : escrowService.payInspectionFeeResponse(userId, orderId, preListingQuoteId));
     }
 
     @PostMapping("/orders/{orderId}/check-in-code")

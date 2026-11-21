@@ -67,6 +67,9 @@ public class InspectionOrder {
     @Column(name = "inspection_shipping_quote_id")
     private UUID inspectionShippingQuoteId;
 
+    @Column(name = "pre_listing_quote_id")
+    private UUID preListingQuoteId;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "checklist_template_id")
     private InspectionChecklistTemplate checklistTemplate;

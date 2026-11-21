@@ -15,6 +15,7 @@ import com.secondlife.secondlife.entity.ShipmentEvent;
 import com.secondlife.secondlife.entity.UserReport;
 import com.secondlife.secondlife.enums.EscrowStatus;
 import com.secondlife.secondlife.enums.InspectionOrderType;
+import com.secondlife.secondlife.enums.InspectionScope;
 import com.secondlife.secondlife.enums.NotificationType;
 import com.secondlife.secondlife.enums.OrderStatus;
 import com.secondlife.secondlife.exception.BadRequestException;
@@ -33,6 +34,7 @@ import com.secondlife.secondlife.repository.ShipmentEventRepository;
 import com.secondlife.secondlife.repository.ShipmentRepository;
 import com.secondlife.secondlife.repository.ShippingQuoteRepository;
 import com.secondlife.secondlife.service.ListingFingerprint;
+import com.secondlife.secondlife.service.ListingPublicationService;
 import com.secondlife.secondlife.service.InspectionCenterProfileService;
 import com.secondlife.secondlife.service.InspectionFeeSettlementService;
 import com.secondlife.secondlife.service.InspectionShippingQuoteService;
@@ -94,6 +96,7 @@ public class ShipmentServiceImpl implements ShipmentService {
     private final InspectionCenterProfileService centerProfiles;
     private final InspectionShippingQuoteService inspectionShipping;
     private final InspectionFeeSettlementService inspectionFeeSettlement;
+    private final ListingPublicationService publication;
     private final boolean cashShippingSimulationEnabled;
 
     public ShipmentServiceImpl(ShipmentRepository shipments, ShipmentEventRepository events, OrderRepository orders,
@@ -103,7 +106,7 @@ public class ShipmentServiceImpl implements ShipmentService {
                            SystemWalletService systemWallet, SellerReputationService reputation, ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes, ReturnShippingFeeService returnShippingFees,
                            InspectionCenterProfileService centerProfiles, InspectionShippingQuoteService inspectionShipping,
                            InspectionFeeSettlementService inspectionFeeSettlement) {
-        this(shipments, events, orders, inspections, quotes, quoteService, geocoding, provider, mapper, wallets, transactions, systemWallet, reputation, null, null, listingFingerprint, shipmentMapper, disputes, returnShippingFees, centerProfiles, inspectionShipping, inspectionFeeSettlement, false);
+        this(shipments, events, orders, inspections, quotes, quoteService, geocoding, provider, mapper, wallets, transactions, systemWallet, reputation, null, null, listingFingerprint, shipmentMapper, disputes, returnShippingFees, centerProfiles, inspectionShipping, inspectionFeeSettlement, null, false);
     }
 
     @Autowired
@@ -117,6 +120,7 @@ public class ShipmentServiceImpl implements ShipmentService {
                            ListingFingerprint listingFingerprint, ShipmentMapper shipmentMapper, OrderDisputeService disputes, ReturnShippingFeeService returnShippingFees,
                            InspectionCenterProfileService centerProfiles, InspectionShippingQuoteService inspectionShipping,
                            InspectionFeeSettlementService inspectionFeeSettlement,
+                           ListingPublicationService publication,
                            @Value("${app.inspection.cash-shipping-simulation-enabled:false}") boolean cashShippingSimulationEnabled) {
         this.shipmentMapper = shipmentMapper;
         this.disputes = Objects.requireNonNull(disputes, "OrderDisputeService is required");
@@ -140,6 +144,7 @@ public class ShipmentServiceImpl implements ShipmentService {
         this.centerProfiles = centerProfiles;
         this.inspectionShipping = inspectionShipping;
         this.inspectionFeeSettlement = inspectionFeeSettlement;
+        this.publication = publication;
         this.cashShippingSimulationEnabled = cashShippingSimulationEnabled;
         this.listingFingerprint = listingFingerprint;
     }
@@ -317,6 +322,10 @@ public class ShipmentServiceImpl implements ShipmentService {
             if (Set.of("CANCELLED", "FAILED", "PAYMENT_EXPIRED", "COMPLETED").contains(inspection.getStatus())) {
                 throw new ConflictException("Inspection order is not eligible for center shipment");
             }
+            if (saved.isEmpty() && inspection.getInspectionScope() == InspectionScope.PRE_LISTING
+                    && inspection.getSellerPaidAt() == null) {
+                throw new ConflictException("Người bán cần đóng phí kiểm định trước khi gửi hàng đến trung tâm");
+            }
             if (saved.isEmpty() && inspection.getInspectionShippingQuoteId() != null
                     && !Set.of("CONFIRMED_PENDING_DISPATCH", "DISPATCHED", "SCHEDULED").contains(inspection.getStatus())) {
                 throw new ConflictException("Đơn kiểm định phải được xác nhận và thanh toán đủ trước khi gửi hàng đến trung tâm");
@@ -376,7 +385,7 @@ public class ShipmentServiceImpl implements ShipmentService {
         requireAssignedCenter(centerId, inspection);
         var existing = shipments.findByInspectionOrderIdOrderByCreatedAtAsc(inspectionId);
         var inbound = requireReturnInbound(inspection, true, existing);
-        if (existing.stream().anyMatch(s -> "CENTER_TO_SELLER".equals(s.getLeg()) && !"CANCELLED".equals(s.getStatus()))) {
+        if (existing.stream().anyMatch(s -> "CENTER_TO_SELLER".equals(s.getLeg()) && blocksNewHubShipment(s))) {
             throw new ConflictException("Đơn đã có vận đơn trả hàng hoặc đang xác minh chuyến trả.");
         }
 
@@ -401,8 +410,10 @@ public class ShipmentServiceImpl implements ShipmentService {
         if (inspection.getOrderType() != InspectionOrderType.AT_CENTER) {
             throw new ConflictException("Only AT_CENTER inspections support return shipments");
         }
+        boolean completedPreListing = inspection.getInspectionScope() == InspectionScope.PRE_LISTING
+                && "COMPLETED".equals(inspection.getStatus());
         if (inspection.getFinalPaymentPaidAt() != null
-                || !Set.of("FAILED", "CANCELLED", "PASSED").contains(inspection.getStatus())) {
+                || (!completedPreListing && !Set.of("FAILED", "CANCELLED", "PASSED").contains(inspection.getStatus()))) {
             throw new ConflictException("Inspection is not eligible for return shipping");
         }
 
@@ -505,10 +516,10 @@ public class ShipmentServiceImpl implements ShipmentService {
                 throw new ConflictException("A shipment is already active or uncertain for this inspection");
             }
             boolean outbound=!"BUYER_TO_SELLER".equals(request.leg());
-            if (siblings.stream().anyMatch(s -> !"CANCELLED".equals(s.getStatus())
+            if (siblings.stream().anyMatch(s -> (s.getLeg().equals(request.leg())
+                    || (outbound && Set.of("SELLER_TO_BUYER","CENTER_TO_BUYER").contains(s.getLeg())))
                     && !("RETURNED".equals(s.getStatus()) && Set.of("BUYER_TO_SELLER","SELLER_TO_CENTER").contains(s.getLeg()))
-                    && (s.getLeg().equals(request.leg())
-                    || (outbound && Set.of("SELLER_TO_BUYER","CENTER_TO_BUYER").contains(s.getLeg())))))
+                    && blocksNewHubShipment(s)))
                 throw new ConflictException("A shipment is already active or uncertain; retry its original requestId");
             // A paid quotation can still be unexpired after its pickup schedule has passed.
             // Refresh only new booking attempts; existing requests return above without another provider mutation.
@@ -546,6 +557,23 @@ public class ShipmentServiceImpl implements ShipmentService {
         }
         return new Prepared(id,true);
     }
+    private boolean blocksNewHubShipment(Shipment shipment) {
+        return !"CANCELLED".equals(shipment.getStatus()) && !canRebookFailedHubShipment(shipment);
+    }
+
+    private boolean canRebookFailedHubShipment(Shipment shipment) {
+        if (!Set.of("SELLER_TO_CENTER", "CENTER_TO_SELLER").contains(shipment.getLeg())
+                || !"LALAMOVE".equals(shipment.getProvider())
+                || !"FAILED".equals(shipment.getStatus()) || shipment.getOrderCode() == null
+                || shipment.getDeliveredAt() != null || shipment.getCashConfirmedAt() != null
+                || !("REJECTED".equals(shipment.getProviderStatus()) || "EXPIRED".equals(shipment.getProviderStatus()))) {
+            return false;
+        }
+        // A failed carrier trip can still have the parcel. The shipment history survives status changes.
+        return events.findByShipmentIdOrderByOccurredAtAsc(shipment.getId()).stream().noneMatch(event ->
+                "PICKED_UP".equals(event.getStatus()) || "COMPLETED".equals(event.getStatus()));
+    }
+
     private ShipmentResponse submit(Prepared prepared) {
         return new TransactionTemplate(transactions).execute(tx -> {
         var shipment=lock(prepared.id());
@@ -1046,6 +1074,10 @@ public class ShipmentServiceImpl implements ShipmentService {
                 } else {
                     inspectionFeeSettlement.settleReturnShipping(inspection, observedFee);
                 }
+            }
+            if (publication != null && inspection.getInspectionScope() == InspectionScope.PRE_LISTING
+                    && "COMPLETED".equals(inspection.getStatus())) {
+                publication.markReadyAfterInspectionReturn(inspection.getPost().getId());
             }
         }
         inspections.save(inspection);

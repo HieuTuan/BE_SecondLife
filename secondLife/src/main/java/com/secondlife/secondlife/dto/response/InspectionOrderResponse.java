@@ -22,6 +22,7 @@ import java.util.UUID;
 public record InspectionOrderResponse(
     UUID id,
     UUID postId,
+    UUID preListingQuoteId,
     String postTitle,
     List<String> postImageUrls,
     BigDecimal postPrice,

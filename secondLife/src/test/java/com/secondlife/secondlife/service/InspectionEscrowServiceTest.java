@@ -169,8 +169,20 @@ class InspectionEscrowServiceTest {
     }
 
     @Test
+    void staleExpirationJobCannotExpireAnOrderWithARenewedPaymentDeadline() {
+        order.setPaymentDeadline(Instant.now().plusSeconds(60));
+        when(inspectionOrderRepository.findByIdForUpdate(orderId)).thenReturn(Optional.of(order));
+
+        escrowService.refundExpiredOrder(order);
+
+        assertEquals(InspectionOrderStatus.WAITING_FEE_PAYMENT.name(), order.getStatus());
+        verifyNoInteractions(feeSettlementService);
+    }
+
+    @Test
     @DisplayName("refundExpiredOrder: Hoàn trả tiền qua feeSettlementService và mở lại post về ACTIVE")
     void testRefundExpiredOrder() {
+        order.setPaymentDeadline(Instant.now().minusSeconds(1));
         order.setBuyerPaidAt(Instant.now().minus(2, ChronoUnit.HOURS));
         Post post = new Post();
         post.setId(UUID.randomUUID());

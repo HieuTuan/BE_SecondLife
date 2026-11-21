@@ -6,6 +6,7 @@ import com.secondlife.secondlife.entity.InspectionFeeSettlement;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.enums.InspectionSettlementOutcome;
+import com.secondlife.secondlife.enums.InspectionScope;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.PostMapper;
@@ -164,6 +165,8 @@ public class MarketplaceListingServiceImpl implements MarketplaceListingService 
                     cb.equal(inspection.get("post"), post),
                     cb.or(cb.isNotNull(inspection.get("tamperSealId")),
                             cb.equal(inspection.get("status"), "PASSED"),
+                            cb.and(cb.equal(inspection.get("status"), "COMPLETED"),
+                                    cb.equal(inspection.get("inspectionScope"), InspectionScope.PRE_LISTING)),
                             cb.and(cb.equal(inspection.get("status"), "CANCELLED"), cb.exists(settlements))));
             return cb.exists(inspections);
         };

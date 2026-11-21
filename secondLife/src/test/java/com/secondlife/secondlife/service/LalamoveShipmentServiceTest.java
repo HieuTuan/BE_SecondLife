@@ -31,6 +31,7 @@ import static org.mockito.Mockito.*;
 
 class LalamoveShipmentServiceTest {
     private final ObjectMapper mapper=new ObjectMapper();
+    private final ListingPublicationService publication = mock(ListingPublicationService.class);
     private final ShipmentRepository shipments=mock(ShipmentRepository.class);
     private final ShipmentEventRepository events=mock(ShipmentEventRepository.class);
     private final OrderRepository orders=mock(OrderRepository.class);
@@ -40,6 +41,8 @@ class LalamoveShipmentServiceTest {
     private final ShippingProvider router=mock(ShippingProvider.class), lala=mock(ShippingProvider.class), ghn=mock(ShippingProvider.class);
     private final WalletService wallets=mock(WalletService.class);
     private final InspectionFeeSettlementService inspectionFeeSettlement = mock(InspectionFeeSettlementService.class);
+    private final InspectionShippingQuoteService inspectionShipping = mock(InspectionShippingQuoteService.class);
+    private final InspectionCenterProfileService centerProfiles = mock(InspectionCenterProfileService.class);
     private final PlatformTransactionManager transactions=mock(PlatformTransactionManager.class);
     private final UUID seller=UUID.randomUUID(), buyer=UUID.randomUUID();
     private ShipmentService service;
@@ -73,10 +76,41 @@ class LalamoveShipmentServiceTest {
         service = new ShipmentServiceImpl(shipments, events, orders, inspections, quotes, quoteService,
                 mock(ReverseGeocodingService.class), router, mapper, wallets, transactions,
                 mock(SystemWalletService.class), mock(SellerReputationService.class), null, null, new ListingFingerprintImpl(),
-                MapperTestSupport.mapper(ShipmentMapper.class), mock(OrderDisputeService.class), mock(ReturnShippingFeeService.class), mock(InspectionCenterProfileService.class), mock(InspectionShippingQuoteService.class), inspectionFeeSettlement, true);
+                MapperTestSupport.mapper(ShipmentMapper.class), mock(OrderDisputeService.class), mock(ReturnShippingFeeService.class), centerProfiles, inspectionShipping, inspectionFeeSettlement, publication, true);
     }
     private CreateShipmentRequest request(UUID id) { return new CreateShipmentRequest(id,"SELLER_TO_BUYER",null,null,null); }
     private Shipment booked() { service.createForOrder(seller,false,order.getId(),request(UUID.randomUUID())); return rows.values().iterator().next(); }
+    @Test
+    void deliveredHubReturnMakesTheListingReadyForSellerPublication() {
+        var inspection = new InspectionOrder();
+        inspection.setId(UUID.randomUUID());
+        inspection.setPost(order.getPost());
+        inspection.setOrderType(InspectionOrderType.AT_CENTER);
+        inspection.setInspectionScope(InspectionScope.PRE_LISTING);
+        inspection.setStatus("COMPLETED");
+        when(inspections.findByIdForUpdate(inspection.getId())).thenReturn(Optional.of(inspection));
+
+        var returning = new Shipment();
+        returning.setId(UUID.randomUUID());
+        returning.setInspectionOrderId(inspection.getId());
+        returning.setLeg("CENTER_TO_SELLER");
+        returning.setProvider("LALAMOVE");
+        returning.setOrderCode("CORPORATE_RETURN");
+        returning.setStatus("PICKED");
+        rows.put(returning.getId(), returning);
+
+        Instant now = Instant.now();
+        event(returning, "still-in-transit", "PICKED_UP", now.minusSeconds(10));
+        verifyNoInteractions(publication);
+        service.receiveLalamove(mapper.valueToTree(Map.of("event_id", "pre-listing-delivered",
+                "event_type", "ORDER_STATUS_CHANGED", "order_code", returning.getOrderCode(),
+                "occurred_at", now.toString(), "status", "COMPLETED", "fee", 27000)));
+
+        verify(inspectionFeeSettlement).settleReturnShipping(inspection, new BigDecimal("27000"));
+        verify(publication).markReadyAfterInspectionReturn(inspection.getPost().getId());
+        assertEquals("COMPLETED", inspection.getStatus());
+    }
+
     private void event(Shipment s,String eventId,String status,Instant time) {
         service.receiveLalamove(mapper.valueToTree(Map.of("event_id",eventId,"event_type","ORDER_STATUS_CHANGED","order_code",s.getOrderCode(),"occurred_at",time.toString(),"status",status)));
     }
@@ -269,6 +303,158 @@ class LalamoveShipmentServiceTest {
         assertEquals("FAILED",s.getStatus()); assertEquals(EscrowStatus.FROZEN,order.getEscrowStatus());
         assertThrows(ConflictException.class,() -> service.refundReturned(seller,true,s.getId(),"not physically returned")); verifyNoInteractions(wallets);
     }
+    private InspectionOrder inspectionWithFailedHubReturn(Shipment failedReturn) {
+        var inspection = new InspectionOrder();
+        inspection.setId(UUID.randomUUID());
+        inspection.setPost(order.getPost());
+        order.getPost().setPrice(order.getFinalPrice());
+        inspection.setSeller(order.getSeller());
+        var center = new User();
+        center.setId(UUID.randomUUID());
+        inspection.setInspectionCenter(center);
+        inspection.setOrderType(InspectionOrderType.AT_CENTER);
+        inspection.setStatus("FAILED");
+        inspection.setFeeSettledAt(Instant.now());
+        inspection.setReturnShippingReserveFee(new BigDecimal("36000"));
+        when(inspections.findById(inspection.getId())).thenReturn(Optional.of(inspection));
+        when(inspections.findByIdForUpdate(inspection.getId())).thenReturn(Optional.of(inspection));
+
+        var inbound = new Shipment();
+        inbound.setId(UUID.randomUUID());
+        inbound.setLeg("SELLER_TO_CENTER");
+        inbound.setStatus("DELIVERED");
+        var route = (tools.jackson.databind.node.ObjectNode) mapper.readTree(quote.getPayload());
+        route.put("to_address", "Inspection Hub");
+        inbound.setPayload(mapper.writeValueAsString(route));
+        failedReturn.setId(UUID.randomUUID());
+        failedReturn.setInspectionOrderId(inspection.getId());
+        failedReturn.setLeg("CENTER_TO_SELLER");
+        failedReturn.setStatus("FAILED");
+        failedReturn.setOrderCode("9876543210987654321");
+        rows.put(failedReturn.getId(), failedReturn);
+        when(shipments.findByInspectionOrderIdOrderByCreatedAtAsc(inspection.getId())).thenAnswer(call -> {
+            var legShipments = new ArrayList<Shipment>();
+            legShipments.add(inbound);
+            legShipments.addAll(rows.values().stream().filter(row -> inspection.getId().equals(row.getInspectionOrderId())).toList());
+            return legShipments;
+        });
+        return inspection;
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"REJECTED", "EXPIRED"})
+    void centerCanQuoteAndRebookAnUnpickedReturn(String providerStatus) {
+        var previous = new Shipment();
+        previous.setProviderStatus(providerStatus);
+        var inspection = inspectionWithFailedHubReturn(previous);
+        var inspectionId = inspection.getId();
+        var centerId = inspection.getInspectionCenter().getId();
+
+        var quote = service.quoteCenterReturn(centerId, inspectionId);
+        assertEquals("Inspection Hub", quote.from().address());
+        assertEquals("123 Street", quote.to().address());
+        verify(lala, never()).create(anyMap());
+
+        var request = new CreateShipmentRequest(UUID.randomUUID(), "CENTER_TO_SELLER", null, null, null, null, quote.shippingFee());
+        var replacement = service.createCenterDelivery(centerId, inspectionId, request);
+        assertNotEquals(previous.getId(), replacement.shipmentId());
+        assertNotEquals(previous.getOrderCode(), replacement.orderCode());
+        assertEquals("CENTER_TO_SELLER", replacement.leg());
+        assertEquals("FAILED", previous.getStatus());
+        assertEquals(replacement.shipmentId(), service.createCenterDelivery(centerId, inspectionId, request).shipmentId());
+
+        assertThrows(ConflictException.class, () -> service.quoteCenterReturn(centerId, inspectionId));
+        assertThrows(ConflictException.class, () -> service.createCenterDelivery(centerId, inspectionId,
+                new CreateShipmentRequest(UUID.randomUUID(), "CENTER_TO_SELLER", null, null, null)));
+        verify(lala, times(1)).create(anyMap());
+        verifyNoInteractions(wallets, inspectionFeeSettlement);
+    }
+
+    @Test void centerCannotQuoteOrRebookAnUncertainOrPickedUpReturn() {
+        var previous = new Shipment();
+        previous.setProviderStatus("REJECTED");
+        var inspection = inspectionWithFailedHubReturn(previous);
+        var inspectionId = inspection.getId();
+        var centerId = inspection.getInspectionCenter().getId();
+        var request = new CreateShipmentRequest(UUID.randomUUID(), "CENTER_TO_SELLER", null, null, null);
+
+        previous.setStatus("CREATION_UNCERTAIN");
+        assertThrows(ConflictException.class, () -> service.quoteCenterReturn(centerId, inspectionId));
+        assertThrows(ConflictException.class, () -> service.createCenterDelivery(centerId, inspectionId, request));
+
+        previous.setStatus("FAILED");
+        var pickup = new ShipmentEvent();
+        pickup.setStatus("PICKED_UP");
+        when(events.findByShipmentIdOrderByOccurredAtAsc(previous.getId())).thenReturn(List.of(pickup));
+        assertThrows(ConflictException.class, () -> service.quoteCenterReturn(centerId, inspectionId));
+        assertThrows(ConflictException.class, () -> service.createCenterDelivery(centerId, inspectionId, request));
+        verify(lala, never()).preview(anyMap());
+        verify(lala, never()).create(anyMap());
+    }
+
+    private Shipment failedHubInbound(String providerStatus) {
+        var inspection = new InspectionOrder();
+        inspection.setId(UUID.randomUUID());
+        inspection.setPost(order.getPost());
+        var center = new User();
+        center.setId(UUID.randomUUID());
+        inspection.setInspectionCenter(center);
+        inspection.setInspectionScope(InspectionScope.PRE_LISTING);
+        inspection.setSellerPaidAt(Instant.now());
+        when(centerProfiles.requireShippingAddress(center.getId())).thenReturn(
+                ShippingPayloads.storedAddress(mapper.readTree(quote.getPayload()), "to"));
+        inspection.setOrderType(InspectionOrderType.AT_CENTER);
+        inspection.setStatus("CONFIRMED_PENDING_DISPATCH");
+        inspection.setInspectionShippingQuoteId(UUID.randomUUID());
+        inspection.setShippingFee(quote.getFee());
+        when(inspections.findOwnerId(inspection.getId())).thenReturn(Optional.of(seller));
+        when(inspections.findByIdForUpdate(inspection.getId())).thenReturn(Optional.of(inspection));
+        when(inspectionShipping.outboundPayload(inspection)).thenAnswer(call ->
+                mapper.readValue(quote.getPayload(), new tools.jackson.core.type.TypeReference<Map<String, Object>>() {}));
+        when(shipments.findByInspectionOrderIdOrderByCreatedAtAsc(inspection.getId())).thenAnswer(call ->
+                rows.values().stream().filter(row -> inspection.getId().equals(row.getInspectionOrderId())).toList());
+
+        var shipment = new Shipment();
+        shipment.setId(UUID.randomUUID());
+        shipment.setInspectionOrderId(inspection.getId());
+        shipment.setLeg("SELLER_TO_CENTER");
+        shipment.setStatus("FAILED");
+        shipment.setProviderStatus(providerStatus);
+        shipment.setOrderCode("9876543210987654321");
+        rows.put(shipment.getId(), shipment);
+        return shipment;
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"REJECTED", "EXPIRED"})
+    void sellerCanRebookAnUnpickedHubShipment(String providerStatus) {
+        var oldShipment = failedHubInbound(providerStatus);
+        var inspectionId = oldShipment.getInspectionOrderId();
+        var request = new CreateShipmentRequest(UUID.randomUUID(), "SELLER_TO_CENTER", null, null, null);
+        var replacement = service.createForInspection(seller, false, inspectionId, request);
+
+        assertNotEquals(oldShipment.getId(), replacement.shipmentId());
+        assertNotEquals(oldShipment.getOrderCode(), replacement.orderCode());
+        assertEquals("READY_TO_PICK", replacement.status());
+        assertEquals("FAILED", oldShipment.getStatus());
+        assertEquals(replacement.shipmentId(), service.createForInspection(seller, false, inspectionId, request).shipmentId());
+        assertThrows(ConflictException.class, () -> service.createForInspection(seller, false, inspectionId,
+                new CreateShipmentRequest(UUID.randomUUID(), "SELLER_TO_CENTER", null, null, null)));
+        verify(lala, times(1)).create(anyMap());
+        verifyNoInteractions(wallets);
+    }
+
+    @Test void sellerCannotRebookARejectedHubShipmentAfterPickup() {
+        var oldShipment = failedHubInbound("REJECTED");
+        var pickedUp = new ShipmentEvent();
+        pickedUp.setStatus("PICKED_UP");
+        when(events.findByShipmentIdOrderByOccurredAtAsc(oldShipment.getId())).thenReturn(List.of(pickedUp));
+
+        assertThrows(ConflictException.class, () -> service.createForInspection(seller, false, oldShipment.getInspectionOrderId(),
+                new CreateShipmentRequest(UUID.randomUUID(), "SELLER_TO_CENTER", null, null, null)));
+        verify(lala, never()).create(anyMap());
+    }
+
     @Test void completedTrackingDoesNotFetchUnavailableDriverLocation() {
         var s=booked(); event(s,"a","COMPLETED",Instant.now()); s.setDriverId("D1");
         var tracking=service.tracking(buyer,false,s.getId()); assertEquals("UNAVAILABLE",tracking.path("locationStatus").asText());

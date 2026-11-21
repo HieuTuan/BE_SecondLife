@@ -1286,7 +1286,8 @@ public class InspectionServiceImpl implements InspectionService {
         requireUnlockedAssignment(order);
         requireEditableInspectionOrder(order);
         requireFundedConfiguredRequest(order);
-        if (order.getChecklistSnapshotJson() != null && order.getInspectionScope() == InspectionScope.BUYER_REQUEST
+        if ((order.getInspectionScope() == InspectionScope.PRE_LISTING
+                || (order.getChecklistSnapshotJson() != null && order.getInspectionScope() == InspectionScope.BUYER_REQUEST))
                 && !Set.of("CONFIRMED_PENDING_DISPATCH", "DISPATCHED", "SCHEDULED", "SHIPPING_TO_CENTER").contains(order.getStatus())) {
             throw new ConflictException("Đơn chưa sẵn sàng để phân công kiểm định");
         }
@@ -1416,6 +1417,7 @@ public class InspectionServiceImpl implements InspectionService {
 
         requireEditableInspectionOrder(order);
         requireFundedConfiguredRequest(order);
+        requirePreListingCenterReceipt(order);
         boolean alreadyStarted = InspectionOrderStatus.INSPECTING.name().equals(order.getStatus());
         if (alreadyStarted && order.getInspector() != null && actorId.equals(order.getInspector().getId())) {
             if (!Boolean.TRUE.equals(order.getInspectorConfirmed()) || order.getInspectorConfirmedAt() == null
@@ -1545,8 +1547,9 @@ public class InspectionServiceImpl implements InspectionService {
                     "Đơn kiểm định chưa ở trạng thái phù hợp để nộp biên bản: " + order.getStatus());
         }
 
-        order.setNote(request.note());
         requireFundedConfiguredRequest(order);
+        requirePreListingCenterReceipt(order);
+        order.setNote(request.note());
         confirmInspectorAssignment(order);
         order.setConditionScore(request.conditionScore());
         order.setConditionGrade(request.conditionGrade());
@@ -1590,20 +1593,20 @@ public class InspectionServiceImpl implements InspectionService {
 
         if ("FAILED".equals(request.status())) {
             order.setStatus(InspectionOrderStatus.FAILED.name());
-            order.setAppealDeadline(Instant.now().plus(Duration.ofHours(24)));
+            order.setAppealDeadline(null);
             order.setAppealStatus(InspectionAppealStatus.NONE);
             order.setReputationPenaltyApplied(false);
             if (!isExternalVideo) {
                 order.setVideoRetentionUntil(Instant.now().plus(14, ChronoUnit.DAYS));
             }
 
+            feeSettlementService.settle(order, InspectionSettlementOutcome.FAILED_INSPECTION, request.note());
             if (order.getInspectionScope() == InspectionScope.PRE_LISTING) {
                 post.setStatus("REJECTED");
                 post.setRejectionReason("Kiểm định chất lượng đầu vào không đạt: "
                         + (request.note() != null ? request.note() : "Không đạt tiêu chuẩn sàn"));
                 postRepository.save(post);
             } else {
-                feeSettlementService.settle(order, InspectionSettlementOutcome.FAILED_INSPECTION, request.note());
                 restorePostStatusAfterInspectionEnd(order);
             }
 
@@ -1637,10 +1640,16 @@ public class InspectionServiceImpl implements InspectionService {
             }
 
             if (order.getInspectionScope() == InspectionScope.PRE_LISTING) {
+                feeSettlementService.settle(order, InspectionSettlementOutcome.PRE_LISTING_PASSED, request.note());
                 if ("PENDING_INSPECTION".equals(post.getStatus()) || "PENDING_APPROVAL".equals(post.getStatus())) {
                     String scanResult = aiScanPost(post);
                     if ("APPROVED".equals(scanResult)) {
-                        publication.activate(post);
+                        if (order.getOrderType() == InspectionOrderType.AT_CENTER) {
+                            post.setStatus("PENDING_INSPECTION");
+                            postRepository.save(post);
+                        } else {
+                            publication.markReadyToPublish(post);
+                        }
                     } else {
                         String reason = scanResult.contains(":")
                                 ? scanResult.substring(scanResult.indexOf(":") + 1).trim()
@@ -1788,7 +1797,24 @@ public class InspectionServiceImpl implements InspectionService {
         order.setEvidencePhotoUrls(photos.stream().distinct().toList());
     }
 
+    private void requirePreListingCenterReceipt(InspectionOrder order) {
+        if (order.getInspectionScope() == InspectionScope.PRE_LISTING
+                && order.getOrderType() == InspectionOrderType.AT_CENTER
+                && shipments.findByInspectionOrderIdOrderByCreatedAtAsc(order.getId()).stream()
+                        .noneMatch(shipment -> "SELLER_TO_CENTER".equals(shipment.getLeg())
+                                && "DELIVERED".equals(shipment.getStatus()))) {
+            throw new ConflictException("Cần nhận sản phẩm tại trung tâm trước khi kiểm định bài đăng");
+        }
+    }
+
     private void requireFundedConfiguredRequest(InspectionOrder order) {
+        if (order.getInspectionScope() == InspectionScope.PRE_LISTING) {
+            if (order.getOrderType() == null || order.getSellerPaidAt() == null) {
+                throw new ConflictException("Người bán cần chọn hình thức và thanh toán phí trước khi kiểm định bài đăng");
+            }
+            requireInspectionFeesPaid(order);
+            return;
+        }
         if (order.getChecklistSnapshotJson() == null || order.getInspectionScope() != InspectionScope.BUYER_REQUEST) return;
         requireInspectionFeesPaid(order);
     }
@@ -2120,8 +2146,8 @@ public class InspectionServiceImpl implements InspectionService {
             throw new ConflictException("Đơn kiểm định này đã được gửi khiếu nại trước đó");
         }
 
-        if (order.getAppealDeadline() != null && order.getAppealDeadline().isBefore(Instant.now())) {
-            throw new ConflictException("Đã hết thời hạn 24 giờ để khiếu nại kết quả kiểm định");
+        if (order.getAppealDeadline() == null || order.getAppealDeadline().isBefore(Instant.now())) {
+            throw new ConflictException("Đơn kiểm định không hỗ trợ hoặc đã hết thời hạn khiếu nại kết quả kiểm định");
         }
 
         order.setAppealStatus(InspectionAppealStatus.PENDING_REVIEW);
