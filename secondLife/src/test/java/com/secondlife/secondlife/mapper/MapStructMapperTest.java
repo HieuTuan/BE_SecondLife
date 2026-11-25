@@ -50,7 +50,7 @@ class MapStructMapperTest {
         assertEquals("first.jpg", response.imageUrls().getFirst());
         post.getImages().clear();
         assertEquals("first.jpg", response.imageUrls().getFirst());
-        assertEquals(response.user().address(), mapper.toMarketplaceResponse(post, false, null, null).sellerAddress());
+        assertEquals(response.user().address(), mapper.toMarketplaceResponse(post, false, null, null, null).sellerAddress());
     }
 
     @Test
@@ -65,10 +65,16 @@ class MapStructMapperTest {
         order.setVideoCleanupStatus("CLEANED");
         order.setStatus("COMPLETED");
         order.setNote("Inspection note");
+        order.setInspectorConfirmed(true);
+        order.setInspectorConfirmedAt(java.time.Instant.parse("2026-11-18T00:00:00Z"));
+        order.setAssignmentLocked(true);
 
         var response = context.getBean(InspectionOrderMapper.class).toResponse(order);
         assertEquals("COMPLETED", response.status());
         assertEquals("Inspection note", response.note());
+        assertTrue(response.inspectorConfirmed());
+        assertEquals(order.getInspectorConfirmedAt(), response.inspectorConfirmedAt());
+        assertTrue(response.assignmentLocked());
         assertEquals("CLEANED", response.videoCleanupStatus());
         assertNull(response.buyerName());
         assertNull(response.sellerName());

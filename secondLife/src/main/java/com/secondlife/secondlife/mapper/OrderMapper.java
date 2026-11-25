@@ -6,6 +6,7 @@ import com.secondlife.secondlife.dto.response.OrderBankPaymentResponse;
 import com.secondlife.secondlife.dto.response.OrderFeedItemResponse;
 import com.secondlife.secondlife.dto.response.OrderFulfillmentResponse;
 import com.secondlife.secondlife.dto.response.OrderResponseDTO;
+import com.secondlife.secondlife.dto.response.OrderReturnResponse;
 import com.secondlife.secondlife.dto.response.SellerCommissionPreviewResponse;
 import com.secondlife.secondlife.entity.DepositRequest;
 import com.secondlife.secondlife.entity.Order;
@@ -30,8 +31,8 @@ public class OrderMapper {
     }
 
     public OrderFeedItemResponse toFeedItem(FeedRow row, OrderResponseDTO order, InspectionOrderResponse inspection,
-                                            SellerCommissionPreviewResponse sellerCommissionPreview) {
-        return delegate.toFeedItem(row, order, inspection, sellerCommissionPreview);
+                                            SellerCommissionPreviewResponse sellerCommissionPreview, OrderReturnResponse orderReturn) {
+        return delegate.toFeedItem(row, order, inspection, sellerCommissionPreview, orderReturn);
     }
 
     public OrderFulfillmentResponse toFulfillmentResponse(Order order) {
@@ -82,8 +83,9 @@ public class OrderMapper {
         @Mapping(target = "itemId", source = "row.itemId")
         @Mapping(target = "itemCondition", source = "row.itemCondition")
         @Mapping(target = "sellerCommissionPreview", source = "sellerCommissionPreview")
+        @Mapping(target = "orderReturn", source = "orderReturn")
         OrderFeedItemResponse toFeedItem(FeedRow row, OrderResponseDTO order, InspectionOrderResponse inspection,
-                                         SellerCommissionPreviewResponse sellerCommissionPreview);
+                                         SellerCommissionPreviewResponse sellerCommissionPreview, OrderReturnResponse orderReturn);
 
         @Mapping(target = "orderId", source = "id")
         @Mapping(target = "lateHandoverCandidate", expression = "java(order.getHandoverDeadline() != null && order.getCarrierPickedUpAt() != null && order.getCarrierPickedUpAt().isAfter(order.getHandoverDeadline()))")

@@ -25,6 +25,8 @@ public interface PostService {
 
     PostSubmitResponse submitPost(UUID userId, UUID postId, PostSubmitRequest request);
 
+    PostDto publishInspectedPost(UUID userId, UUID postId);
+
     String suggestTitle(UUID userId, UUID postId, String context);
 
     AiPriceEstimationResponse estimatePrice(UUID userId, UUID postId, String requestId);

@@ -2,6 +2,7 @@ package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.common.PageResponse;
+import com.secondlife.secondlife.dto.request.MarketplaceListingFilter;
 import com.secondlife.secondlife.dto.request.PostInitRequest;
 import com.secondlife.secondlife.dto.request.PostSubmitRequest;
 import com.secondlife.secondlife.dto.request.ReclassifyListingItemRequest;
@@ -11,6 +12,7 @@ import com.secondlife.secondlife.dto.response.PostDto;
 import com.secondlife.secondlife.dto.response.PostFinalizeResponse;
 import com.secondlife.secondlife.dto.response.PostInitResponse;
 import com.secondlife.secondlife.dto.response.PostSubmitResponse;
+import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.MarketplaceListingService;
@@ -63,6 +65,24 @@ public class PostController {
         int safeSize = Math.max(1, Math.min(size, 100));
         return ApiResponse.success(marketplaceListingService.list(categoryId, itemId,
                 PageRequest.of(safePage, safeSize, Sort.by("publishedAt").descending())));
+    }
+
+    @GetMapping("/search")
+    @Operation(summary = "Search and filter active marketplace listings")
+    public ApiResponse<Page<MarketplaceListingResponse>> searchPosts(
+            @Valid @ModelAttribute MarketplaceListingFilter filter,
+            @RequestParam(defaultValue = "newest") String sort,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Sort order = switch (sort) {
+            case "newest" -> Sort.by(Sort.Order.desc("publishedAt"));
+            case "priceAsc" -> Sort.by(Sort.Order.asc("price"), Sort.Order.desc("publishedAt"));
+            case "priceDesc" -> Sort.by(Sort.Order.desc("price"), Sort.Order.desc("publishedAt"));
+            default -> throw new BadRequestException("Cách sắp xếp sản phẩm không hợp lệ");
+        };
+        return ApiResponse.success(marketplaceListingService.search(filter,
+                PageRequest.of(Math.max(0, page), Math.max(1, Math.min(size, 100)),
+                        order.and(Sort.by("id")))));
     }
 
     @GetMapping("/{postId}")
@@ -122,6 +142,15 @@ public class PostController {
             @Valid @RequestBody PostSubmitRequest request) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(postService.submitPost(userId, postId, request));
+    }
+
+    @PostMapping("/{postId}/publish-inspected")
+    @PreAuthorize("hasAuthority('LISTING_PUBLISH_SELF')")
+    public ResponseEntity<PostDto> publishInspectedPost(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID postId) {
+        UUID userId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(postService.publishInspectedPost(userId, postId));
     }
 
     @GetMapping("/my-posts")

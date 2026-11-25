@@ -7,6 +7,7 @@ import com.secondlife.secondlife.dto.response.ShippingQuoteResponse;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.ShippingPickupAddress;
 import com.secondlife.secondlife.entity.ShippingQuote;
+import com.secondlife.secondlife.enums.InspectionOrderType;
 import com.secondlife.secondlife.enums.NegotiationStatus;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
@@ -118,16 +119,35 @@ public class ShippingQuoteServiceImpl implements ShippingQuoteService {
         ShippingAddress origin=sellerPickup;
         String leg="SELLER_TO_BUYER";
 
-        var inspection = passedInspection.or(() -> inspections.findActiveByPostId(post.getId()))
-                .or(() -> inspections.findFirstByPostIdOrderByCreatedAtDesc(post.getId()));
+        var inspection = passedInspection.or(() -> inspections.findActiveByPostId(post.getId()));
         if (inspection.isPresent()) {
-            var centerLegs=shipments.findByInspectionOrderIdOrderByCreatedAtAsc(inspection.get().getId()).stream()
-                    .filter(s -> "SELLER_TO_CENTER".equals(s.getLeg()) && !"CANCELLED".equals(s.getStatus())).toList();
-            if (!centerLegs.isEmpty()) {
-                var center=centerLegs.getLast();
-                if (!"PASSED".equals(inspection.get().getStatus()) || !"DELIVERED".equals(center.getStatus()))
-                    throw new ConflictException("The package must reach the inspection center and pass inspection before checkout");
-                origin=ShippingPayloads.storedAddress(mapper.readTree(center.getPayload()),"to"); leg="CENTER_TO_BUYER";
+            var inspOrder = inspection.get();
+            boolean isAtHome = inspOrder.getOrderType() == InspectionOrderType.AT_HOME;
+            var allShipments = shipments.findByInspectionOrderIdOrderByCreatedAtAsc(inspOrder.getId());
+            boolean hasReturnedToSeller = allShipments.stream()
+                    .anyMatch(s -> "CENTER_TO_SELLER".equals(s.getLeg()) && "DELIVERED".equals(s.getStatus()));
+
+            if (!isAtHome && !hasReturnedToSeller) {
+                var centerLegs = allShipments.stream()
+                        .filter(s -> "SELLER_TO_CENTER".equals(s.getLeg()) && !"CANCELLED".equals(s.getStatus()))
+                        .toList();
+                if (!centerLegs.isEmpty()) {
+                    var center = centerLegs.getLast();
+                    boolean isDeliveredToCenter = "DELIVERED".equals(center.getStatus());
+                    boolean isPassed = "PASSED".equals(inspOrder.getStatus());
+
+                    boolean isTargetInspectionQuote = isPassedInspectionBuyer
+                            || (inspOrder.getBuyer() == null && isPassed)
+                            || (inspOrder.getBuyer() != null && buyerId.equals(inspOrder.getBuyer().getId()));
+
+                    if (isTargetInspectionQuote) {
+                        if (!isPassed || !isDeliveredToCenter) {
+                            throw new ConflictException("The package must reach the inspection center and pass inspection before checkout");
+                        }
+                        origin = ShippingPayloads.storedAddress(mapper.readTree(center.getPayload()), "to");
+                        leg = "CENTER_TO_BUYER";
+                    }
+                }
             }
         }
         ShippingAddress delivery=geocoding.shipping(request.deliveryAddress());

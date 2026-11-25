@@ -2,6 +2,7 @@ package com.secondlife.secondlife.dto.response;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.enums.InspectionAppointmentShift;
 import com.secondlife.secondlife.enums.InspectionAppointmentStatus;
 import com.secondlife.secondlife.enums.InspectionComplexityLevel;
@@ -17,10 +18,11 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-@Builder
+@Builder(toBuilder = true)
 public record InspectionOrderResponse(
     UUID id,
     UUID postId,
+    UUID preListingQuoteId,
     String postTitle,
     List<String> postImageUrls,
     BigDecimal postPrice,
@@ -32,11 +34,16 @@ public record InspectionOrderResponse(
     String sellerName,
     UUID inspectorId,
     String inspectorName,
+    Boolean inspectorConfirmed,
+    Instant inspectorConfirmedAt,
+    Boolean assignmentLocked,
     UUID linkedOrderId,
     UUID negotiationId,
     String inspectionScope,
     InspectionOrderType orderType,
     InspectionFeePayer feePayer,
+    Integer buyerFeePercent,
+    Integer previousBuyerFeePercent,
     String status,
     String note,
     BigDecimal inspectionFee,
@@ -98,6 +105,8 @@ public record InspectionOrderResponse(
     String sellerAddress,
     String buyerPhone,
     String buyerAddress,
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    ShippingAddress buyerDeliveryAddress,
     String inspectionCenterName,
     String inspectionCenterAddress,
     String inspectionCenterPhone,

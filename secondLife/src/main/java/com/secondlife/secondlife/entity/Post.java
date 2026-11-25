@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.Formula;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -31,6 +32,9 @@ public class Post {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    @Formula("(select cast(pickup.address_json as jsonb) ->> 'address' from shipping_pickup_addresses pickup where pickup.user_id = user_id)")
+    private String sellerPickupAddress;
+
     @Column(name = "category_id")
     private UUID categoryId;
 
@@ -48,11 +52,17 @@ public class Post {
     @Column(name = "title", length = 255)
     private String title;
 
+    @Column(name = "brand", length = 120)
+    private String brand;
+
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 
     @Column(name = "image_url")
     private String imageUrl; // the original image uploaded by the user
+
+    @Column(name = "image_content_reviewed_at")
+    private Instant imageContentReviewedAt;
 
     @ElementCollection
     @CollectionTable(name = "post_images", joinColumns = @JoinColumn(name = "post_id"))
@@ -83,6 +93,15 @@ public class Post {
 
     @Column(name = "price", precision = 18, scale = 2)
     private BigDecimal price; // Giá người dùng chốt
+
+    @Column(name = "mandatory_inspection")
+    private Boolean mandatoryInspection;
+
+    @Column(name = "inspection_threshold_snapshot", precision = 18, scale = 2)
+    private BigDecimal inspectionThresholdSnapshot;
+
+    @Column(name = "inspection_policy_version")
+    private Long inspectionPolicyVersion;
 
     @Column(name = "item_condition", length = 50)
     private String itemCondition; // Tình trạng (Mới, cũ, xước xát...) do AI quét

@@ -9,6 +9,8 @@ import java.util.UUID;
 
 public interface ReportEvidenceService {
 
+    int MAX_ATTACHMENTS_PER_SUBMISSION = 5;
+
     ReportEvidenceUploadResponse upload(UUID ownerId, MultipartFile file);
 
     void validateOwner(UUID ownerId, List<String> urls);

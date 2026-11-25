@@ -51,7 +51,7 @@ public class ListingAccessServiceImpl implements ListingAccessService {
 
     public void requireDraft(Post post) {
         if (post.isListingCreditCharged()) throw new ConflictException("This post was already submitted; re-up is not supported");
-        if (!"DRAFT".equals(post.getStatus()) && !"REJECTED".equals(post.getStatus()))
+        if (!ListingAccessService.canEditDraft(post))
             throw new ConflictException("Only a draft or rejected post can be edited or valued");
     }
 }

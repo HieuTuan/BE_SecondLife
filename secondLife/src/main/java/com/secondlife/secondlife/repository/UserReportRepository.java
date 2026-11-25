@@ -5,6 +5,10 @@ import com.secondlife.secondlife.dto.request.ReportRequests.Create;
 import com.secondlife.secondlife.dto.request.ReportRequests.Decision;
 import com.secondlife.secondlife.dto.request.ReportRequests.ReasonCode;
 import com.secondlife.secondlife.dto.request.ReportRequests.ResponsibleParty;
+import com.secondlife.secondlife.dto.request.ReportRequests.ResolutionAction;
+import com.secondlife.secondlife.dto.request.ReportRequests.Status;
+import com.secondlife.secondlife.dto.response.OrderReturnResponse;
+import com.secondlife.secondlife.dto.response.SellerOrderDisputeResponse;
 import com.secondlife.secondlife.entity.UserReport;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
@@ -59,6 +63,18 @@ public interface UserReportRepository extends JpaRepository<UserReport, UUID>, R
 
     Optional<UserReport> findByReturnShipmentId(UUID shipmentId);
 
+    @Query("""
+            SELECT new com.secondlife.secondlife.dto.response.OrderReturnResponse(
+                r.orderId, r.id, r.returnShipmentId, s.status, s.orderCode, r.refundedAt)
+            FROM UserReport r LEFT JOIN Shipment s ON s.id = r.returnShipmentId
+                AND s.orderId = r.orderId AND s.leg = 'BUYER_TO_SELLER'
+            WHERE r.orderId IN :orderIds AND r.status = :status AND r.resolutionAction = :action
+              AND r.returnApprovedAt IS NOT NULL
+            ORDER BY r.returnApprovedAt DESC, r.id DESC
+            """)
+    List<OrderReturnResponse> findApprovedReturnsForOrders(@Param("orderIds") List<UUID> orderIds,
+            @Param("status") Status status, @Param("action") ResolutionAction action);
+
     @Modifying
     @Query(value = """
             INSERT INTO user_reports(id,reporter_id,request_id,seller_id,post_id,order_id,reason_code,description,evidence_urls,related_post_id,status,created_at,updated_at)
@@ -91,6 +107,20 @@ public interface UserReportRepository extends JpaRepository<UserReport, UUID>, R
                 AND (CAST(:type AS TEXT) IS NULL OR (:type='LISTING' AND order_id IS NULL) OR (:type='ORDER' AND order_id IS NOT NULL))
             """, nativeQuery = true)
     Page<UserReport> mine(@Param("reporterId") UUID reporterId, @Param("type") String type, Pageable page);
+
+    @Query(value = """
+            SELECT new com.secondlife.secondlife.dto.response.SellerOrderDisputeResponse(
+                r.id, r.orderId, p.title, r.reasonCode, r.status, r.resolutionAction, r.refundedAt, r.createdAt,
+                r.sellerResponseDeadlineAt, r.sellerRespondedAt,
+                r.postId, r.responsibleParty, r.decisionReason, r.resolvedAt)
+            FROM UserReport r LEFT JOIN Post p ON p.id = r.postId
+            WHERE r.sellerId = :sellerId AND r.orderId IS NOT NULL
+            ORDER BY r.createdAt DESC, r.id DESC
+            """, countQuery = """
+            SELECT COUNT(r) FROM UserReport r
+            WHERE r.sellerId = :sellerId AND r.orderId IS NOT NULL
+            """)
+    Page<SellerOrderDisputeResponse> sellerDisputes(@Param("sellerId") UUID sellerId, Pageable page);
 
     @Query(value = """
             SELECT * FROM user_reports WHERE (CAST(:status AS TEXT) IS NULL OR status=:status)

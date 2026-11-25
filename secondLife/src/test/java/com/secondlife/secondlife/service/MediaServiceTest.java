@@ -169,6 +169,25 @@ class MediaServiceTest {
     }
 
     @Test
+    void inspectionProofUploadsRejectFiveMegabytesOrMoreBeforeStoringAnyImage() throws IOException {
+        var atLimit = new MockMultipartFile("file", "proof.jpg", "image/jpeg", new byte[5_000_000]);
+        var overLimit = new MockMultipartFile("files", "large-proof.jpg", "image/jpeg", new byte[5_000_001]);
+        var valid = new MockMultipartFile("files", "front.jpg", "image/jpeg", imageBytes("valid-front.jpg"));
+
+        var single = assertThrows(ImageValidationException.class,
+                () -> mediaService.uploadImage(atLimit, "secondlife/inspections/proofs"));
+        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, single.getStatus());
+        assertEquals("file", single.getErrors().getFirst().field());
+        assertTrue(single.getErrors().getFirst().message().contains("dưới 5 MB"));
+
+        var batch = assertThrows(ImageValidationException.class,
+                () -> mediaService.uploadImages(List.of(valid, overLimit), " secondlife/inspections/proofs/ "));
+        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, batch.getStatus());
+        assertEquals("files[1]", batch.getErrors().getFirst().field());
+        verifyNoInteractions(cloudinary);
+    }
+
+    @Test
     void normalizedBatchCannotRetainMoreThanTheConfiguredRequestBudget() throws Exception {
         var bounded = new MediaServiceImpl(new CloudinaryMediaStorage(cloudinary), 10485760,
                 "avatars", 104857600, new ImageUploadValidator(600, 16000, 25000000, 2560), "40KB");

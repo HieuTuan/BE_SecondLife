@@ -32,6 +32,17 @@ public interface PostRepository extends JpaRepository<Post, UUID>, JpaSpecificat
     @EntityGraph(attributePaths = "images")
     @Query("select p from Post p where p.id in :ids")
     List<Post> findAllWithImagesByIdIn(@Param("ids") Collection<UUID> ids);
+    @Query("""
+            select p.id from Post p where p.id in :ids
+            and not exists (select i.id from Item i where i.id = p.itemId and i.selectable = true)
+            and exists (select i.id from Item i where i.category.id = p.categoryId and i.selectable = true)
+            and not exists (
+                select o.id from InspectionOrder o where o.post.id = p.id
+                and o.status not in ('CANCELLED', 'FAILED', 'PAYMENT_EXPIRED', 'COMPLETED')
+            )
+            """)
+    List<UUID> findReclassifiableIds(@Param("ids") Collection<UUID> ids);
+
     long countByUser_IdAndStatusIn(UUID userId, Collection<String> statuses);
     long countByUser_IdAndPublishedAtAfter(UUID userId, Instant since);
     @Lock(LockModeType.PESSIMISTIC_WRITE)

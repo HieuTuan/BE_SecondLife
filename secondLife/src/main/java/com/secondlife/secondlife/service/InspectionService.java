@@ -106,6 +106,11 @@ public interface InspectionService {
      */
     InspectionOrderResponse startInspection(UUID actorId, UUID orderId, InspectionStartRequest request);
 
+    /**
+     * KTV đã được phân công xác nhận tiếp nhận và khóa quyền đổi KTV.
+     */
+    InspectionOrderResponse confirmTask(UUID inspectorId, UUID orderId);
+
     InspectionCheckInCodeResponse getOrCreateHomeCheckInCode(UUID sellerId, UUID orderId);
 
     /**

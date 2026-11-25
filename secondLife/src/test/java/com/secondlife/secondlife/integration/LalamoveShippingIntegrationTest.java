@@ -62,7 +62,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.shipping.lalamove.key=pk_test_integration", "app.shipping.lalamove.secret=sk_test_integration",
         "app.shipping.lalamove.base-url=https://rest.sandbox.lalamove.com/v3",
         "app.shipping.lalamove.market=VN", "app.shipping.lalamove.language=vi_VN",
-        "app.shipping.lalamove.timeout-ms=5000",
+        "app.shipping.lalamove.timeout-ms=5000", "app.orders.dispute-refund.interval-ms=3600000",
         "app.shipping.lalamove.max-response-characters=4194304", "app.shipping.lalamove.webhook-max-future-skew-seconds=300"
 })
 class LalamoveShippingIntegrationTest {
@@ -90,6 +90,7 @@ class LalamoveShippingIntegrationTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired JwtTokenProvider jwt;
     @Autowired com.secondlife.secondlife.service.OrderAutoReleaseService autoRelease;
+    @Autowired com.secondlife.secondlife.scheduler.OrderDisputeRefundScheduler disputeRefunds;
     @Autowired com.secondlife.secondlife.service.OrderService orderService;
     @Autowired com.secondlife.secondlife.repository.OrderRepository orderRepository;
     @MockitoBean(name = "orderReleaseClock") Clock releaseClock;
@@ -398,43 +399,51 @@ class LalamoveShippingIntegrationTest {
         assertMoney(new BigDecimal("950000"), balance(f.seller()));
     }
 
-    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"SELLER","BUYER","CARRIER"})
-    void approvedReturnFreezesEscrowAndRefundsProductWithoutPayingSellerOrCommission(String responsibleParty) throws Exception {
+    @Test
+    void approvedReturnAutomaticallyRefundsProductWithoutPayingSellerOrCommission() throws Exception {
         Fixture f = fixture(); User admin = user("ADMIN", BigDecimal.ZERO);
         JsonNode before = systemWallet(admin); UUID id = deliveredOrder(f);
+        UUID evidenceId = UUID.randomUUID();
+        jdbc.update("INSERT INTO report_evidence_uploads(id,owner_id,storage_id,content_type,size_bytes) VALUES (?,?,?,'image/png',3)",
+                evidenceId, f.buyer().getId(), "shipping-dispute/" + evidenceId);
         JsonNode report = tree(mvc.perform(post("/api/v1/reports").header("Authorization", bearer(f.buyer()))
                 .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("requestId", UUID.randomUUID(), "orderId", id,
-                        "reasonCode", "MISLEADING_DESCRIPTION", "description", "Delivered product differs from its listing", "evidenceUrls", List.of()))))
+                        "reasonCode", "MISLEADING_DESCRIPTION", "description", "Delivered product differs from its listing",
+                        "evidenceUrls", List.of("/api/v1/reports/evidence/" + evidenceId)))))
                 .andExpect(status().isCreated()).andReturn()).path("data");
         UUID reportId = UUID.fromString(report.path("id").asText());
+        mvc.perform(post("/api/v1/reports/" + reportId + "/responses").header("Authorization", bearer(f.seller()))
+                .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("requestId", UUID.randomUUID(),
+                        "description", "Seller response for the returned product", "evidenceUrls", List.of()))))
+                .andExpect(status().isCreated());
         mvc.perform(post("/api/v1/staff/reports/" + reportId + "/start-review").header("Authorization", bearer(admin)))
                 .andExpect(status().isOk());
         mvc.perform(post("/api/v1/staff/reports/" + reportId + "/resolve").header("Authorization", bearer(admin))
-                .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("decision", "CONFIRMED", "responsibleParty", responsibleParty,
+                .contentType(MediaType.APPLICATION_JSON).content(body(Map.of("decision", "CONFIRMED",
                         "reason", "Staff approved the product return", "resolutionAction", "RETURN_AND_REFUND"))))
                 .andExpect(status().isOk());
         JsonNode returned = tree(mvc.perform(post("/api/v1/orders/" + id + "/shipments")
-                .header("Authorization", bearer(admin)).contentType(MediaType.APPLICATION_JSON)
-                .content(body(Map.of("requestId", UUID.randomUUID(), "leg", "BUYER_TO_SELLER", "reason", "Approved product return", "reportId", reportId))))
+                .header("Authorization", bearer(f.buyer())).contentType(MediaType.APPLICATION_JSON)
+                .content(body(Map.of("requestId", UUID.randomUUID(), "leg", "BUYER_TO_SELLER", "reportId", reportId))))
                 .andExpect(status().isOk()).andReturn()).path("data");
         assertOrder(id, "DELIVERED", "FROZEN");
         deliveredAt(id, Instant.now().minus(Duration.ofHours(49)));
         assertFalse(autoRelease.releaseIfDue(id));
         mvc.perform(put("/api/v1/orders/" + id + "/delivered").header("Authorization", bearer(f.buyer())))
                 .andExpect(status().isConflict());
-        callback(event(returned.path("orderCode").asText(), "COMPLETED", Instant.now().minusSeconds(1),
-                UUID.randomUUID().toString(), FEE)).andExpect(status().isOk());
-        for (int retry = 0; retry < 2; retry++)
-            mvc.perform(post("/api/v1/shipments/" + returned.path("shipmentId").asText() + "/refund")
-                    .header("Authorization", bearer(admin)).contentType(MediaType.APPLICATION_JSON)
-                    .content(body(Map.of("reason", "Product physically returned","responsibleParty",responsibleParty)))).andExpect(status().isOk());
+        var delivered = event(returned.path("orderCode").asText(), "COMPLETED", Instant.now().minusSeconds(1),
+                UUID.randomUUID().toString(), FEE);
+        callback(delivered).andExpect(status().isOk());
+        disputeRefunds.refundDeliveredReturns();
+        callback(delivered).andExpect(status().isOk());
+        disputeRefunds.refundDeliveredReturns();
         assertOrder(id, "CANCELLED", "REFUNDED");
         assertMoney(FUNDS.subtract(FEE), balance(f.buyer())); assertMoney(BigDecimal.ZERO, balance(f.seller()));
         assertEquals(0, transactions(id, "EARNING")); assertEquals(1, transactions(id, "REFUND"));
         assertEquals(1, systemTransactions(id, "REFUND"));
         mvc.perform(get("/api/v1/sellers/"+f.seller().getId()+"/reputation")).andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.evaluatedOrders").value("SELLER".equals(responsibleParty)?1:0))
-            .andExpect(jsonPath("$.data.sellerReturnFaultOrders").value("SELLER".equals(responsibleParty)?1:0));
+            .andExpect(jsonPath("$.data.evaluatedOrders").value(1))
+            .andExpect(jsonPath("$.data.sellerReturnFaultOrders").value(1));
         JsonNode after = systemWallet(admin);
         assertMoney(before.path("heldBalance").decimalValue(), after.path("heldBalance").decimalValue());
         assertMoney(before.path("shippingBalance").decimalValue().add(FEE), after.path("shippingBalance").decimalValue());

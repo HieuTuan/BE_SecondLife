@@ -1,12 +1,16 @@
 package com.secondlife.secondlife.service;
 
+import com.google.genai.errors.ApiException;
 import com.secondlife.secondlife.common.validation.ImageUploadValidator;
 import com.secondlife.secondlife.dto.request.PostInitRequest;
 import com.secondlife.secondlife.entity.Category;
 import com.secondlife.secondlife.entity.Post;
+import com.secondlife.secondlife.entity.PostImage;
 import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.exception.ImageValidationException;
 import com.secondlife.secondlife.exception.InvalidRequestFieldException;
 import com.secondlife.secondlife.integration.ai.AiChatGateway;
+import com.secondlife.secondlife.integration.ai.ListingPhotoContentReview;
 import com.secondlife.secondlife.mapper.PostMapper;
 import com.secondlife.secondlife.repository.AiChatMessageRepository;
 import com.secondlife.secondlife.repository.AiChatSessionRepository;
@@ -22,6 +26,10 @@ import com.secondlife.secondlife.service.impl.PostServiceImpl;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -36,9 +44,12 @@ import java.util.UUID;
 import javax.imageio.ImageIO;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -56,6 +67,9 @@ class ListingImageValidationTest {
     private final PostRepository posts = mock(PostRepository.class);
     private final CloudinaryService cloud = mock(CloudinaryService.class);
     private final ListingCreditService credits = mock(ListingCreditService.class);
+    private final AiChatGateway photoVision = mock(AiChatGateway.class);
+    private final ListingPhotoContentReview photoReview = new ListingPhotoContentReview(
+            photoVision, new tools.jackson.databind.ObjectMapper(), "test-cloud", "test-vision-model");
     private PostServiceImpl service;
 
     @BeforeEach
@@ -72,7 +86,11 @@ class ListingImageValidationTest {
                 new ListingImageSimilarityImpl(16000, 25000000, 20971520, 100, 8, 12, 90),
                 new ListingFingerprintImpl(), 30,
                 10485760, 3, 6, mock(PostMapper.class), null,
-                new ImageUploadValidator(600, 16000, 25000000, 2560));
+                new ImageUploadValidator(600, 16000, 25000000, 2560),
+                photoReview);
+        when(photoVision.complete(any(Prompt.class))).thenReturn("""
+                {"images":[{"number":1,"status":"RELATED"},{"number":2,"status":"RELATED"},{"number":3,"status":"RELATED"}]}
+                """);
         doThrow(new AssertionError("Invalid batch must be rejected before any upload"))
                 .when(cloud).uploadImage(any());
     }
@@ -100,6 +118,74 @@ class ListingImageValidationTest {
         assertThrows(InvalidRequestFieldException.class,
                 () -> service.initPost(ownerId, request(List.of(repeated, repeated, photo(800, 600, Color.BLUE)))));
         verifyNoInteractions(cloud, credits);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"manual", "ai"})
+    void unrelatedPhotosAreRejectedBeforeStorageOrCredits(String mode) throws Exception {
+        when(photoVision.complete(any(Prompt.class))).thenReturn("""
+                {"images":[{"number":1,"status":"RELATED"},{"number":2,"status":"DIFFERENT"},{"number":3,"status":"NOT_PRODUCT_PHOTO"}]}
+                """);
+        var request = new PostInitRequest(categoryId, null, null, null, validPhotos(), mode);
+        var rejected = assertThrows(ImageValidationException.class, () -> service.initPost(ownerId, request));
+
+        assertEquals(HttpStatus.BAD_REQUEST, rejected.getStatus());
+        assertEquals(List.of("images[1]", "images[2]"),
+                rejected.getErrors().stream().map(error -> error.field()).toList());
+        assertEquals("Ảnh này không thể hiện sản phẩm thực tế. Hãy thay sơ đồ, ảnh chụp màn hình hoặc tài liệu bằng ảnh chụp sản phẩm.",
+                rejected.getErrors().getLast().message());
+        verify(posts, never()).save(any());
+        verifyNoInteractions(cloud, credits);
+    }
+
+    @Test
+    void incompletePhotoReviewCannotApproveTheBatch() throws Exception {
+        when(photoVision.complete(any(Prompt.class))).thenReturn("""
+                {"images":[{"number":1,"status":"RELATED"},{"number":1,"status":"RELATED"},{"number":3,"status":"RELATED"}]}
+                """);
+        var error = assertThrows(ImageValidationException.class, () -> service.initPost(ownerId, request(validPhotos())));
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, error.getStatus());
+        assertEquals("images", error.getErrors().getFirst().field());
+        assertEquals("Dịch vụ kiểm duyệt trả kết quả thiếu hoặc sai định dạng. Bộ ảnh chưa được xác minh.",
+                error.getErrors().getFirst().message());
+        verify(posts, never()).save(any());
+        verifyNoInteractions(cloud, credits);
+    }
+
+    @Test
+    void reviewQuotaFailureReturnsServiceErrorWithoutLeakingUpstreamMessage() throws Exception {
+        when(photoVision.complete(any(Prompt.class)))
+                .thenThrow(new IllegalStateException(new ApiException(429, "internal provider detail", "RESOURCE_EXHAUSTED")));
+        var error = assertThrows(ImageValidationException.class, () -> service.initPost(ownerId, request(validPhotos())));
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, error.getStatus());
+        assertEquals("images", error.getErrors().getFirst().field());
+        assertEquals("Dịch vụ kiểm duyệt ảnh đã chạm giới hạn xử lý. Hãy thử lại sau ít phút.", error.getMessage());
+        verify(photoVision).complete(argThat((Prompt prompt) -> "test-vision-model".equals(prompt.getOptions().getModel())));
+        verify(posts, never()).save(any());
+        verifyNoInteractions(cloud, credits);
+    }
+
+    @Test
+    void olderDraftMustPassReviewAndIsOnlyCheckedOnceAfterApproval() {
+        var oldDraft = new Post();
+        oldDraft.getImages().addAll(List.of("front", "back", "label").stream().map(name ->
+                new PostImage(
+                        "https://res.cloudinary.com/test-cloud/image/upload/listings/" + name + ".jpg", null, null)).toList());
+
+        when(photoVision.complete(any(Prompt.class))).thenReturn("""
+                        {"images":[{"number":1,"status":"RELATED"},{"number":2,"status":"DIFFERENT"},{"number":3,"status":"RELATED"}]}
+                        """, """
+                        {"images":[{"number":1,"status":"RELATED"},{"number":2,"status":"RELATED"},{"number":3,"status":"RELATED"}]}
+                        """);
+        assertThrows(ImageValidationException.class, () -> photoReview.requireReviewed(oldDraft));
+        assertNull(oldDraft.getImageContentReviewedAt());
+
+        photoReview.requireReviewed(oldDraft);
+        assertNotNull(oldDraft.getImageContentReviewedAt());
+        photoReview.requireReviewed(oldDraft);
+        verify(photoVision, times(2)).complete(any(Prompt.class));
     }
 
     @Test
@@ -147,6 +233,7 @@ class ListingImageValidationTest {
             assertEquals(List.of("https://example.test/1.jpg", "https://example.test/2.jpg", "https://example.test/3.jpg"),
                     post.getImages().stream().map(image -> image.getImageUrl()).toList());
             assertEquals("DRAFT", post.getStatus());
+            assertNotNull(post.getImageContentReviewedAt());
             return post;
         });
         var response = service.initPost(ownerId, request(validPhotos()));

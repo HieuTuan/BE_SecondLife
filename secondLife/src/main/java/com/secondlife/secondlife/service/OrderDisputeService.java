@@ -13,6 +13,7 @@ import java.util.UUID;
 
 public interface OrderDisputeService {
     Instant open(Order order);
+    boolean hasOrderHold(UUID orderId);
     void resolve(ReportResponse report, Resolve request, ResponsibleParty party);
     UserReport approvedReturn(Order order, UUID reportId);
     void bindReturn(Order order, UserReport report, Shipment shipment);

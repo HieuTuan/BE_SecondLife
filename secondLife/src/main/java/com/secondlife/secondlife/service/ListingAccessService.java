@@ -10,4 +10,9 @@ public interface ListingAccessService {
 
     void requireDraft(Post post);
 
+    static boolean canEditDraft(Post post) {
+        return !post.isListingCreditCharged()
+                && ("DRAFT".equals(post.getStatus()) || "REJECTED".equals(post.getStatus()));
+    }
+
 }

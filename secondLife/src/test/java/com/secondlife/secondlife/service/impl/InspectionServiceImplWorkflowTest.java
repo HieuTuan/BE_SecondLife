@@ -265,10 +265,133 @@ class InspectionServiceImplWorkflowTest {
                 eq(order.getId()), eq("INSPECTION_ORDER"), eq("/seller/inspections/" + order.getId()));
 
         order.setStatus("INSPECTING");
-        service.assignInspector(order.getId(), inspector.getId(), center.getId());
+        assertThrows(ConflictException.class,
+                () -> service.assignInspector(order.getId(), inspector.getId(), center.getId()));
 
         assertEquals("INSPECTING", order.getStatus());
         verify(notificationService, times(2)).notifyInApp(any(), any(), any(), eq(NotificationType.INSPECTION), any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"AT_CENTER", "AT_HOME"})
+    void confirmationLocksAssignmentOnceAndPreservesInspectionSchedule(InspectionOrderType type) {
+        order.setOrderType(type);
+        order.setStatus("DISPATCHED");
+        order.setAppointmentStatus(InspectionAppointmentStatus.CONFIRMED);
+        Instant appointment = Instant.now().plusSeconds(3600);
+        order.setAppointmentScheduledAt(appointment);
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+        when(inspectionOrderRepository.save(order)).thenReturn(order);
+
+        service.confirmTask(inspector.getId(), order.getId());
+        Instant confirmedAt = order.getInspectorConfirmedAt();
+        service.confirmTask(inspector.getId(), order.getId());
+
+        assertTrue(order.getInspectorConfirmed());
+        assertTrue(order.getAssignmentLocked());
+        assertNotNull(confirmedAt);
+        assertEquals(confirmedAt, order.getInspectorConfirmedAt());
+        assertEquals("DISPATCHED", order.getStatus());
+        assertEquals(appointment, order.getAppointmentScheduledAt());
+        assertNull(order.getHomeCheckedInAt());
+        verify(inspectionOrderRepository, times(2)).findByIdForUpdate(order.getId());
+        verify(inspectionOrderRepository).save(order);
+    }
+
+    @Test
+    void onlyTheAssignedTechnicianCanConfirmAndPendingOrdersRemainUnconfirmed() {
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+
+        assertThrows(ForbiddenException.class, () -> service.confirmTask(buyer.getId(), order.getId()));
+        assertThrows(ConflictException.class, () -> service.confirmTask(inspector.getId(), order.getId()));
+        order.setInspector(null);
+        assertThrows(ForbiddenException.class, () -> service.confirmTask(inspector.getId(), order.getId()));
+
+        assertFalse(order.getAssignmentLocked());
+        assertFalse(order.getInspectorConfirmed());
+        assertNull(order.getInspectorConfirmedAt());
+        verify(inspectionOrderRepository, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"INSPECTING", "INSPECTION_IN_PROGRESS", "PASSED", "FAILED", "COMPLETED",
+            "DELIVERING_TO_BUYER", "DISPUTED", "CANCELLED", "PAYMENT_EXPIRED"})
+    void assignmentRejectsStartedAndFinalizedOrdersEvenWithoutConfirmationFields(String state) {
+        order.setStatus(state);
+        order.setInspectorConfirmed(null);
+        order.setAssignmentLocked(null);
+        inspector.addRole(new Role("INSPECTOR", "Inspector", null));
+        when(userRepository.findById(inspector.getId())).thenReturn(Optional.of(inspector));
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+
+        assertThrows(ConflictException.class, () -> service.assignInspector(order.getId(), inspector.getId()));
+        verify(inspectionOrderRepository, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"confirmed", "locked", "confirmedAt", "checkedIn"})
+    void assignmentRejectsEveryRecordedAcceptanceSignal(String signal) {
+        order.setStatus("DISPATCHED");
+        switch (signal) {
+            case "confirmed" -> order.setInspectorConfirmed(true);
+            case "locked" -> order.setAssignmentLocked(true);
+            case "confirmedAt" -> order.setInspectorConfirmedAt(Instant.now());
+            case "checkedIn" -> order.setHomeCheckedInAt(Instant.now());
+        }
+        inspector.addRole(new Role("INSPECTOR", "Inspector", null));
+        when(userRepository.findById(inspector.getId())).thenReturn(Optional.of(inspector));
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+
+        assertThrows(ConflictException.class, () -> service.assignInspector(order.getId(), inspector.getId()));
+        assertEquals(inspector, order.getInspector());
+        verify(inspectionOrderRepository, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"confirm", "start", "result"})
+    void anotherHubTechnicianCannotTakeOverAfterAcceptance(String action) {
+        User anotherInspector = new User();
+        anotherInspector.setId(UUID.randomUUID());
+        anotherInspector.addRole(new Role("INSPECTOR", "Inspector", null));
+        order.setStatus("DISPATCHED");
+        order.setInspectorConfirmed(true);
+        order.setInspectorConfirmedAt(Instant.now());
+        order.setAssignmentLocked(true);
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+
+        if ("confirm".equals(action)) {
+            assertThrows(ForbiddenException.class,
+                    () -> service.confirmTask(anotherInspector.getId(), order.getId()));
+        } else {
+            when(userRepository.findById(anotherInspector.getId())).thenReturn(Optional.of(anotherInspector));
+            if ("start".equals(action)) {
+                assertThrows(ConflictException.class,
+                        () -> service.startInspection(anotherInspector.getId(), order.getId(), null));
+            } else {
+                assertThrows(ConflictException.class,
+                        () -> service.submitResult(order.getId(), anotherInspector.getId(),
+                                resultWithPhotos(List.of(proofPhoto()))));
+            }
+        }
+        assertEquals(inspector, order.getInspector());
+        assertEquals("DISPATCHED", order.getStatus());
+        verify(inspectionOrderRepository, never()).save(any());
+    }
+
+    @Test
+    void assignedHubTechnicianCanStartAfterConfirmation() {
+        order.setStatus("DISPATCHED");
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+        when(inspectionOrderRepository.save(order)).thenReturn(order);
+
+        service.confirmTask(inspector.getId(), order.getId());
+        Instant confirmedAt = order.getInspectorConfirmedAt();
+        service.startInspection(inspector.getId(), order.getId(), null);
+
+        assertEquals("INSPECTING", order.getStatus());
+        assertTrue(order.getInspectorConfirmed());
+        assertTrue(order.getAssignmentLocked());
+        assertEquals(confirmedAt, order.getInspectorConfirmedAt());
     }
 
     @Test
@@ -362,7 +485,13 @@ class InspectionServiceImplWorkflowTest {
     @DisplayName("WP-2: Pre-listing inspection FAILED -> Bài đăng chuyển REJECTED và thiết lập hạn khiếu nại 24h")
     void testPreListingInspectionFailedRejectsPostAndSetsAppealWindow() {
         order.setInspectionScope(InspectionScope.PRE_LISTING);
+        order.setSellerPaidAt(Instant.now());
+        order.setBuyerPaidAt(Instant.now());
         order.setStatus("INSPECTING");
+        com.secondlife.secondlife.entity.Shipment inbound = new com.secondlife.secondlife.entity.Shipment();
+        inbound.setLeg("SELLER_TO_CENTER");
+        inbound.setStatus("DELIVERED");
+        when(shipments.findByInspectionOrderIdOrderByCreatedAtAsc(order.getId())).thenReturn(List.of(inbound));
 
         when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
         when(postRepository.findByIdForUpdate(post.getId())).thenReturn(Optional.of(post));
@@ -426,6 +555,9 @@ class InspectionServiceImplWorkflowTest {
         assertEquals(checkedInAt, order.getHomeCheckedInAt());
         assertEquals("INSPECTING", order.getStatus());
         assertNull(order.getHomeCheckInCode());
+        assertTrue(order.getInspectorConfirmed());
+        assertTrue(order.getAssignmentLocked());
+        assertNotNull(order.getInspectorConfirmedAt());
         verify(inspectionOrderRepository).save(order);
     }
 
@@ -521,6 +653,54 @@ class InspectionServiceImplWorkflowTest {
         assertTrue(order.isCorporateShipping());
         assertEquals(0, buyerDue.compareTo(order.getBuyerFeeShare()));
         assertEquals(0, sellerDue.compareTo(order.getSellerFeeShare()));
+    }
+
+    @Test
+    void invalidCounterOffersLeaveTheLatestProposalOpenForAcceptance() {
+        order.setBuyerFeePercent(30);
+        order.setFeePayer(InspectionFeePayer.CUSTOM);
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+        when(inspectionOrderRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var invalidStep = new InspectionSellerRespondRequest("COUNTER", null, null, false, null,
+                new BigDecimal("62.5"));
+        assertThrows(BadRequestException.class, () -> service.respondInspection(seller.getId(), order.getId(), invalidStep));
+
+        service.respondInspection(seller.getId(), order.getId(),
+                new InspectionSellerRespondRequest("COUNTER", null, null, false, null, BigDecimal.valueOf(20)));
+        Instant buyerDeadline = order.getApprovalDeadline();
+        for (int ratio : List.of(20, 30, 75)) {
+            var invalid = new InspectionBuyerRespondRequest("COUNTER", null, null, null, BigDecimal.valueOf(ratio));
+            var error = assertThrows(BadRequestException.class,
+                    () -> service.respondInspectionByBuyer(buyer.getId(), order.getId(), invalid));
+            assertTrue(error.getMessage().contains("nằm giữa"));
+        }
+        verify(inspectionOrderRepository, times(1)).save(order);
+        assertEquals(InspectionOrderStatus.WAITING_BUYER_APPROVAL.name(), order.getStatus());
+        assertEquals(buyerDeadline, order.getApprovalDeadline());
+        assertEquals(20, order.getBuyerFeePercent());
+        assertEquals(30, order.getPreviousBuyerFeePercent());
+
+        service.respondInspectionByBuyer(buyer.getId(), order.getId(),
+                new InspectionBuyerRespondRequest("COUNTER", null, null, null, BigDecimal.valueOf(25)));
+        Instant sellerDeadline = order.getApprovalDeadline();
+
+        var exhausted = new InspectionSellerRespondRequest("COUNTER", null, null, false, null, BigDecimal.valueOf(30));
+        var error = assertThrows(BadRequestException.class,
+                () -> service.respondInspection(seller.getId(), order.getId(), exhausted));
+        assertTrue(error.getMessage().contains("Không còn tỷ lệ trung gian"));
+        verify(inspectionOrderRepository, times(2)).save(order);
+        assertEquals(InspectionOrderStatus.WAITING_SELLER_APPROVAL.name(), order.getStatus());
+        assertEquals(sellerDeadline, order.getApprovalDeadline());
+        assertEquals(25, order.getBuyerFeePercent());
+        assertEquals(20, order.getPreviousBuyerFeePercent());
+        assertEquals(0, BigDecimal.valueOf(65000).compareTo(order.getBuyerFeeShare()));
+        assertEquals(0, BigDecimal.valueOf(195000).compareTo(order.getSellerFeeShare()));
+
+        service.respondInspection(seller.getId(), order.getId(),
+                new InspectionSellerRespondRequest("ACCEPT", null, null, true, null));
+        assertEquals(InspectionOrderStatus.WAITING_FEE_PAYMENT.name(), order.getStatus());
+        assertEquals(25, order.getBuyerFeePercent());
     }
 
     private void assertFeePaymentDeadline(Instant startedAt) {

@@ -1,13 +1,17 @@
 package com.secondlife.secondlife.service.impl;
 
+import com.secondlife.secondlife.dto.request.ReportRequests.ResolutionAction;
+import com.secondlife.secondlife.dto.request.ReportRequests.Status;
 import com.secondlife.secondlife.dto.response.CommissionRuleResponse;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.dto.response.OrderBankPaymentResponse;
 import com.secondlife.secondlife.dto.response.OrderFeedItemResponse;
 import com.secondlife.secondlife.dto.response.OrderFeedResponse;
 import com.secondlife.secondlife.dto.response.OrderResponseDTO;
+import com.secondlife.secondlife.dto.response.OrderReturnResponse;
 import com.secondlife.secondlife.dto.response.SellerCommissionPreviewResponse;
 import com.secondlife.secondlife.entity.Order;
+import com.secondlife.secondlife.enums.EscrowStatus;
 import com.secondlife.secondlife.enums.InspectionScope;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.mapper.InspectionOrderMapper;
@@ -16,6 +20,7 @@ import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.OrderRepository;
 import com.secondlife.secondlife.repository.OrderRepository.FeedCounts;
 import com.secondlife.secondlife.repository.OrderRepository.FeedRow;
+import com.secondlife.secondlife.repository.UserReportRepository;
 import com.secondlife.secondlife.service.CommissionCalculator;
 import com.secondlife.secondlife.service.CommissionService;
 import com.secondlife.secondlife.service.OrderBankPaymentService;
@@ -41,13 +46,14 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class OrderFeedServiceImpl implements OrderFeedService {
     private static final Set<String> FILTERS = Set.of("all", "awaiting_pickup", "inspecting", "shipping",
-            "delivered", "completed", "cancelled", "disputed", "with_inspection");
+            "delivered", "completed", "cancelled", "disputed", "with_inspection", "pre_listing");
     private static final Set<String> PERSPECTIVES = Set.of("all", "buyer", "seller");
     private static final Set<String> INSPECTION_PREVIEW_STATUSES = Set.of(
             "PENDING", "WAITING_SELLER_APPROVAL", "WAITING_BUYER_APPROVAL", "WAITING_FEE_PAYMENT",
             "CONFIRMED_PENDING_DISPATCH", "DISPATCHED", "SCHEDULED", "SHIPPING_TO_CENTER", "INSPECTING", "PASSED");
 
     private final OrderRepository orderRepository;
+    private final UserReportRepository userReports;
     private final InspectionOrderRepository inspectionOrderRepository;
     private final OrderBankPaymentService bankPayments;
     private final OrderMapper orderMapper;
@@ -73,6 +79,7 @@ public class OrderFeedServiceImpl implements OrderFeedService {
         List<FeedRow> rows = orderRepository.findFeedRows(
                 actor, perspective, search, filter, size, (long) currentPage * size, detail);
         Map<UUID, OrderResponseDTO> orders = loadOrders(rows);
+        Map<UUID, OrderReturnResponse> approvedReturns = loadApprovedReturns(orders);
         Map<UUID, InspectionOrderResponse> inspections = loadInspections(rows);
         CommissionRuleResponse previewRule = inspections.values().stream()
                 .anyMatch(inspection -> canPreviewCommission(actor, inspection))
@@ -87,7 +94,7 @@ public class OrderFeedServiceImpl implements OrderFeedService {
             OrderResponseDTO order = orders.get(row.getId());
             SellerCommissionPreviewResponse preview = order == null && previewRule != null
                     && canPreviewCommission(actor, inspection) ? previewCommission(inspection, previewRule) : null;
-            OrderFeedItemResponse item = orderMapper.toFeedItem(row, order, inspection, preview);
+            OrderFeedItemResponse item = orderMapper.toFeedItem(row, order, inspection, preview, approvedReturns.get(row.getId()));
             if (row.isDetail()) {
                 detailItem = item;
             } else {
@@ -125,6 +132,17 @@ public class OrderFeedServiceImpl implements OrderFeedService {
                 orderMapper.toResponse(order, payments.get(order.getId()), order.getFinalPrice().add(order.getShippingFee()))));
     }
 
+    private Map<UUID, OrderReturnResponse> loadApprovedReturns(Map<UUID, OrderResponseDTO> orders) {
+        List<UUID> orderIds = orders.values().stream()
+                .filter(order -> order.escrowStatus() == EscrowStatus.FROZEN || order.escrowStatus() == EscrowStatus.REFUNDED)
+                .map(OrderResponseDTO::id)
+                .toList();
+        if (orderIds.isEmpty()) return Map.of();
+
+        return userReports.findApprovedReturnsForOrders(orderIds, Status.CONFIRMED, ResolutionAction.RETURN_AND_REFUND)
+                .stream().collect(Collectors.toMap(OrderReturnResponse::orderId, Function.identity(), (first, next) -> first));
+    }
+
     private Map<UUID, InspectionOrderResponse> loadInspections(List<FeedRow> rows) {
         List<UUID> inspectionIds = rows.stream()
                 .map(FeedRow::getInspectionId)
@@ -150,6 +168,7 @@ public class OrderFeedServiceImpl implements OrderFeedService {
         counts.put("cancelled", result.getCancelled());
         counts.put("disputed", result.getDisputed());
         counts.put("with_inspection", result.getWithInspection());
+        counts.put("pre_listing", result.getPreListing());
         return counts;
     }
 }

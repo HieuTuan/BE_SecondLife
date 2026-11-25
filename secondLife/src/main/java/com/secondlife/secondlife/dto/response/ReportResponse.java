@@ -15,7 +15,8 @@ public record ReportResponse(UUID id, UUID requestId, UUID reporterId, UUID sell
         ReasonCode reasonCode, String description, List<String> evidenceUrls, Status status, UUID reviewerId,
         ResponsibleParty responsibleParty, String decisionReason, Instant createdAt, Instant updatedAt, Instant resolvedAt,
         UUID relatedPostId, TargetType targetType, ResolutionAction resolutionAction, UUID returnShipmentId,
-        Instant returnApprovedAt, Instant refundedAt, UUID refundedBy, BigDecimal refundAmount) {
+        Instant returnApprovedAt, Instant refundedAt, UUID refundedBy, BigDecimal refundAmount,
+        Instant sellerResponseDeadlineAt, Instant sellerRespondedAt) {
 
     public ReportResponse(UUID id, UUID requestId, UUID reporterId, UUID sellerId, UUID postId, UUID orderId,
             ReasonCode reasonCode, String description, List<String> evidenceUrls, Status status, UUID reviewerId,
@@ -23,6 +24,6 @@ public record ReportResponse(UUID id, UUID requestId, UUID reporterId, UUID sell
             Instant resolvedAt, UUID relatedPostId, TargetType targetType) {
         this(id, requestId, reporterId, sellerId, postId, orderId, reasonCode, description, evidenceUrls, status,
                 reviewerId, responsibleParty, decisionReason, createdAt, updatedAt, resolvedAt, relatedPostId,
-                targetType, ResolutionAction.NONE, null, null, null, null, null);
+                targetType, ResolutionAction.NONE, null, null, null, null, null, null, null);
     }
 }

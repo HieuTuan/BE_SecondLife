@@ -24,6 +24,9 @@ import java.util.Set;
 @Service
 public class MediaServiceImpl implements MediaService {
 
+    private static final String INSPECTION_PROOF_FOLDER = "secondlife/inspections/proofs";
+    private static final long INSPECTION_PROOF_SIZE_LIMIT_BYTES = 5_000_000L;
+
     private static final Set<String> ALLOWED_VIDEO_CONTENT_TYPES = Set.of(
             "video/mp4",
             "video/quicktime",
@@ -53,13 +56,29 @@ public class MediaServiceImpl implements MediaService {
 
     @Override
     public MediaUploadResponse uploadImage(MultipartFile file, String folder) {
-        var prepared = imageValidator.prepareMediaImage(file, "file", maxFileSizeBytes);
-        return storeImage(file, prepared, folder);
+        String targetFolder = resolveFolder(folder);
+        var prepared = prepareImage(file, "file", targetFolder);
+        return storeImage(file, prepared, targetFolder);
     }
 
-    private MediaUploadResponse storeImage(MultipartFile original, ImageUploadValidator.PreparedImage prepared, String folder) {
-        String targetFolder = (folder != null && !folder.isBlank()) ? folder.trim() : defaultFolder;
+    private String resolveFolder(String folder) {
+        return (folder != null && !folder.isBlank()) ? folder.trim() : defaultFolder;
+    }
 
+    private ImageUploadValidator.PreparedImage prepareImage(MultipartFile file, String field, String targetFolder) {
+        boolean inspectionProof = INSPECTION_PROOF_FOLDER.equals(targetFolder.replaceFirst("/+$", ""));
+        if (inspectionProof && file != null && file.getSize() >= INSPECTION_PROOF_SIZE_LIMIT_BYTES) {
+            throw new ImageValidationException(HttpStatus.PAYLOAD_TOO_LARGE, List.of(new ErrorResponse.FieldErrorItem(
+                    field, "Ảnh bằng chứng kiểm định phải có dung lượng dưới 5 MB.")));
+        }
+
+        long maxBytes = inspectionProof
+                ? Math.min(maxFileSizeBytes, INSPECTION_PROOF_SIZE_LIMIT_BYTES - 1)
+                : maxFileSizeBytes;
+        return imageValidator.prepareMediaImage(file, field, maxBytes);
+    }
+
+    private MediaUploadResponse storeImage(MultipartFile original, ImageUploadValidator.PreparedImage prepared, String targetFolder) {
         try {
             log.info("Uploading prepared image of size {} bytes", prepared.file().getSize());
 
@@ -91,11 +110,12 @@ public class MediaServiceImpl implements MediaService {
             throw new BadRequestException("Danh sách file không được để trống");
         }
 
+        String targetFolder = resolveFolder(folder);
         List<MediaUploadResponse> responses = new ArrayList<>();
         List<ImageUploadValidator.PreparedImage> prepared = new ArrayList<>();
         long preparedBytes = 0;
         for (int index = 0; index < files.size(); index++) {
-            var image = imageValidator.prepareMediaImage(files.get(index), "files[" + index + "]", maxFileSizeBytes);
+            var image = prepareImage(files.get(index), "files[" + index + "]", targetFolder);
             preparedBytes += image.file().getSize();
             if (preparedBytes > maxImageBatchBytes) {
                 throw new ImageValidationException(HttpStatus.PAYLOAD_TOO_LARGE, List.of(new ErrorResponse.FieldErrorItem(
@@ -105,7 +125,7 @@ public class MediaServiceImpl implements MediaService {
         }
         try {
             for (int index = 0; index < files.size(); index++) {
-                responses.add(storeImage(files.get(index), prepared.get(index), folder));
+                responses.add(storeImage(files.get(index), prepared.get(index), targetFolder));
             }
         } catch (RuntimeException ex) {
             for (var response : responses) {

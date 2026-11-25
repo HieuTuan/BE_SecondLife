@@ -177,6 +177,38 @@ class ReturnShippingFeeMigrationTest {
         });
     }
 
+    @Test
+    void installedV95CanBeUpgradedWhenHibernateLeftADuplicateOrderTypeConstraint() throws Exception {
+        inDatabase((jdbcUrl, jdbc) -> {
+            UUID seller = user(jdbc), buyer = user(jdbc), reviewer = user(jdbc);
+            var returned = returnedOrder(jdbc, seller, buyer, reviewer);
+            var config = Flyway.configure().dataSource(jdbcUrl, database.getUsername(), database.getPassword());
+            config.target("95").load().migrate();
+            jdbc.execute("""
+                    ALTER TABLE system_wallet_transactions ADD CONSTRAINT uk7nwe35xaqcxui3ajku36kf42t
+                    UNIQUE (order_id, type)
+                    """);
+            String record = """
+                    INSERT INTO system_wallet_transactions(order_id,type,held_delta,shipping_delta,revenue_delta,
+                        held_balance_after,shipping_balance_after,revenue_balance_after,created_at)
+                    VALUES (?,?,0,10000,0,0,10000,0,now())
+                    """;
+            jdbc.update(record, returned.orderId(), "RETURN_SHIPPING_FEE");
+            assertThrows(DataIntegrityViolationException.class,
+                    () -> jdbc.update(record, returned.orderId(), "RETURN_SHIPPING_FEE"));
+
+            assertEquals(1, config.target("96").load().migrate().migrationsExecuted);
+
+            jdbc.update(record, returned.orderId(), "RETURN_SHIPPING_FEE");
+            assertEquals(2, jdbc.queryForObject("""
+                    SELECT COUNT(*) FROM system_wallet_transactions WHERE order_id=? AND type='RETURN_SHIPPING_FEE'
+                    """, Integer.class, returned.orderId()));
+            jdbc.update(record, returned.orderId(), "REFUND");
+            assertThrows(DataIntegrityViolationException.class,
+                    () -> jdbc.update(record, returned.orderId(), "REFUND"));
+        });
+    }
+
     private interface DatabaseTest {
         void run(String jdbcUrl, JdbcTemplate jdbc) throws Exception;
     }

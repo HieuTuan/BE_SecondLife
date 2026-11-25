@@ -11,6 +11,7 @@ import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.SellerVerificationRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
+import com.secondlife.secondlife.integration.ai.AiChatGateway;
 import com.secondlife.secondlife.service.AiChatService;
 import com.secondlife.secondlife.service.CloudinaryService;
 
@@ -70,11 +71,15 @@ class ListingImageUploadIntegrationTest {
     @Autowired private JdbcTemplate jdbc;
     @MockitoBean private CloudinaryService cloud;
     @MockitoBean private AiChatService ai;
+    @MockitoBean(name = "googleChatGateway") private AiChatGateway photoVision;
     private User seller;
     private UUID categoryId;
 
     @BeforeEach
     void setup() throws Exception {
+        when(photoVision.complete(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn("""
+                {"images":[{"number":1,"status":"RELATED"},{"number":2,"status":"RELATED"},{"number":3,"status":"RELATED"}]}
+                """);
         seller = new User("image-test-" + UUID.randomUUID() + "@example.test", "test-password-hash", AccountStatus.ACTIVE);
         seller.addRole(roles.findByCodeWithPermissions("SELLER").orElseThrow());
         seller = users.saveAndFlush(seller);
@@ -122,6 +127,36 @@ class ListingImageUploadIntegrationTest {
                         .param("categoryId", categoryId.toString()).param("mode", "manual")
                         .header("Authorization", bearer()))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.errors[0].field").value("images[1]"));
+        assertNoSideEffects();
+    }
+
+    @Test
+    void unrelatedProductPhotoReturnsAnIndexedErrorAtStepOne() throws Exception {
+        when(photoVision.complete(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn("""
+                {"images":[{"number":1,"status":"RELATED"},{"number":2,"status":"DIFFERENT"},{"number":3,"status":"RELATED"}]}
+                """);
+        mvc.perform(multipart("/api/v1/posts/init").file(file("valid-front.jpg", "image/jpeg"))
+                        .file(file("valid-back.png", "image/png")).file(file("valid-label.webp", "image/webp"))
+                        .param("categoryId", categoryId.toString()).param("mode", "manual")
+                        .header("Authorization", bearer()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("images[1]"))
+                .andExpect(jsonPath("$.errors[0].message").value("Ảnh này chụp sản phẩm khác. Hãy thay bằng ảnh của cùng sản phẩm đang đăng."));
+        assertNoSideEffects();
+    }
+
+    @Test
+    void unavailablePhotoReviewExplainsTheServiceFailureWithoutBlamingAnImage() throws Exception {
+        when(photoVision.complete(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn("{\"images\":[]}");
+        String message = "Dịch vụ kiểm duyệt trả kết quả thiếu hoặc sai định dạng. Bộ ảnh chưa được xác minh.";
+        mvc.perform(multipart("/api/v1/posts/init").file(file("valid-front.jpg", "image/jpeg"))
+                        .file(file("valid-back.png", "image/png")).file(file("valid-label.webp", "image/webp"))
+                        .param("categoryId", categoryId.toString()).param("mode", "manual")
+                        .header("Authorization", bearer()))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.message").value(message))
+                .andExpect(jsonPath("$.errors[0].field").value("images"))
+                .andExpect(jsonPath("$.errors[0].message").value(message));
         assertNoSideEffects();
     }
 

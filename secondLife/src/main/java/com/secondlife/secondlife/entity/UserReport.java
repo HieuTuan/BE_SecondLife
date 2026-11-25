@@ -99,4 +99,13 @@ public class UserReport {
 
     @Column(name = "refund_amount", precision = 18, scale = 2)
     private BigDecimal refundAmount;
+
+    @Column(name = "seller_response_deadline_at")
+    private Instant sellerResponseDeadlineAt;
+
+    @Column(name = "seller_response_requested_by")
+    private UUID sellerResponseRequestedBy;
+
+    @Column(name = "seller_responded_at")
+    private Instant sellerRespondedAt;
 }

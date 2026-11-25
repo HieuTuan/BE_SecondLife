@@ -68,7 +68,17 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
 
     @Override
     @Transactional
+    public InspectionOrderResponse payInspectionFeeResponse(UUID userId, UUID inspectionOrderId, UUID preListingQuoteId) {
+        return inspectionOrderMapper.toResponse(payFee(userId, inspectionOrderId, preListingQuoteId));
+    }
+
+    @Override
+    @Transactional
     public InspectionOrder payInspectionFee(UUID userId, UUID inspectionOrderId) {
+        return payFee(userId, inspectionOrderId, null);
+    }
+
+    private InspectionOrder payFee(UUID userId, UUID inspectionOrderId, UUID preListingQuoteId) {
         InspectionOrder order = inspectionOrderRepository.findByIdForUpdate(inspectionOrderId)
                 .orElseThrow(() -> new NotFoundException("Inspection order not found"));
 
@@ -85,6 +95,9 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
 
         if (!isBuyer && !isSeller) {
             throw new ForbiddenException("Bạn không phải là người mua hoặc người bán của đơn kiểm định này");
+        }
+        if (order.getPreListingQuoteId() != null && !order.getPreListingQuoteId().equals(preListingQuoteId)) {
+            throw new ConflictException("Cần xác nhận mã báo giá kiểm định trước khi thanh toán");
         }
 
         if (isBuyer) {
@@ -154,7 +167,8 @@ public class InspectionEscrowServiceImpl implements InspectionEscrowService {
     }
 
     private void expireOrder(InspectionOrder order) {
-        if (!"WAITING_FEE_PAYMENT".equals(order.getStatus())) return;
+        if (!"WAITING_FEE_PAYMENT".equals(order.getStatus()) || order.getPaymentDeadline() == null
+                || !order.getPaymentDeadline().isBefore(Instant.now())) return;
 
         log.info("Refunding and expiring unpaid inspection order: {}", order.getId());
 

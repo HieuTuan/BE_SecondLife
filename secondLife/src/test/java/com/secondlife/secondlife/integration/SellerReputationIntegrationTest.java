@@ -491,7 +491,13 @@ class SellerReputationIntegrationTest {
     }
     private UUID report(User buyer,UUID postId,UUID orderId,String code) throws Exception {
         var body=new HashMap<String,Object>(); body.put("requestId",UUID.randomUUID()); body.put("reasonCode",code);
-        body.put("description","Evidence of the reported issue"); if (postId!=null) body.put("postId",postId); else body.put("orderId",orderId);
+        body.put("description", "Evidence of the reported issue");
+        if (postId != null) {
+            body.put("postId", postId);
+        } else {
+            body.put("orderId", orderId);
+            body.put("evidenceUrls", List.of(uploadEvidence(buyer)));
+        }
         var result=submit(buyer,body).andExpect(status().isCreated()).andReturn();
         return UUID.fromString(mapper.readTree(result.getResponse().getContentAsString()).path("data").path("id").asText());
     }

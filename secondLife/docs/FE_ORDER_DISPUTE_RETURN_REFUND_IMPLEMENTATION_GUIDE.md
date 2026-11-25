@@ -157,13 +157,13 @@ Không khóa mọi khiếu nại chỉ vì escrow FROZEN: BE cho mở report h�
 | --- | --- |
 | Lý do | `reasonCode`; ưu tiên MISLEADING_DESCRIPTION/COUNTERFEIT/OTHER theo ca thực tế |
 | Nội dung | `description`, bắt buộc có nội dung, tối đa 2000 ký tự |
-| Bằng chứng | Danh sách evidenceUrl đã upload/complete thành công; có thể trống theo contract BE |
+| Bằng chứng | Từ 1 đến 5 ảnh hoặc video, gửi `evidenceUrl` đã tải lên thành công |
 | requestId | UUID sinh một lần cho một lần gửi nghiệp vụ, giữ nguyên khi retry |
 | orderId | Đơn đang khiếu nại; không gửi đồng thời postId/relatedPostId |
 
 Enum ReasonCode hiện có: `MISLEADING_DESCRIPTION`, `COUNTERFEIT`, `FRAUD`, `ITEM_NOT_RECEIVED`, `OTHER`, `LATE_HANDOVER`, `SELLER_CANCELLATION`, `RETURN_NOT_AS_DESCRIBED`, `DUPLICATE_LISTING`. Không đưa toàn bộ enum vào dropdown chỉ vì tồn tại: DUPLICATE_LISTING dành cho listing, không hợp lệ với order; các lý do chuyên biệt có kiểm tra nghiệp vụ khi STAFF chốt. ITEM_NOT_RECEIVED cũng không bỏ qua điều kiện carrier đã ghi nhận giao thành công của luồng này.
 
-Giới hạn số evidence ban đầu lấy từ `app.reputation.max-evidence-images` (hiện `.env` là 6); không coi giới hạn 10 của phản hồi là giới hạn tạo report. FE nên dùng cấu hình chung được thống nhất với môi trường BE vì chưa có endpoint trả các hạn mức này.
+FE khóa nút gửi khi chưa có tệp bằng chứng hoặc còn tệp đang tải lên. BE áp dụng trần 5 tệp và có thể giảm trần theo `app.reputation.max-evidence-images`.
 
 ### 4.3. Gửi và xem report
 
@@ -484,13 +484,12 @@ Cùng endpoint resolve:
 ```json
 {
   "decision": "DISMISSED",
-  "responsibleParty": "NONE",
   "reason": "Bằng chứng hiện có chưa xác nhận nội dung khiếu nại.",
   "resolutionAction": "NONE"
 }
 ```
 
-HTTP 200 trả DISMISSED. Dừng luồng hoàn hàng của report này. Không hiển thị đã giải ngân: BE chỉ có thể gỡ freeze khi không còn hold khác và chưa tự trả tiền seller ngay trong thao tác bác.
+HTTP 200 trả `DISMISSED`. Nếu người bán quá hạn phản hồi, BE trả `responsibleParty = SELLER` và ghi nhận lỗi quá hạn. Các hồ sơ bác theo quy trình thông thường trả `NONE`. Người mua giữ hàng. Escrow trở về `HELD` khi đơn hết lý do giữ tiền và tiếp tục quy trình giải ngân.
 
 ## 8. STAFF: tạo và vận hành chuyến hoàn
 

@@ -372,9 +372,13 @@ class InspectionOrderListIntegrationTest {
     }
 
     @Test
-    void corporateFailedInspectionRefundsBuyerAndReconcilesSellerDebtAfterReturn() throws Exception {
-        UUID buyerId = configureInspectionFees(new BigDecimal("100000"));
+    void corporateFailedInspectionKeepsAgreedSplitAndRefundsOnlyReturnSurplus() throws Exception {
+        UUID buyerId = configureInspectionFees(new BigDecimal("200000"));
         UUID sellerId = inspectionParty(false);
+        jdbc.update("""
+                UPDATE inspection_orders SET fee_payer = 'CUSTOM', buyer_fee_percent = 35,
+                    buyer_fee_share = 56000, seller_fee_share = 104000 WHERE id = ?
+                """, buyerRequestId);
         escrow.payInspectionFee(buyerId, buyerRequestId);
         escrow.payInspectionFee(sellerId, buyerRequestId);
 
@@ -384,8 +388,8 @@ class InspectionOrderListIntegrationTest {
             feeSettlement.settle(inspection, InspectionSettlementOutcome.FAILED_INSPECTION, "Rollback test");
             status.setRollbackOnly();
         });
-        assertEquals(0, new BigDecimal("10000").compareTo(walletBalance(buyerId)));
-        assertEquals(0, new BigDecimal("20000").compareTo(walletBalance(sellerId)));
+        assertEquals(0, new BigDecimal("134000").compareTo(walletBalance(buyerId)));
+        assertEquals(0, new BigDecimal("96000").compareTo(walletBalance(sellerId)));
         assertEquals(0, jdbc.queryForObject(
                 "SELECT count(*) FROM inspection_fee_settlements WHERE inspection_order_id = ?", Integer.class, buyerRequestId));
         assertEquals(2, jdbc.queryForObject(
@@ -395,14 +399,20 @@ class InspectionOrderListIntegrationTest {
             var inspection = inspectionOrders.findByIdForUpdate(buyerRequestId).orElseThrow();
             inspection.setStatus("FAILED");
             var settlement = feeSettlement.settle(inspection, InspectionSettlementOutcome.FAILED_INSPECTION, "Test");
-            assertEquals(0, new BigDecimal("90000").compareTo(settlement.getBuyerRefundAmount()));
+            assertEquals(0, new BigDecimal("10000").compareTo(settlement.getBuyerRefundAmount()));
             assertEquals(0, new BigDecimal("30000").compareTo(settlement.getOutboundShippingAllocated()));
-            assertEquals(0, new BigDecimal("20000").compareTo(settlement.getSellerAdditionalCollected()));
-            assertEquals(0, new BigDecimal("60000").compareTo(settlement.getSellerOutstandingAmount()));
+            assertEquals(0, BigDecimal.ZERO.compareTo(settlement.getSellerAdditionalCollected()));
+            assertEquals(0, BigDecimal.ZERO.compareTo(settlement.getSellerOutstandingAmount()));
+            assertNull(settlement.getReturnShippingSettledAt());
         });
-        assertEquals(0, new BigDecimal("100000").compareTo(walletBalance(buyerId)));
-        assertEquals(0, BigDecimal.ZERO.compareTo(walletBalance(sellerId)));
+        assertEquals(0, new BigDecimal("144000").compareTo(walletBalance(buyerId)));
+        assertEquals(0, new BigDecimal("96000").compareTo(walletBalance(sellerId)));
         assertEquals(0, new BigDecimal("90000").compareTo(walletBalance(centerId)));
+        mvc.perform(get("/api/v1/admin/inspection/orders/{id}/funds", buyerRequestId)
+                        .header("Authorization", adminAuthorization()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.returnReserve.status").value("AWAITING_RETURN_SHIPMENT"))
+                .andExpect(jsonPath("$.data.returnReserve.heldAmount").value(30000));
 
         String orderCode = testCarrierOrderCode();
         inspectionShipment(null, "CENTER_TO_SELLER", orderCode, 25000);
@@ -417,17 +427,20 @@ class InspectionOrderListIntegrationTest {
             var inspection = inspectionOrders.findByIdForUpdate(buyerRequestId).orElseThrow();
             var settlement = feeSettlement.settle(inspection, InspectionSettlementOutcome.FAILED_INSPECTION, "Retry");
             assertEquals(0, new BigDecimal("25000").compareTo(settlement.getReturnReserveAllocated()));
-            assertEquals(0, new BigDecimal("55000").compareTo(settlement.getSellerOutstandingAmount()));
+            assertEquals(0, new BigDecimal("11750").compareTo(settlement.getBuyerRefundAmount()));
+            assertEquals(0, new BigDecimal("3250").compareTo(settlement.getSellerRefundAmount()));
+            assertEquals(0, BigDecimal.ZERO.compareTo(settlement.getSellerOutstandingAmount()));
         });
-        assertEquals(0, new BigDecimal("100000").compareTo(walletBalance(buyerId)));
+        assertEquals(0, new BigDecimal("145750").compareTo(walletBalance(buyerId)));
+        assertEquals(0, new BigDecimal("99250").compareTo(walletBalance(sellerId)));
         assertEquals(0, new BigDecimal("90000").compareTo(walletBalance(centerId)));
         mvc.perform(get("/api/v1/admin/system-wallet/transactions").header("Authorization", adminAuthorization())
                         .param("orderId", buyerRequestId.toString()).param("type", "INSPECTION_RETURN_SHIPPING"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElements").value(1))
                 .andExpect(jsonPath("$.data.items[0].carrierFee").value(25000))
-                .andExpect(jsonPath("$.data.items[0].shippingDelta").value(0))
-                .andExpect(jsonPath("$.data.items[0].unfundedExpense").value(25000));
+                .andExpect(jsonPath("$.data.items[0].shippingDelta").value(-30000))
+                .andExpect(jsonPath("$.data.items[0].unfundedExpense").value(0));
     }
 
     @Test

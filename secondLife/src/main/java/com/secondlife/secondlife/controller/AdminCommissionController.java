@@ -62,6 +62,8 @@ public class AdminCommissionController {
         return ApiResponse.success(commissions.deactivate(currentUser.resolveUserId(user), id, request.reason()));
     }
     @GetMapping("/commission-rules/{id}/history")
+    @Operation(summary = "Xem lịch sử thay đổi hoa hồng, mới nhất trước",
+            description = "Trả về cấu hình trước/sau, người thực hiện, lý do và thời điểm UTC cho từng bản ghi.")
     public ApiResponse<PageResponse<CommissionAuditResponse>> history(@PathVariable UUID id, @ParameterObject Pageable pageable) {
         return ApiResponse.success(PageResponse.from(commissions.history(id, PageRequest.of(pageable.getPageNumber(), pageable.getPageSize()))));
     }

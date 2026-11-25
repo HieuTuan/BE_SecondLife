@@ -5,6 +5,7 @@ import com.secondlife.secondlife.dto.response.InspectionChecklistItemResponse;
 import com.secondlife.secondlife.dto.response.InspectionChecklistResponse;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.exception.GlobalExceptionHandler;
+import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.service.InspectionOrderChecklistService;
 import com.secondlife.secondlife.service.InspectionService;
@@ -186,6 +187,38 @@ class InspectorControllerTest {
                 .andExpect(jsonPath("$.conditionGrade").value("Like New"))
                 .andExpect(jsonPath("$.tamperSealId").value("SL-SEAL-8829102"))
                 .andExpect(jsonPath("$.barcode").value("SL-BC-998877"));
+    }
+
+    @Test
+    void confirmTaskReturnsServerConfirmationFields() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        UUID inspectorId = UUID.randomUUID();
+        java.time.Instant confirmedAt = java.time.Instant.parse("2026-11-18T00:00:00Z");
+        when(currentUserProvider.resolveUserId(any())).thenReturn(inspectorId);
+        when(inspectionService.confirmTask(inspectorId, orderId)).thenReturn(InspectionOrderResponse.builder()
+                .id(orderId).status("DISPATCHED").inspectorConfirmed(true)
+                .inspectorConfirmedAt(confirmedAt).assignmentLocked(true).build());
+
+        mockMvc.perform(post("/api/v1/inspector/orders/" + orderId + "/confirm-task"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DISPATCHED"))
+                .andExpect(jsonPath("$.inspectorConfirmed").value(true))
+                .andExpect(jsonPath("$.inspectorConfirmedAt").value(confirmedAt.toString()))
+                .andExpect(jsonPath("$.assignmentLocked").value(true));
+    }
+
+    @Test
+    void assignmentReturnsConflictWhenTechnicianHasAccepted() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        UUID inspectorId = UUID.randomUUID();
+        UUID managerId = UUID.randomUUID();
+        when(currentUserProvider.resolveUserId(any())).thenReturn(managerId);
+        when(inspectionService.assignInspector(orderId, inspectorId, managerId))
+                .thenThrow(new ConflictException("Kỹ thuật viên đã tiếp nhận đơn kiểm định. Quyền đổi KTV đã bị khóa!"));
+
+        mockMvc.perform(post("/api/v1/inspector/orders/" + orderId + "/assign")
+                        .param("inspectorId", inspectorId.toString()))
+                .andExpect(status().isConflict());
     }
 
     @Test

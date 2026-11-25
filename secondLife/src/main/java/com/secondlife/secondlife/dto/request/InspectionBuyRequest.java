@@ -19,7 +19,6 @@ public record InspectionBuyRequest(
     UUID postId,
     @NotNull(message = "orderType is required (AT_HOME or AT_CENTER)")
     InspectionOrderType orderType,
-    @NotNull(message = "feePayer is required (BUYER_PAYS, SELLER_PAYS, SPLIT_50_50)")
     InspectionFeePayer feePayer,
     @AssertTrue(message = "Bạn cần đồng ý với điều khoản tháo máy kiểm định có thể làm mất trạng thái zin ban đầu")
     @JsonAlias({"buyerConsentZinLoss", "buyerConsentZin"})
@@ -34,8 +33,18 @@ public record InspectionBuyRequest(
     UUID inspectionCenterId,
     UUID expectedFeeProposalId,
     UUID expectedChecklistTemplateId,
-    UUID inspectionShippingQuoteId
+    UUID inspectionShippingQuoteId,
+    BigDecimal buyerFeePercent
 ) {
+    public InspectionBuyRequest(UUID postId, InspectionOrderType orderType, InspectionFeePayer feePayer,
+            boolean buyerConsentZin, ShippingAddressRequest buyerDeliveryAddress, String note,
+            BigDecimal buyerLatitude, BigDecimal buyerLongitude, UUID negotiationId, UUID inspectionCenterId,
+            UUID expectedFeeProposalId, UUID expectedChecklistTemplateId, UUID inspectionShippingQuoteId) {
+        this(postId, orderType, feePayer, buyerConsentZin, buyerDeliveryAddress, note, buyerLatitude,
+                buyerLongitude, negotiationId, inspectionCenterId, expectedFeeProposalId,
+                expectedChecklistTemplateId, inspectionShippingQuoteId, null);
+    }
+
     public InspectionBuyRequest(UUID postId, InspectionOrderType orderType, InspectionFeePayer feePayer,
                                 boolean buyerConsentZin, ShippingAddressRequest buyerDeliveryAddress,
                                 String note, BigDecimal buyerLatitude, BigDecimal buyerLongitude, UUID negotiationId) {

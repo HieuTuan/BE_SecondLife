@@ -28,7 +28,9 @@ public class ReportEvidenceServiceImpl implements ReportEvidenceService {
     }
     @Transactional
     public ReportEvidenceUploadResponse upload(UUID ownerId,MultipartFile file) {
-        if(file==null || file.isEmpty() || file.getSize()>maxBytes) throw new BadRequestException("Evidence image is empty or exceeds the upload size limit");
+        if (file == null || file.isEmpty()) throw new BadRequestException("Ảnh bằng chứng đang trống.");
+        if (file.getSize() >= 5_000_000) throw new BadRequestException("Ảnh bằng chứng phải có dung lượng dưới 5 MB.");
+        if (file.getSize() > maxBytes) throw new BadRequestException("Ảnh bằng chứng vượt giới hạn tải lên của máy chủ.");
         if(!Set.of("image/jpeg","image/png","image/webp").contains(String.valueOf(file.getContentType())))
             throw new BadRequestException("Evidence supports JPEG, PNG and WEBP images");
         try {
@@ -54,8 +56,9 @@ public class ReportEvidenceServiceImpl implements ReportEvidenceService {
     @Transactional(readOnly=true)
     public void requireReadable(UUID actorId,boolean reviewer,UUID evidenceId) {
         var upload=evidence.findUploadById(evidenceId).orElseThrow(() -> new NotFoundException("Report evidence not found"));
-        if(!actorId.equals(upload.ownerId()) && (!reviewer || upload.reportId()==null))
-            throw new ForbiddenException("You cannot read this report evidence");
+        if (actorId.equals(upload.ownerId()) || (reviewer && upload.reportId() != null)) return;
+        if (upload.reportId() != null && evidence.isInitialBuyerEvidenceForSeller(evidenceId, actorId)) return;
+        throw new ForbiddenException("You cannot read this report evidence");
     }
     @Transactional(readOnly=true)
     public ReportEvidenceMetadataResponse metadata(UUID actorId,boolean reviewer,UUID evidenceId) {

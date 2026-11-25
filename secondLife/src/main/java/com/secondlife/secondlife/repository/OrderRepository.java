@@ -16,6 +16,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -27,6 +28,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, RefreshOper
     String FEED_SCOPE = """
             with candidates as (
                 select o.id, i.id as inspection_id, o.post_id, o.buyer_id, o.seller_id, o.created_at,
+                    false as pre_listing,
                     case
                         when o.status = 'COMPLETED' or o.escrow_status = 'RELEASED' then 'completed'
                         when o.status = 'CANCELLED' or o.escrow_status = 'REFUNDED' then 'cancelled'
@@ -44,6 +46,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, RefreshOper
                 where o.buyer_id = :actor or o.seller_id = :actor
                 union all
                 select i.id, i.id, i.post_id, i.buyer_id, i.seller_id, i.created_at,
+                    i.inspection_scope = 'PRE_LISTING',
                     case
                         when i.status = 'COMPLETED' then 'completed'
                         when i.status in ('CANCELLED', 'PAYMENT_EXPIRED', 'FAILED', 'REJECTED') then 'cancelled'
@@ -75,15 +78,16 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, RefreshOper
             """;
 
     @Query(value = FEED_SCOPE + """
-            select count(*) as "allCount",
-                   count(*) filter (where stage = 'awaiting_pickup') as "awaitingPickup",
-                   count(*) filter (where stage = 'inspecting') as inspecting,
-                   count(*) filter (where stage = 'shipping') as shipping,
-                   count(*) filter (where stage = 'delivered') as delivered,
-                   count(*) filter (where stage = 'completed') as completed,
-                   count(*) filter (where stage = 'cancelled') as cancelled,
-                   count(*) filter (where stage = 'disputed') as disputed,
-                   count(*) filter (where inspection_id is not null) as "withInspection"
+            select count(*) filter (where not pre_listing) as "allCount",
+                   count(*) filter (where not pre_listing and stage = 'awaiting_pickup') as "awaitingPickup",
+                   count(*) filter (where not pre_listing and stage = 'inspecting') as inspecting,
+                   count(*) filter (where not pre_listing and stage = 'shipping') as shipping,
+                   count(*) filter (where not pre_listing and stage = 'delivered') as delivered,
+                   count(*) filter (where not pre_listing and stage = 'completed') as completed,
+                   count(*) filter (where not pre_listing and stage = 'cancelled') as cancelled,
+                   count(*) filter (where not pre_listing and stage = 'disputed') as disputed,
+                   count(*) filter (where not pre_listing and inspection_id is not null) as "withInspection",
+                   count(*) filter (where pre_listing) as "preListing"
             from matched
             """, nativeQuery = true)
     FeedCounts countFeedRows(@Param("actor") UUID actor, @Param("perspective") String perspective,
@@ -92,8 +96,9 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, RefreshOper
     @Query(value = FEED_SCOPE + """
             , page_rows as (
                 select * from matched
-                where :filter = 'all' or stage = :filter
-                   or (:filter = 'with_inspection' and inspection_id is not null)
+                where (pre_listing and :filter = 'pre_listing')
+                   or (not pre_listing and (:filter = 'all' or stage = :filter
+                       or (:filter = 'with_inspection' and inspection_id is not null)))
                 order by created_at desc, id desc limit :size offset :offset
             ), detail_row as (
                 select * from scoped where id = cast(:detail as uuid) or inspection_id = cast(:detail as uuid)
@@ -132,6 +137,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, RefreshOper
         long getCancelled();
         long getDisputed();
         long getWithInspection();
+        long getPreListing();
     }
 
     interface FeedRow {
@@ -217,4 +223,53 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, RefreshOper
         Instant getDeliveredAt();
     }
 
+    @EntityGraph(attributePaths = {"post", "buyer", "seller"})
+    @Query("""
+        select o from Order o
+        where (:status is null or o.status = :status)
+          and (:escrowStatus is null or o.escrowStatus = :escrowStatus)
+          and (:orderId is null or o.id = :orderId)
+          and (:search is null or :search = ''
+               or lower(o.post.title) like lower(concat('%', :search, '%'))
+               or lower(o.buyer.email) like lower(concat('%', :search, '%'))
+               or lower(o.seller.email) like lower(concat('%', :search, '%'))
+              )
+        order by o.createdAt desc
+    """)
+    Page<Order> findAdminOrders(
+        @Param("status") OrderStatus status,
+        @Param("escrowStatus") EscrowStatus escrowStatus,
+        @Param("orderId") UUID orderId,
+        @Param("search") String search,
+        Pageable pageable
+    );
+
+    @Query("""
+        select
+            count(o) as totalOrders,
+            count(case when o.status = com.secondlife.secondlife.enums.OrderStatus.CONFIRMED then 1 end) as confirmedOrders,
+            count(case when o.status = com.secondlife.secondlife.enums.OrderStatus.PROCESSING then 1 end) as processingOrders,
+            count(case when o.status = com.secondlife.secondlife.enums.OrderStatus.SHIPPED then 1 end) as shippingOrders,
+            count(case when o.status = com.secondlife.secondlife.enums.OrderStatus.DELIVERED then 1 end) as deliveredOrders,
+            count(case when o.status = com.secondlife.secondlife.enums.OrderStatus.COMPLETED then 1 end) as completedOrders,
+            count(case when o.status = com.secondlife.secondlife.enums.OrderStatus.CANCELLED then 1 end) as cancelledOrders,
+            count(case when o.escrowStatus = com.secondlife.secondlife.enums.EscrowStatus.FROZEN then 1 end) as disputedOrders,
+            coalesce(sum(case when o.status != com.secondlife.secondlife.enums.OrderStatus.CANCELLED then o.finalPrice else 0 end), 0) as totalGmv,
+            coalesce(sum(case when o.escrowStatus = com.secondlife.secondlife.enums.EscrowStatus.HELD then o.finalPrice else 0 end), 0) as heldEscrowAmount
+        from Order o
+    """)
+    AdminOrderStatsProjection getAdminOrderStats();
+
+    interface AdminOrderStatsProjection {
+        long getTotalOrders();
+        long getConfirmedOrders();
+        long getProcessingOrders();
+        long getShippingOrders();
+        long getDeliveredOrders();
+        long getCompletedOrders();
+        long getCancelledOrders();
+        long getDisputedOrders();
+        BigDecimal getTotalGmv();
+        BigDecimal getHeldEscrowAmount();
+    }
 }

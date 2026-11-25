@@ -140,7 +140,7 @@ class CloudinaryVideoStorageTest {
 
     @Test
     void rejectsMissingNonFiniteUnsupportedAndOversizedMetadata() throws Exception {
-        Map<String, Object> invalid = Map.of("bytes", 262144001L, "duration", 600.1, "format", "mp3",
+        Map<String, Object> invalid = Map.of("bytes", 10_000_000L, "duration", 90d, "format", "mp3",
                 "secure_url", "http://example.com/video", "asset_id", "", "version", 0);
         for (var entry : invalid.entrySet()) {
             var data = validVideo();

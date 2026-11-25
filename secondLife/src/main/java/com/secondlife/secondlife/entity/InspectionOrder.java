@@ -51,12 +51,24 @@ public class InspectionOrder {
     @JoinColumn(name = "inspector_id")
     private User inspector; // Được phân công sau bởi Manager
 
+    @Column(name = "inspector_confirmed", nullable = false)
+    private Boolean inspectorConfirmed = false;
+
+    @Column(name = "inspector_confirmed_at")
+    private Instant inspectorConfirmedAt;
+
+    @Column(name = "assignment_locked", nullable = false)
+    private Boolean assignmentLocked = false;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "inspection_center_id")
     private User inspectionCenter;
 
     @Column(name = "inspection_shipping_quote_id")
     private UUID inspectionShippingQuoteId;
+
+    @Column(name = "pre_listing_quote_id")
+    private UUID preListingQuoteId;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "checklist_template_id")
@@ -103,6 +115,12 @@ public class InspectionOrder {
     @Enumerated(EnumType.STRING)
     @Column(name = "fee_payer", length = 30)
     private InspectionFeePayer feePayer = InspectionFeePayer.BUYER_PAYS;
+
+    @Column(name = "buyer_fee_percent")
+    private Integer buyerFeePercent;
+
+    @Column(name = "previous_buyer_fee_percent")
+    private Integer previousBuyerFeePercent;
 
     @Column(name = "status", nullable = false, length = 30)
     private String status = "PENDING"; // WAITING_FEE_PAYMENT, CONFIRMED_PENDING_DISPATCH, DISPATCHED, SCHEDULED, SHIPPING_TO_CENTER, INSPECTING, PASSED, FAILED, CANCELLED, PAYMENT_EXPIRED
@@ -280,6 +298,15 @@ public class InspectionOrder {
 
     @Column(name = "updated_at")
     private Instant updatedAt;
+
+    public int resolveBuyerFeePercent() {
+        if (buyerFeePercent != null) return buyerFeePercent;
+        return (feePayer == null ? InspectionFeePayer.BUYER_PAYS : feePayer).buyerPercent();
+    }
+
+    public BigDecimal buyerShareOf(BigDecimal amount) {
+        return InspectionFeePayer.buyerShare(amount, resolveBuyerFeePercent());
+    }
 
     @PrePersist
     protected void onCreate() {

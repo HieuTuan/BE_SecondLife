@@ -118,15 +118,15 @@ class MarketplaceListingQueryIntegrationTest {
     }
 
     @Test
-    void publicEndpointsReturnLatestQualifyingInspectionAndExcludeUnsettledCancellations() throws Exception {
+    void publicEndpointsUseInspectionVerdictsAndExcludeUnsettledCancellations() throws Exception {
         UUID buyerId = UUID.randomUUID();
         jdbc.update("INSERT INTO users(id, email, password_hash) VALUES (?, ?, 'test-hash')",
                 buyerId, buyerId + "@example.test");
 
-        UUID passedPost = activeIds.get(0);
-        addInspection(passedPost, buyerId, "COMPLETED", "old-seal", "B", 1);
-        addInspection(passedPost, buyerId, "PASSED", null, "A", 2);
-        addInspection(passedPost, buyerId, "FAILED", null, "FAILED-GRADE", 3);
+        UUID failedPost = activeIds.get(0);
+        addInspection(failedPost, buyerId, "COMPLETED", "old-seal", "B", 1);
+        addInspection(failedPost, buyerId, "PASSED", null, "A", 2);
+        addInspection(failedPost, buyerId, "FAILED", "failed-seal", "FAILED-GRADE", 3);
         addInspection(activeIds.get(1), buyerId, "COMPLETED", "public-seal", "A", 1);
         UUID returned = addInspection(activeIds.get(2), buyerId, "CANCELLED", null, "B", 1);
         recordSettlement(returned, "PASSED_BUYER_DEFAULTED", true);
@@ -134,12 +134,17 @@ class MarketplaceListingQueryIntegrationTest {
         recordSettlement(pending, "PASSED_BUYER_DEFAULTED", false);
         UUID expired = addInspection(activeIds.get(4), buyerId, "CANCELLED", null, "D", 1);
         recordSettlement(expired, "CANCELLED_BEFORE_INSPECTION", false);
+        addInspection(activeIds.get(5), buyerId, "FAILED", "failed-only-seal", "Fair", 1);
+        UUID passedPost = activeIds.get(6);
+        addInspection(passedPost, buyerId, "FAILED", "old-failed-seal", "C", 1);
+        addInspection(passedPost, buyerId, "PASSED", null, "A", 2);
+        addInspection(activeIds.get(7), buyerId, "INSPECTING", "issued-seal", "A", 1);
 
         mvc.perform(get("/api/v1/posts").param("categoryId", categoryId.toString()).param("size", "8"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElements").value(8))
-                .andExpect(jsonPath("$.data.content[7].isInspected").value(true))
-                .andExpect(jsonPath("$.data.content[7].conditionGrade").value("A"))
+                .andExpect(jsonPath("$.data.content[7].isInspected").value(false))
+                .andExpect(jsonPath("$.data.content[7].conditionGrade").value(nullValue()))
                 .andExpect(jsonPath("$.data.content[7].tamperSealId").value(nullValue()))
                 .andExpect(jsonPath("$.data.content[6].isInspected").value(true))
                 .andExpect(jsonPath("$.data.content[6].tamperSealId").value("public-seal"))
@@ -148,11 +153,112 @@ class MarketplaceListingQueryIntegrationTest {
                 .andExpect(jsonPath("$.data.content[4].isInspected").value(false))
                 .andExpect(jsonPath("$.data.content[4].conditionGrade").value(nullValue()))
                 .andExpect(jsonPath("$.data.content[3].isInspected").value(false))
+                .andExpect(jsonPath("$.data.content[2].isInspected").value(false))
+                .andExpect(jsonPath("$.data.content[1].isInspected").value(true))
                 .andExpect(jsonPath("$.data.content[0].isInspected").value(false));
+        mvc.perform(get("/api/v1/posts/search").param("categoryId", categoryId.toString())
+                        .param("inspected", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(3))
+                .andExpect(jsonPath("$.data.content[0].postId").value(passedPost.toString()))
+                .andExpect(jsonPath("$.data.content[0].isInspected").value(true));
+        mvc.perform(get("/api/v1/posts/{postId}", failedPost))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.isInspected").value(false))
+                .andExpect(jsonPath("$.data.tamperSealId").value(nullValue()))
+                .andExpect(jsonPath("$.data.inspectionMethod").value(nullValue()));
         mvc.perform(get("/api/v1/posts/{postId}", passedPost))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.isInspected").value(true))
-                .andExpect(jsonPath("$.data.conditionGrade").value("A"));
+                .andExpect(jsonPath("$.data.conditionGrade").value("A"))
+                .andExpect(jsonPath("$.data.inspectionMethod").value("AT_CENTER"));
+    }
+
+    @Test
+    void passedHomeInspectionRemainsPublicAfterBuyerDoesNotContinue() throws Exception {
+        UUID buyerId = UUID.randomUUID();
+        jdbc.update("INSERT INTO users(id, email, password_hash) VALUES (?, ?, 'test-hash')",
+                buyerId, buyerId + "@example.test");
+
+        UUID returnedToSale = activeIds.getFirst();
+        UUID laterFailed = activeIds.get(1);
+        UUID cancelledBeforeInspection = activeIds.get(2);
+        UUID pendingHubReturn = activeIds.get(3);
+        UUID homePass = addInspection(returnedToSale, buyerId, "CANCELLED", null, "Good", 1);
+        UUID olderHomePass = addInspection(laterFailed, buyerId, "CANCELLED", null, "Good", 1);
+        UUID homeCancellation = addInspection(cancelledBeforeInspection, buyerId, "CANCELLED", null, null, 1);
+        UUID recentFailure = addInspection(laterFailed, buyerId, "FAILED", null, "Fair", 2);
+        jdbc.update("UPDATE inspection_orders SET order_type = 'AT_HOME' WHERE id IN (?, ?, ?, ?)",
+                homePass, olderHomePass, homeCancellation, recentFailure);
+        recordSettlement(homePass, "PASSED_BUYER_DEFAULTED", false);
+        recordSettlement(olderHomePass, "PASSED_BUYER_DEFAULTED", false);
+        recordSettlement(homeCancellation, "CANCELLED_BEFORE_INSPECTION", false);
+        recordSettlement(addInspection(pendingHubReturn, buyerId, "CANCELLED", null, "A", 1),
+                "PASSED_BUYER_DEFAULTED", false);
+
+        mvc.perform(get("/api/v1/posts").param("categoryId", categoryId.toString()).param("size", "8"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[7].postId").value(returnedToSale.toString()))
+                .andExpect(jsonPath("$.data.content[7].isInspected").value(true))
+                .andExpect(jsonPath("$.data.content[7].inspectionMethod").value("AT_HOME"))
+                .andExpect(jsonPath("$.data.content[6].isInspected").value(false))
+                .andExpect(jsonPath("$.data.content[5].isInspected").value(false))
+                .andExpect(jsonPath("$.data.content[4].isInspected").value(false));
+        mvc.perform(get("/api/v1/posts/search").param("categoryId", categoryId.toString())
+                        .param("inspected", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.content[0].postId").value(returnedToSale.toString()))
+                .andExpect(jsonPath("$.data.content[0].inspectionMethod").value("AT_HOME"));
+        mvc.perform(get("/api/v1/posts/{postId}", returnedToSale))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.isInspected").value(true))
+                .andExpect(jsonPath("$.data.inspectionMethod").value("AT_HOME"))
+                .andExpect(jsonPath("$.data.conditionGrade").value("Good"));
+    }
+
+    @Test void marketplaceSearchCombinesFiltersBeforeSortingAndPaging() throws Exception {
+        jdbc.update("INSERT INTO user_profiles (id, user_id, full_name, province) VALUES (?, ?, 'Seller', 'Hà Nội')",
+                UUID.randomUUID(), sellerId);
+        String warehouse = "Kho Dịch vụ, Đà Nẵng, Việt Nam";
+        jdbc.update("INSERT INTO shipping_pickup_addresses (user_id, address_json) VALUES (?, ?)",
+                sellerId, "{\"address\":\"" + warehouse + "\"}");
+        mvc.perform(get("/api/v1/posts/{postId}", activeIds.getFirst()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sellerAddress").value(warehouse));
+        mvc.perform(get("/api/v1/posts/search").param("categoryId", categoryId.toString()).param("location", "Hà Nội"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(0));
+        jdbc.update("UPDATE posts SET title = ?, brand = ?, description = ?, item_condition = ?, price = ? WHERE id = ?",
+                "Máy giặt cửa trước", "LG", "Động cơ inverter", "USED_GOOD", 3000000, activeIds.get(0));
+        jdbc.update("UPDATE posts SET title = ?, description = ?, item_condition = ?, price = ? WHERE id = ?",
+                "Máy giặt LG", "Động cơ inverter", "GOOD", 2500000, activeIds.get(1));
+        jdbc.update("UPDATE posts SET title = ?, brand = ?, description = ?, item_condition = ?, price = ? WHERE id = ?",
+                "Máy giặt", "Samsung", "Động cơ inverter, tương đương LG", "USED_GOOD", 2500000, activeIds.get(2));
+        jdbc.update("UPDATE posts SET title = ?, description = ?, item_condition = ?, price = ? WHERE id = ?",
+                "Máy giặt LGX", "Động cơ inverter", "USED_GOOD", 2500000, activeIds.get(3));
+        jdbc.update("UPDATE posts SET title = ?, brand = ?, description = ?, item_condition = ?, price = ? WHERE id = ?",
+                "Máy giặt", "LG", "Động cơ inverter", "LIKE_NEW", 2000000, activeIds.get(4));
+
+        var filters = get("/api/v1/posts/search").param("categoryId", categoryId.toString())
+                .param("q", " inverter ").param("brand", "lg").param("condition", "USED_GOOD")
+                .param("minPrice", "2500000").param("maxPrice", "3000000")
+                .param("location", "đà nẵng").param("sort", "priceAsc").param("size", "1");
+        mvc.perform(filters)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(2))
+                .andExpect(jsonPath("$.data.totalPages").value(2))
+                .andExpect(jsonPath("$.data.content[0].postId").value(activeIds.get(1).toString()));
+        mvc.perform(filters.param("page", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].postId").value(activeIds.get(0).toString()))
+                .andExpect(jsonPath("$.data.content[0].brand").value("LG"));
+        mvc.perform(get("/api/v1/posts/search").param("categoryId", categoryId.toString())
+                        .param("q", "_").param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(0));
+        mvc.perform(get("/api/v1/posts/search").param("minPrice", "100").param("maxPrice", "90"))
+                .andExpect(status().isBadRequest());
     }
 
     private UUID addInspection(UUID postId, UUID buyerId, String status, String seal, String grade, long sequence) {

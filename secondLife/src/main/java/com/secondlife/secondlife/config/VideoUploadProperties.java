@@ -11,10 +11,16 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "app.video-upload")
 public record VideoUploadProperties(
         @DefaultValue("") String uploadPreset,
-        @DefaultValue("262144000") @Positive long maxBytes,
-        @DefaultValue("600") @Positive long maxDurationSeconds,
+        @DefaultValue("9999999") @Positive long maxBytes,
+        @DefaultValue("90") @Positive long maxDurationSeconds,
         @DefaultValue("3600") @Positive @Max(3600) long sessionTtlSeconds,
         @DefaultValue("300") @Positive @Max(3600) long playbackTtlSeconds,
         @DefaultValue("10") @Positive int maxSessionsPerHour,
         @DefaultValue("10000") @Positive int timeoutMs,
-        @DefaultValue("6291456") @Min(5242881) int chunkSizeBytes) { }
+        @DefaultValue("6291456") @Min(5242881) int chunkSizeBytes) {
+
+    public VideoUploadProperties {
+        maxBytes = Math.min(maxBytes, 9_999_999);
+        maxDurationSeconds = Math.min(maxDurationSeconds, 90);
+    }
+}

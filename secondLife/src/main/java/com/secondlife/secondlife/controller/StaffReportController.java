@@ -45,6 +45,13 @@ public class StaffReportController {
             @RequestParam(required=false) ReportRequests.TargetType targetType,@Parameter(hidden=true) Pageable pageable) {
         return ApiResponse.success(reports.queue(status,targetType,pageable));
     }
+    @PostMapping("/{id}/request-seller-response")
+    @Operation(summary="Notify the seller to respond within 24 hours; repeated requests keep the original deadline")
+    public ApiResponse<ReportResponse> requestSellerResponse(
+            @AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID id) {
+        return ApiResponse.success(reports.requestSellerResponse(currentUser.resolveUserId(user), id));
+    }
+
     @PostMapping("/{id}/start-review")
     @Operation(summary="Assign OPEN report to the current reviewer; other staff cannot resolve it")
     public ApiResponse<ReportResponse> start(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID id) {
@@ -52,7 +59,7 @@ public class StaffReportController {
     }
     @PostMapping("/{id}/resolve")
     @PreAuthorize("((hasRole('STAFF') and hasAuthority('STAFF_FRAUD_REVIEW')) or (hasRole('ADMIN') and hasAuthority('ADMIN_RBAC_MANAGE'))) and (#request.resolutionAction().name() != 'RETURN_AND_REFUND' or (hasRole('STAFF') and hasAuthority('STAFF_DISPUTE_REVIEW')) or (hasRole('ADMIN') and hasAuthority('ADMIN_RBAC_MANAGE')))")
-    @Operation(summary="Confirm responsible party or dismiss; only confirmed SELLER fault changes reputation, repeated confirmed FRAUD restricts new sales")
+    @Operation(summary="Resolve a report. Order returns assign seller responsibility; a missed seller response deadline also assigns seller responsibility.")
     public ApiResponse<ReportResponse> resolve(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID id,
             @Valid @RequestBody ReportRequests.Resolve request) {
         return ApiResponse.success(reports.resolve(currentUser.resolveUserId(user),id,request));

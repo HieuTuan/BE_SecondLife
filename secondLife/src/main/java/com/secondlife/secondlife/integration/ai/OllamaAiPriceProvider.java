@@ -13,14 +13,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.util.MimeTypeUtils;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.JsonNode;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.net.URI;
 import java.util.List;
-import java.util.Locale;
 
 @Service
 public class OllamaAiPriceProvider implements AiPriceProvider {
@@ -63,32 +60,11 @@ public class OllamaAiPriceProvider implements AiPriceProvider {
         if (imageUrls == null || imageUrls.isEmpty()) return estimate(inputSnapshot);
         if (imageUrls.size() > maxImages) throw new AiProviderException("AI valuation supports at most " + maxImages + " product images");
         try {
-            List<Media> media = imageUrls.stream().map(this::trustedImage).toList();
+            List<Media> media = imageUrls.stream()
+                    .map(url -> CloudinaryListingMedia.trustedImage(url, cloudName, "AI valuation")).toList();
             return estimateWithModel(inputSnapshot, media, visionModel, visionModelVersion);
         } catch (AiProviderException ex) { throw ex; }
         catch (Exception ex) { throw new AiProviderException("AI valuation received an invalid product image", ex); }
-    }
-
-    private Media trustedImage(String imageUrl) {
-        if (cloudName == null || !cloudName.matches("[A-Za-z0-9_-]+"))
-            throw new AiProviderException("AI valuation image storage is not configured");
-        URI uri = URI.create(imageUrl);
-        String path = uri.getRawPath();
-        String prefix = "/" + cloudName + "/image/upload/";
-        if (!("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))
-                || !"res.cloudinary.com".equalsIgnoreCase(uri.getHost())
-                || uri.getPort() != -1 || uri.getUserInfo() != null || uri.getRawQuery() != null || uri.getRawFragment() != null
-                || path == null || !path.startsWith(prefix) || path.length() <= prefix.length()
-                || path.contains("%") || !uri.normalize().getRawPath().equals(path))
-            throw new AiProviderException("AI valuation images must use the configured Cloudinary storage");
-        if ("http".equalsIgnoreCase(uri.getScheme())) uri = URI.create("https" + imageUrl.substring(imageUrl.indexOf(':')));
-        String lowerPath = path.toLowerCase(Locale.ROOT);
-        String mime;
-        if (lowerPath.endsWith(".jpg") || lowerPath.endsWith(".jpeg")) mime = "image/jpeg";
-        else if (lowerPath.endsWith(".png")) mime = "image/png";
-        else if (lowerPath.endsWith(".webp")) mime = "image/webp";
-        else throw new AiProviderException("AI valuation supports JPEG, PNG and WEBP images");
-        return new Media(MimeTypeUtils.parseMimeType(mime), uri);
     }
 
     private PriceSuggestion estimateWithModel(String inputSnapshot, List<Media> media, ChatModel selectedModel, String selectedVersion) {

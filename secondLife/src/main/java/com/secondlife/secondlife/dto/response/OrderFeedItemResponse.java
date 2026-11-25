@@ -13,6 +13,7 @@ public record OrderFeedItemResponse(
         UUID categoryId,
         UUID itemId,
         String itemCondition,
-        @JsonInclude(JsonInclude.Include.NON_NULL) SellerCommissionPreviewResponse sellerCommissionPreview
+        @JsonInclude(JsonInclude.Include.NON_NULL) SellerCommissionPreviewResponse sellerCommissionPreview,
+        @JsonInclude(JsonInclude.Include.NON_NULL) OrderReturnResponse orderReturn
 ) {
 }

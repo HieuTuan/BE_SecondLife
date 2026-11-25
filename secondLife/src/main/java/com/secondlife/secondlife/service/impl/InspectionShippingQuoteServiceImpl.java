@@ -2,10 +2,12 @@ package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.dto.request.InspectionReturnShippingPolicyRequest;
 import com.secondlife.secondlife.dto.request.ShippingAddress;
+import com.secondlife.secondlife.dto.response.InspectionReturnShippingPolicyHistoryResponse;
 import com.secondlife.secondlife.dto.response.InspectionReturnShippingPolicyResponse;
 import com.secondlife.secondlife.dto.response.InspectionShippingQuoteResponse;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.InspectionReturnShippingPolicy;
+import com.secondlife.secondlife.entity.InspectionReturnShippingPolicyHistory;
 import com.secondlife.secondlife.entity.InspectionShippingQuote;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.exception.ConflictException;
@@ -17,6 +19,7 @@ import com.secondlife.secondlife.mapper.InspectionShippingQuoteMapper;
 import com.secondlife.secondlife.mapper.ShippingPayloads;
 import com.secondlife.secondlife.mapper.ShippingVehicleSelectionMapper;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
+import com.secondlife.secondlife.repository.InspectionReturnShippingPolicyHistoryRepository;
 import com.secondlife.secondlife.repository.InspectionReturnShippingPolicyRepository;
 import com.secondlife.secondlife.repository.InspectionShippingQuoteRepository;
 import com.secondlife.secondlife.repository.PostRepository;
@@ -25,6 +28,9 @@ import com.secondlife.secondlife.service.InspectionLocationService;
 import com.secondlife.secondlife.service.InspectionShippingQuoteService;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,6 +52,7 @@ public class InspectionShippingQuoteServiceImpl implements InspectionShippingQuo
 
     private final InspectionShippingQuoteRepository quotes;
     private final InspectionReturnShippingPolicyRepository returnPolicies;
+    private final InspectionReturnShippingPolicyHistoryRepository returnPolicyHistory;
     private final InspectionOrderRepository orders;
     private final PostRepository posts;
     private final InspectionCenterProfileService centers;
@@ -110,10 +117,27 @@ public class InspectionShippingQuoteServiceImpl implements InspectionShippingQuo
 
     @Override
     @Transactional
-    public InspectionReturnShippingPolicyResponse updateReturnPolicy(InspectionReturnShippingPolicyRequest request) {
-        InspectionReturnShippingPolicy policy = returnPolicy();
-        policy.setMarkupPercentage(request.markupPercentage());
+    public InspectionReturnShippingPolicyResponse updateReturnPolicy(UUID adminId, InspectionReturnShippingPolicyRequest request) {
+        InspectionReturnShippingPolicy policy = returnPolicies.findByIdForUpdate(RETURN_POLICY_ID)
+                .orElseThrow(() -> new ConflictException("Chưa cấu hình tỷ lệ dự phòng vận chuyển kiểm định"));
+        BigDecimal previousPercentage = policy.getMarkupPercentage();
+        BigDecimal newPercentage = request.markupPercentage();
+        if (previousPercentage.compareTo(newPercentage) != 0) {
+            policy.setMarkupPercentage(newPercentage);
+            returnPolicyHistory.save(new InspectionReturnShippingPolicyHistory(
+                    previousPercentage, newPercentage, Instant.now(), adminId));
+        }
         return new InspectionReturnShippingPolicyResponse(policy.getMarkupPercentage());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<InspectionReturnShippingPolicyHistoryResponse> getReturnPolicyHistory(Pageable pageable) {
+        var page = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
+        return returnPolicyHistory.findAllByOrderByChangedAtDescIdDesc(page)
+                .map(entry -> new InspectionReturnShippingPolicyHistoryResponse(entry.getId(),
+                        entry.getPreviousMarkupPercentage(), entry.getNewMarkupPercentage(),
+                        entry.getChangedAt(), entry.getChangedBy()));
     }
 
     private InspectionReturnShippingPolicy returnPolicy() {

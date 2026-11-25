@@ -10,7 +10,6 @@ import com.secondlife.secondlife.entity.SystemWallet;
 import com.secondlife.secondlife.entity.SystemWalletStatementEntry;
 import com.secondlife.secondlife.entity.SystemWalletTransaction;
 import com.secondlife.secondlife.enums.EscrowStatus;
-import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.OrderStatus;
 import com.secondlife.secondlife.enums.SystemWalletFundCategory;
 import com.secondlife.secondlife.enums.SystemWalletTransactionType;
@@ -156,10 +155,7 @@ public class SystemWalletServiceImpl implements SystemWalletService {
         BigDecimal shippingRefund = switch (settlement.getOutcome()) {
             case PAYMENT_EXPIRED, CANCELLED_BEFORE_INSPECTION -> balances.getShipping();
             case PASSED_PURCHASED -> inspectionAmount(order.getReturnShippingReserveFee());
-            case FAILED_INSPECTION -> order.isCorporateShipping()
-                    ? buyerShippingShare(order, settlement.getOutboundShippingAllocated()
-                            .add(settlement.getReturnReserveAllocated())) : BigDecimal.ZERO;
-            case PASSED_BUYER_DEFAULTED -> BigDecimal.ZERO;
+            case FAILED_INSPECTION, PASSED_BUYER_DEFAULTED, PRE_LISTING_PASSED -> BigDecimal.ZERO;
         };
         BigDecimal heldRefund = refunds.subtract(shippingRefund);
         BigDecimal payout = settlement.getCenterPayoutAmount().add(settlement.getSellerCompensationAmount());
@@ -213,8 +209,7 @@ public class SystemWalletServiceImpl implements SystemWalletService {
     }
 
     private BigDecimal buyerShippingShare(InspectionOrder order, BigDecimal shipping) {
-        var payer = order.getFeePayer() == null ? InspectionFeePayer.BUYER_PAYS : order.getFeePayer();
-        return payer.buyerShare(shipping).min(inspectionAmount(order.getBuyerFeeShare()));
+        return order.buyerShareOf(shipping).min(inspectionAmount(order.getBuyerFeeShare()));
     }
 
     private BigDecimal inspectionAmount(BigDecimal amount) {

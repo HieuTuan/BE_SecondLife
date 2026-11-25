@@ -18,6 +18,7 @@ public record AdminInspectionFundsResponse(
         InspectionScope inspectionScope,
         InspectionOrderType orderType,
         InspectionFeePayer feePayer,
+        int buyerFeePercent,
         boolean cashShippingSimulation,
         String currency,
         BigDecimal inspectionFee,

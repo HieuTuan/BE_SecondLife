@@ -112,6 +112,7 @@ class ListingReportIntegrationTest {
     @Test void completedReleasedOrderCannotOpenANewPurchaseDispute() throws Exception {
         var buyer=user("BUYER");var completed=order(user("SELLER"),buyer,true);
         var request=body("OTHER");request.put("orderId",completed.getId());
+        request.put("evidenceUrls", List.of(orderEvidence(buyer)));
         submit(buyer,request).andExpect(status().isConflict());
         assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM user_reports WHERE order_id=?",Integer.class,completed.getId()));
     }
@@ -190,6 +191,7 @@ class ListingReportIntegrationTest {
         var staff=user("STAFF");var seller=user("SELLER");var reporter=user("BUYER");var p=listing(seller);
         listingReport(reporter,p.getId(),body("OTHER")).andExpect(status().isCreated());
         var orderReport=body("OTHER");orderReport.put("orderId",order(seller,reporter,false).getId());
+        orderReport.put("evidenceUrls", List.of(orderEvidence(reporter)));
         submit(reporter,orderReport).andExpect(status().isCreated());
         mvc.perform(get("/api/v1/reports/me?targetType=LISTING&page=0&size=10").header("Authorization",bearer(reporter)))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(1))
@@ -265,6 +267,13 @@ class ListingReportIntegrationTest {
             org.mockito.ArgumentMatchers.eq(reporter.getId().toString()),org.mockito.ArgumentMatchers.eq("/queue/notifications"),
             org.mockito.ArgumentMatchers.any(Object.class));
     }
+    private String orderEvidence(User buyer) {
+        UUID evidenceId = UUID.randomUUID();
+        jdbc.update("INSERT INTO report_evidence_uploads(id,owner_id,storage_id,content_type,size_bytes) VALUES (?,?,?,'image/png',3)",
+                evidenceId, buyer.getId(), "listing-queue-order/" + evidenceId);
+        return "/api/v1/reports/evidence/" + evidenceId;
+    }
+
     private Map<String,Object> body(String reason) {
         var req=new HashMap<String,Object>();req.put("requestId",UUID.randomUUID());req.put("reasonCode",reason);
         req.put("description","Evidence of a listing violation");req.put("evidenceUrls",List.of());return req;

@@ -28,6 +28,7 @@ import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.integration.ai.AiChatGateway;
+import com.secondlife.secondlife.integration.ai.ListingPhotoContentReview;
 import com.secondlife.secondlife.mapper.PostMapper;
 import com.secondlife.secondlife.repository.AiChatMessageRepository;
 import com.secondlife.secondlife.repository.AiChatSessionRepository;
@@ -88,6 +89,7 @@ public class PostServiceImpl implements PostService {
     private final int minImages;
     private final int maxImages;
     private final ImageUploadValidator imageValidator;
+    private final ListingPhotoContentReview photoContentReview;
     private final ListingImageSimilarity imageSimilarity;
     private final ListingFingerprint listingFingerprint;
     private final PostRepository postRepository;
@@ -134,10 +136,12 @@ public class PostServiceImpl implements PostService {
                            @Value("${app.listing.max-images}") int maxImages,
                            PostMapper postMapper,
                            PlatformTransactionManager transactions,
-                           ImageUploadValidator imageValidator) {
+                           ImageUploadValidator imageValidator,
+                           ListingPhotoContentReview photoContentReview) {
         this.transactionTemplate = transactions != null ? new TransactionTemplate(transactions) : null;
         this.postMapper = postMapper;
         this.imageValidator = imageValidator;
+        this.photoContentReview = photoContentReview;
 
         if (maxUnfinishedDrafts <= 0 || maxImageBytes <= 0)
             throw new IllegalArgumentException("Listing draft and image byte limits must be positive");
@@ -197,10 +201,11 @@ public class PostServiceImpl implements PostService {
                 throw new BadRequestException("itemId does not belong to categoryId");
         }
 
-        if (postRepository.countByUser_IdAndStatusIn(userId, List.of("DRAFT", "REJECTED", "PENDING", "PENDING_INSPECTION")) >= maxUnfinishedDrafts)
+        if (postRepository.countByUser_IdAndStatusIn(userId, List.of("DRAFT", "REJECTED", "PENDING", "PENDING_INSPECTION", "READY_TO_PUBLISH")) >= maxUnfinishedDrafts)
             throw new ConflictException("Maximum " + maxUnfinishedDrafts + " unfinished drafts; finish an existing draft first");
 
         var prepared = imageValidator.prepareListingImages(request.images(), minImages, maxImages, maxImageBytes);
+        photoContentReview.validateUploads(prepared);
         List<PostImage> postImages = new ArrayList<>();
         for (var image : prepared) {
             try {
@@ -212,6 +217,7 @@ public class PostServiceImpl implements PostService {
             }
         }
 
+        String declaredBrand = request.brand() == null || request.brand().isBlank() ? null : request.brand().strip();
         Post post;
         List<CloudinaryService.UploadedImage> uploads = new ArrayList<>();
         try {
@@ -225,8 +231,10 @@ public class PostServiceImpl implements PostService {
                 p.setUser(userRepository.getReferenceById(userId));
                 p.setCategoryId(request.categoryId());
                 p.setItemId(request.itemId());
+                p.setBrand(declaredBrand);
                 p.setStatus("DRAFT");
                 p.getImages().addAll(postImages);
+                p.setImageContentReviewedAt(Instant.now());
                 if (!postImages.isEmpty()) {
                     p.setImageUrl(postImages.getFirst().getImageUrl());
                     p.setImageFingerprint(postImages.getFirst().getImageFingerprint());
@@ -259,7 +267,6 @@ public class PostServiceImpl implements PostService {
             // 3. Call AI to analyze image
             String selectedCategoryName = categoryRepository.findById(request.categoryId()).orElseThrow().getName();
             String selectedItemName = request.itemId() == null ? "Không xác định" : itemRepository.findById(request.itemId()).orElseThrow().getName();
-            String declaredBrand = request.brand() != null && !request.brand().isBlank() ? request.brand().trim() : null;
 
             StringBuilder visionCheckPrompt = new StringBuilder();
             visionCheckPrompt.append("Người bán đang đăng bài với thông tin khai báo ở Bước 1:\n");
@@ -418,7 +425,7 @@ public class PostServiceImpl implements PostService {
                     templateText,
                     cleanDescription);
         } else {
-            // Manual mode: No AI visual scan, no credit deducted
+            // The image set already passed moderation. Manual mode uses no AI chat credit.
             runInTransaction(() -> {
                 post.setAiDescription(null);
                 post.setDescription(null);
@@ -641,8 +648,9 @@ public class PostServiceImpl implements PostService {
             throw new BadRequestException("A valid title, description and positive VND price are required");
 
         // A retry after acceptance may return the prior outcome but cannot edit/re-up the listing.
-        if (post.isListingCreditCharged() || "PENDING".equals(post.getStatus()) || "PENDING_INSPECTION".equals(post.getStatus())) {
-            if (!("ACTIVE".equals(post.getStatus()) || "PENDING_INSPECTION".equals(post.getStatus()) || "PENDING".equals(post.getStatus()))
+        boolean awaitingPublication = "READY_TO_PUBLISH".equals(post.getStatus());
+        if (awaitingPublication || post.isListingCreditCharged() || "PENDING".equals(post.getStatus()) || "PENDING_INSPECTION".equals(post.getStatus())) {
+            if (!(awaitingPublication || "ACTIVE".equals(post.getStatus()) || "PENDING_INSPECTION".equals(post.getStatus()) || "PENDING".equals(post.getStatus()))
                     || !listingFingerprint.normalize(request.title()).equals(listingFingerprint.normalize(post.getTitle()))
                     || !listingFingerprint.normalize(request.description()).equals(listingFingerprint.normalize(post.getDescription()))
                     || request.price().compareTo(post.getPrice()) != 0)
@@ -660,10 +668,12 @@ public class PostServiceImpl implements PostService {
         if (post.getImageUrl() == null || post.getImageUrl().isBlank()) throw new BadRequestException("A product image is required");
 
         publication.requirePublishAvailable(userId);
+        photoContentReview.requireReviewed(post);
 
         post.setTitle(request.title().trim());
         post.setDescription(request.description().trim());
         post.setPrice(request.price());
+        publication.snapshotPolicy(post);
         post.setShippingWeight(request.shippingWeight());
         post.setShippingLength(request.shippingLength());
         post.setShippingWidth(request.shippingWidth());
@@ -673,7 +683,7 @@ public class PostServiceImpl implements PostService {
 
         var matches = new ArrayList<UUID>();
         for (Post other : postRepository.findByIdNotAndStatusIn(postId,
-                List.of("ACTIVE", "PENDING_INSPECTION", "PENDING"))) {
+                List.of("ACTIVE", "PENDING_INSPECTION", "PENDING", "READY_TO_PUBLISH"))) {
             boolean sameImage = !Collections.disjoint(post.getImageFingerprints(), other.getImageFingerprints());
             boolean visuallySimilar = post.getImages().stream().anyMatch(image -> other.getImages().stream().anyMatch(candidate ->
                     imageSimilarity.similar(image.getPerceptualFingerprint(), candidate.getPerceptualFingerprint())));
@@ -719,16 +729,37 @@ public class PostServiceImpl implements PostService {
         return submitResponse(post);
     }
 
+    @Override
+    @Transactional
+    public PostDto publishInspectedPost(UUID userId, UUID postId) {
+        return postMapper.toResponse(publication.publishInspectedPost(userId, postId));
+    }
+
     private PostSubmitResponse submitResponse(Post post) {
-        if ("PENDING".equals(post.getStatus()))
-            return new PostSubmitResponse("PENDING", false, null, null, "Bài có dấu hiệu trùng lặp, đang chờ STAFF kiểm duyệt; chưa trừ credit đăng bài", null);
+        if ("READY_TO_PUBLISH".equals(post.getStatus())) {
+            return new PostSubmitResponse("READY_TO_PUBLISH", true, null, null,
+                    "Bài đăng đã đạt kiểm định và sẵn sàng để người bán đăng bán.", null, null,
+                    post.getInspectionThresholdSnapshot(), post.getInspectionPolicyVersion(), "PUBLISH_LISTING");
+        }
+        if ("PENDING".equals(post.getStatus())) {
+            return new PostSubmitResponse("PENDING", Boolean.TRUE.equals(post.getMandatoryInspection()), null, null,
+                    "Bài có dấu hiệu trùng lặp, đang chờ STAFF kiểm duyệt; chưa trừ credit đăng bài", null, null,
+                    post.getInspectionThresholdSnapshot(), post.getInspectionPolicyVersion(), "WAIT_FOR_LISTING_REVIEW");
+        }
         boolean inspection = "PENDING_INSPECTION".equals(post.getStatus());
         InspectionOrder inspectionOrder = inspection ? inspectionOrderRepository.findActiveByPostId(post.getId())
-                .orElseThrow(() -> new ConflictException("Không tìm thấy đơn kiểm định của bài đăng")) : null;
-        return new PostSubmitResponse(post.getStatus(), inspection, inspection ? inspectionOrder.getInspectionFee() : null,
-                inspection ? inspectionOrder.getShippingFee() : null, inspection
-                ? "Đã nhận bài và tạo đơn kiểm định. Phí kiểm định/vận chuyển thanh toán qua luồng riêng."
-                : "Bài đăng đã được duyệt và hiển thị trên sàn.", null);
+                .or(() -> inspectionOrderRepository.findFirstByPostIdOrderByCreatedAtDesc(post.getId())).orElse(null) : null;
+        boolean awaitingReturn = inspectionOrder != null && "COMPLETED".equals(inspectionOrder.getStatus());
+        boolean configured = inspectionOrder != null && inspectionOrder.getOrderType() != null
+                && !"PENDING".equals(inspectionOrder.getStatus()) && !"PAYMENT_EXPIRED".equals(inspectionOrder.getStatus());
+        return new PostSubmitResponse(post.getStatus(), inspection, configured ? inspectionOrder.getInspectionFee() : null,
+                configured ? inspectionOrder.getShippingFee() : null, inspection
+                ? "Bài đăng cần kiểm định trước xuất bản; chọn AT_HOME hoặc AT_CENTER và xác nhận báo giá."
+                : "Bài đăng đã được duyệt và hiển thị trên sàn.", null,
+                inspectionOrder == null ? null : inspectionOrder.getId(), post.getInspectionThresholdSnapshot(),
+                post.getInspectionPolicyVersion(), inspection ? (awaitingReturn ? "TRACK_INSPECTION_RETURN" : configured
+                        ? ("WAITING_FEE_PAYMENT".equals(inspectionOrder.getStatus()) ? "PAY_INSPECTION_FEE" : "TRACK_INSPECTION")
+                        : "SELECT_INSPECTION_METHOD") : null);
     }
 
     /**
@@ -780,14 +811,6 @@ public class PostServiceImpl implements PostService {
     @Override
     @Transactional
     public void approvePost(UUID postId) {
-        Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new RuntimeException("Post not found"));
-        if (!"PENDING".equals(post.getStatus())) {
-            throw new RuntimeException("Post must be in PENDING status to be approved");
-        }
-        listingAccess.requireVerifiedSeller(post.getUser().getId());
-        post.setStatus("ACTIVE");
-        postRepository.save(post);
         reviews.approve(postId, null);
     }
 
@@ -864,7 +887,9 @@ public class PostServiceImpl implements PostService {
         if (post.getUser() == null || !userId.equals(post.getUser().getId())) {
             throw new ForbiddenException("This post belongs to another user");
         }
-        return postMapper.toResponse(post);
+        boolean reclassify = canOfferReclassification(post)
+                && !postRepository.findReclassifiableIds(List.of(postId)).isEmpty();
+        return toSellerPost(post, reclassify);
     }
 
     @Override
@@ -1048,17 +1073,27 @@ public class PostServiceImpl implements PostService {
         if (!page.isEmpty()) {
             postRepository.findAllWithImagesByIdIn(page.getContent().stream().map(Post::getId).toList());
         }
-        return page.map(postMapper::toResponse);
+        var candidates = page.getContent().stream().filter(this::canOfferReclassification).map(Post::getId).toList();
+        Set<UUID> reclassifiable = candidates.isEmpty()
+                ? Set.of() : Set.copyOf(postRepository.findReclassifiableIds(candidates));
+        return page.map(post -> toSellerPost(post, reclassifiable.contains(post.getId())));
+    }
+
+    private boolean canOfferReclassification(Post post) {
+        return "ACTIVE".equals(post.getStatus()) || ListingAccessService.canEditDraft(post);
+    }
+
+    private PostDto toSellerPost(Post post, boolean reclassify) {
+        var actions = new PostDto.SellerActions(
+                ListingAccessService.canEditDraft(post), "ACTIVE".equals(post.getStatus()), reclassify);
+        return postMapper.toResponse(post).toBuilder().sellerActions(actions).build();
     }
 
     @Override
     @Transactional
     public PostDto updateDraft(UUID userId, UUID postId, UpdateDraftRequest request) {
-        Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new NotFoundException("Post not found"));
-        if (post.getUser() == null || !userId.equals(post.getUser().getId())) {
-            throw new ForbiddenException("This post belongs to another user");
-        }
+        Post post = listingAccess.owned(userId, postId, true);
+        listingAccess.requireDraft(post);
 
         post.setTitle(request.title());
         post.setDescription(request.description());

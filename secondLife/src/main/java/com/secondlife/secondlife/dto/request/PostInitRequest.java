@@ -2,6 +2,7 @@ package com.secondlife.secondlife.dto.request;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -11,7 +12,7 @@ public record PostInitRequest(
     @NotNull
     UUID categoryId,
     UUID itemId,
-    String brand,
+    @Size(max = 120) String brand,
     // Optional mode: "ai" (default) or "manual"
     String model,
     @NotNull

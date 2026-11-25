@@ -5,6 +5,8 @@ import com.secondlife.secondlife.dto.response.ReportResponse;
 public interface ListingReportNotifications {
     void created(ReportResponse report);
 
+    void sellerResponseRequested(ReportResponse report);
+
     void reviewStarted(ReportResponse report);
 
     void resolved(ReportResponse report);

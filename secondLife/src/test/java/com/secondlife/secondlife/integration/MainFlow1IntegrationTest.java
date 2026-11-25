@@ -33,6 +33,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.*;
 import java.util.concurrent.*;
@@ -88,7 +89,14 @@ class MainFlow1IntegrationTest {
         when(ollama.getOptions()).thenReturn(ChatOptions.builder().build());
         when(google.getOptions()).thenReturn(ChatOptions.builder().build());
         when(ollama.call(any(Prompt.class))).thenReturn(reply("Mô tả sản phẩm đã sử dụng, còn hoạt động tốt."));
-        when(google.call(any(Prompt.class))).thenReturn(reply("APPROVED"));
+        when(google.call(any(Prompt.class))).thenAnswer(call -> {
+            Prompt sent = call.getArgument(0);
+            boolean photoCheck = sent.getInstructions().stream().anyMatch(message ->
+                    message.getText().startsWith("Kiểm tra liệu toàn bộ ảnh"));
+            return reply(photoCheck ? """
+                    {"images":[{"number":1,"status":"RELATED"},{"number":2,"status":"RELATED"},{"number":3,"status":"RELATED"}]}
+                    """ : "APPROVED");
+        });
         when(cloudinary.uploadImage(any())).thenReturn(new CloudinaryService.UploadedImage(
                 "https://example.test/product.jpg", "listings/images/test-product"));
     }
@@ -147,6 +155,25 @@ class MainFlow1IntegrationTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(1));
         assertThrows(org.springframework.dao.DataAccessException.class, () -> jdbc.update(
                 "UPDATE ai_price_estimates SET suggested_price = 1 WHERE listing_id = ?", postId));
+    }
+
+    @Test void latestValuationReturnsAnEmptySuccessForAnOwnedUnvaluedListing() throws Exception {
+        var seller = user("SELLER", true);
+        var viewer = user("SELLER", true);
+        var post = draft(seller);
+        String valuationPath = "/api/v1/posts/" + post.getId() + "/ai-price-estimation";
+
+        mvc.perform(get(valuationPath).header("Authorization", bearer(seller)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").doesNotExist());
+        mvc.perform(get(valuationPath).header("Authorization", bearer(viewer)))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/posts/" + UUID.randomUUID() + "/ai-price-estimation")
+                        .header("Authorization", bearer(seller)))
+                .andExpect(status().isNotFound());
+        verifyNoInteractions(priceProvider);
+        assertEquals(0, consumes(seller));
     }
 
     @Test void initRejectsWrongImageCountsAndInvalidFilesBeforeUploading() throws Exception {
@@ -512,6 +539,7 @@ class MainFlow1IntegrationTest {
     }
     private Post draft(User seller) {
         Post p = new Post(); p.setUser(seller); p.setCategoryId(category().getId());
+        p.setImageContentReviewedAt(Instant.now());
         p.setDescriptionAccepted(true);
         p.setTitle("Sản phẩm " + UUID.randomUUID()); p.setDescription("Đã sử dụng 2 năm, còn hoạt động tốt.");
         p.setImageUrl("https://example.test/" + UUID.randomUUID() + ".jpg"); return posts.saveAndFlush(p);

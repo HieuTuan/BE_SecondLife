@@ -6,6 +6,7 @@ import java.util.UUID;
 
 public interface InspectionEscrowService {
     InspectionOrderResponse payInspectionFeeResponse(UUID userId, UUID inspectionOrderId);
+    InspectionOrderResponse payInspectionFeeResponse(UUID userId, UUID inspectionOrderId, UUID preListingQuoteId);
     InspectionOrder payInspectionFee(UUID userId, UUID inspectionOrderId);
     void refundExpiredOrder(InspectionOrder order);
 }

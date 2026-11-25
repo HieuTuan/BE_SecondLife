@@ -29,7 +29,7 @@ public final class ReportRequests {
             @Schema(description = "Provide exactly one of postId or orderId") UUID postId,
             @Schema(description = "Only this order's buyer may report it") UUID orderId,
             @NotNull ReasonCode reasonCode, @NotBlank @Size(max=2000) String description,
-            @Schema(description="Private evidenceUrl values returned by POST /api/v1/reports/evidence; public CDN links are rejected")
+            @Schema(description = "Private evidence URLs returned by the evidence upload APIs. Order disputes require at least one attachment.")
             List<@NotBlank @Size(max=2048) String> evidenceUrls,
             @Schema(description="Optional related public listing; only for a DUPLICATE_LISTING report on a post") UUID relatedPostId) {
         public Create { if (evidenceUrls == null) evidenceUrls = List.of(); }
@@ -41,7 +41,7 @@ public final class ReportRequests {
         public boolean isTargetValid() { return (postId == null) != (orderId == null); }
     }
     public record Resolve(@NotNull Decision decision,
-            @Schema(description = "Required for CONFIRMED; only SELLER affects seller reputation") ResponsibleParty responsibleParty,
+            @Schema(description = "Required for confirmed listing reports. For order disputes the backend derives responsibility from the decision and seller response deadline.") ResponsibleParty responsibleParty,
             @NotBlank @Size(max=2000) String reason,
             @Schema(description = "Defaults to NONE; RETURN_AND_REFUND approves an order dispute return") ResolutionAction resolutionAction) {
         public Resolve {

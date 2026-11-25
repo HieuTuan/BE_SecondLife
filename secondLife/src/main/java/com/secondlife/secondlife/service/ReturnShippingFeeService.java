@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.common.PageResponse;
+import com.secondlife.secondlife.dto.response.ReturnShippingDeductionResponse;
 import com.secondlife.secondlife.dto.response.ReturnShippingFeeResponse;
 import com.secondlife.secondlife.dto.response.SellerReturnShippingDebtResponse;
 import com.secondlife.secondlife.entity.Order;
@@ -15,9 +16,12 @@ public interface ReturnShippingFeeService {
 
     void collectPendingForRefund(Order order, Shipment shipment, UserReport report, UUID actorId);
 
+    void collectOutstanding(UUID shipmentId);
+
     ReturnShippingFeeResponse get(UUID actorId, boolean reviewer, UUID shipmentId);
 
     PageResponse<ReturnShippingFeeResponse> mine(UUID sellerId, boolean outstandingOnly, Pageable pageable);
 
+    PageResponse<ReturnShippingDeductionResponse> deductions(UUID sellerId, boolean outstandingOnly, Pageable pageable);
     SellerReturnShippingDebtResponse debt(UUID sellerId);
 }
