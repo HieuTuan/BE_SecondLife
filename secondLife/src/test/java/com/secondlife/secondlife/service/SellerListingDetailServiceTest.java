@@ -1,12 +1,14 @@
 package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.common.validation.ImageUploadValidator;
+import com.secondlife.secondlife.dto.response.PostDto.SellerActions;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.PostImage;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.integration.ai.AiChatGateway;
+import com.secondlife.secondlife.integration.ai.ListingPhotoContentReview;
 import com.secondlife.secondlife.mapper.MapperTestSupport;
 import com.secondlife.secondlife.mapper.PostMapper;
 import com.secondlife.secondlife.repository.AiChatMessageRepository;
@@ -55,7 +57,8 @@ class SellerListingDetailServiceTest {
                 mock(AiChatGateway.class), cloud, mock(InspectionOrderRepository.class), mock(AiChatGateway.class),
                 publication, reviews, mock(ListingImageSimilarity.class), mock(ListingFingerprint.class),
                 30, 10485760, 3, 6,
-                MapperTestSupport.mapper(PostMapper.class), null, mock(ImageUploadValidator.class));
+                MapperTestSupport.mapper(PostMapper.class), null, mock(ImageUploadValidator.class),
+                mock(ListingPhotoContentReview.class));
     }
 
     @ParameterizedTest
@@ -77,6 +80,8 @@ class SellerListingDetailServiceTest {
         assertEquals(post.getId(), result.id());
         assertEquals(ownerId, result.user().id());
         assertEquals(status, result.status());
+        assertEquals("DRAFT".equals(status) || "REJECTED".equals(status), result.sellerActions().editContent());
+        assertEquals("ACTIVE".equals(status), result.sellerActions().updateShippingPackage());
         assertEquals(post.getTitle(), result.title());
         assertEquals(post.getDescription(), result.description());
         assertEquals(new BigDecimal("150000"), result.price());
@@ -89,6 +94,19 @@ class SellerListingDetailServiceTest {
         verify(posts).findById(post.getId());
         verify(posts, never()).save(any());
         verifyNoInteractions(credits, cloud, publication, reviews);
+    }
+
+    @Test
+    void rejectedListingWithChargedCreditHasNoEditingActions() {
+        var post = listing(ownerId);
+        post.setStatus("REJECTED");
+        post.setListingCreditCharged(true);
+        when(posts.findById(post.getId())).thenReturn(Optional.of(post));
+
+        var actions = service.getMyPostDetail(ownerId, post.getId()).sellerActions();
+
+        assertEquals(new SellerActions(false, false, false), actions);
+        verify(posts, never()).findReclassifiableIds(any());
     }
 
     @Test

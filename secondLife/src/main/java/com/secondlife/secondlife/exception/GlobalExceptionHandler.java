@@ -42,7 +42,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ImageValidationException.class)
     public ResponseEntity<ErrorResponse> handleImageValidation(ImageValidationException ex, HttpServletRequest request) {
         String message = ex.getStatus() == HttpStatus.SERVICE_UNAVAILABLE
-                ? "Tạm thời không thể xử lý ảnh" : "Ảnh tải lên chưa hợp lệ";
+                ? ex.getMessage() : "Ảnh tải lên chưa hợp lệ";
         return ResponseEntity.status(ex.getStatus()).body(ErrorResponse.of(message, request.getRequestURI(), ex.getErrors()));
     }
 

@@ -73,8 +73,9 @@ public class AiValuationServiceImpl implements AiValuationService {
     @Transactional(readOnly = true)
     public AiPriceEstimationResponse latest(UUID userId, UUID postId) {
         access.owned(userId, postId, false);
-        return aiPriceEstimationMapper.toEstimateResponse(estimates.findFirstByListingIdOrderByCreatedAtDescIdDesc(postId)
-                .orElseThrow(() -> new NotFoundException("No AI valuation exists for this post")));
+        return estimates.findFirstByListingIdOrderByCreatedAtDescIdDesc(postId)
+                .map(aiPriceEstimationMapper::toEstimateResponse)
+                .orElse(null);
     }
 
     @Transactional(readOnly = true)

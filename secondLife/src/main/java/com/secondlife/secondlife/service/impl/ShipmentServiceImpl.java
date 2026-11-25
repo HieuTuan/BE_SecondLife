@@ -167,8 +167,14 @@ public class ShipmentServiceImpl implements ShipmentService {
     private Prepared prepareForOrder(UUID actor, boolean staff, UUID orderId, CreateShipmentRequest request,
             InspectionOrder centerDelivery) {
         var order=orders.findByIdForUpdate(orderId).orElseThrow(() -> new NotFoundException("Order not found"));
-        if (!staff && centerDelivery == null && !actor.equals(order.getSeller().getId()))
+        boolean buyerReturn = "BUYER_TO_SELLER".equals(request.leg());
+        if (buyerReturn) {
+            if (!actor.equals(order.getBuyer().getId())) {
+                throw new ForbiddenException("Only the buyer of this order can create its return shipment");
+            }
+        } else if (!staff && centerDelivery == null && !actor.equals(order.getSeller().getId())) {
             throw new ForbiddenException("Only the seller can create an outbound shipment");
+        }
         if (order.getShippingQuoteId()==null) throw new ConflictException("Order has no paid shipping quote");
         if (order.getStatus()==OrderStatus.CANCELLED || order.getStatus()==OrderStatus.COMPLETED) throw new ConflictException("Order is already closed");
         if (!Set.of("SELLER_TO_BUYER","CENTER_TO_BUYER","BUYER_TO_SELLER").contains(request.leg())) throw new BadRequestException("Invalid order shipment leg");
@@ -177,25 +183,25 @@ public class ShipmentServiceImpl implements ShipmentService {
         BigDecimal quotedFee=quote.getFee();
         UserReport returnDecision=null;
         UUID linkedInspectionId = null;
+        boolean outboundRetry = false;
 
-        if ("BUYER_TO_SELLER".equals(request.leg())) {
-            if (!staff || request.reason()==null || request.reason().isBlank()) throw new ForbiddenException("A STAFF/ADMIN return decision with reason is required");
-            if (order.getShippingDeliveredAt()==null) throw new ConflictException("Outbound delivery must be confirmed before creating a buyer return");
-            if (order.getEscrowStatus()!=EscrowStatus.HELD && order.getEscrowStatus()!=EscrowStatus.FROZEN) throw new ConflictException("Funds are already settled");
-            returnDecision=disputes.approvedReturn(order,request.reportId());
+        if (buyerReturn) {
+            if (order.getStatus()!=OrderStatus.DELIVERED || order.getShippingDeliveredAt()==null) {
+                throw new ConflictException("Outbound delivery must be confirmed before creating a buyer return");
+            }
             if (order.getEscrowStatus()!=EscrowStatus.FROZEN) throw new ConflictException("An approved return requires frozen escrow");
+            returnDecision=disputes.approvedReturn(order,request.reportId());
+            if (returnDecision.getRefundedAt()!=null) throw new ConflictException("This return decision has already been refunded");
             var from=mapper.readValue(order.getDeliveryAddress(),ShippingAddress.class);
             var original=mapper.readTree(quote.getPayload());
             var to=mapper.readValue(quote.getSellerPickupAddress(),ShippingAddress.class);
             payload=ShippingPayloads.create(from,to,ShippingPayloads.storedParcel(original),order.getPost().getTitle(),order.getFinalPrice());
             if (original.hasNonNull("service_type")) payload.put("service_type",original.path("service_type").asText());
             quotedFee=null;
-            order.setEscrowStatus(EscrowStatus.FROZEN); orders.save(order);
         } else {
             if (!request.leg().equals(quote.getLeg())) throw new ConflictException("Shipment leg must match the paid shipping quote: "+quote.getLeg());
             if (order.getConfirmationDeadline()!=null && order.getSellerConfirmedAt()==null)
                 throw new ConflictException("SELLER must confirm the order before creating an outbound shipment");
-            if (order.getEscrowStatus()!=EscrowStatus.HELD || order.getShippingDeliveredAt()!=null) throw new ConflictException("Order is not eligible for outbound shipping");
             if ("CENTER_TO_BUYER".equals(request.leg())) {
                 if (!staff && centerDelivery == null)
                     throw new ForbiddenException("Only the assigned inspection center or STAFF/ADMIN can create this shipment");
@@ -208,13 +214,35 @@ public class ShipmentServiceImpl implements ShipmentService {
                 if (request.fromAddress()!=null && !matchesAddress(request.fromAddress(),ShippingPayloads.storedAddress(mapper.readTree(quote.getPayload()),"from")))
                     throw new ConflictException("Inspection center address must match the paid shipping quote");
                 linkedInspectionId = inspection.getId();
+                if ("LALAMOVE".equals(quote.getProvider())) {
+                    var outbound = shipments.findByOrderIdOrderByCreatedAtAsc(orderId).stream()
+                            .filter(shipment -> isBuyerDelivery(shipment.getLeg())).toList();
+                    outboundRetry = rebookableOutboundShipment(order, outbound, request.leg()) != null;
+                    if (!outboundRetry && outbound.stream().anyMatch(shipment -> "CANCELLED".equals(shipment.getStatus()))
+                            && shipments.findById(shipmentId(orderId, request)).isEmpty()) {
+                        throw new ConflictException("The cancelled shipment is not eligible for rebooking");
+                    }
+                }
             } else if ("SELLER_TO_BUYER".equals(request.leg())) {
-                linkedInspectionId = inspections.findByOrderId(order.getId())
+                var linkedInspection = inspections.findByOrderId(order.getId());
+                linkedInspectionId = linkedInspection
                         .or(() -> inspections.findFirstByPostIdAndStatusOrderByCreatedAtDesc(order.getPost().getId(), "PASSED"))
                         .map(InspectionOrder::getId).orElse(null);
+                if (linkedInspection.isEmpty() && "LALAMOVE".equals(quote.getProvider())) {
+                    outboundRetry = rebookableOutboundShipment(order,
+                            shipments.findByOrderIdOrderByCreatedAtAsc(orderId), request.leg()) != null;
+                }
             }
+            if ((order.getEscrowStatus()!=EscrowStatus.HELD && !outboundRetry) || order.getShippingDeliveredAt()!=null)
+                throw new ConflictException("Order is not eligible for outbound shipping");
         }
-        var prepared=prepare(actor,orderId,linkedInspectionId,order.getSeller().getId(),order.getBuyer().getId(),request,payload,quotedFee,quote.getProvider());
+        var prepared=prepare(actor,orderId,linkedInspectionId,order.getSeller().getId(),order.getBuyer().getId(),request,payload,quotedFee,quote.getProvider(),outboundRetry);
+        if (outboundRetry && prepared.submit() && order.getEscrowStatus()==EscrowStatus.FROZEN) {
+            // Return the recoverable shipping hold to ordinary escrow. Delivery is still required to release funds.
+            order.setShippingHold(false);
+            order.setEscrowStatus(EscrowStatus.HELD);
+            orders.save(order);
+        }
         if (returnDecision!=null) disputes.bindReturn(order,returnDecision,shipments.findById(prepared.id()).orElseThrow());
         return prepared;
     }
@@ -498,6 +526,12 @@ public class ShipmentServiceImpl implements ShipmentService {
     private Prepared prepare(UUID actor, UUID orderId, UUID inspectionId, UUID seller, UUID buyer,
                              CreateShipmentRequest request, Map<String, Object> payload, BigDecimal fee,
                              String carrierCode) {
+        return prepare(actor, orderId, inspectionId, seller, buyer, request, payload, fee, carrierCode, false);
+    }
+
+    private Prepared prepare(UUID actor, UUID orderId, UUID inspectionId, UUID seller, UUID buyer,
+                             CreateShipmentRequest request, Map<String, Object> payload, BigDecimal fee,
+                             String carrierCode, boolean outboundRetry) {
         UUID parent=orderId!=null?orderId:inspectionId;
         UUID id=shipmentId(parent,request);
         payload.put("client_order_code","SL"+id);
@@ -517,9 +551,10 @@ public class ShipmentServiceImpl implements ShipmentService {
             }
             boolean outbound=!"BUYER_TO_SELLER".equals(request.leg());
             if (siblings.stream().anyMatch(s -> (s.getLeg().equals(request.leg())
-                    || (outbound && Set.of("SELLER_TO_BUYER","CENTER_TO_BUYER").contains(s.getLeg())))
+                    || (outbound && isBuyerDelivery(s.getLeg())))
                     && !("RETURNED".equals(s.getStatus()) && Set.of("BUYER_TO_SELLER","SELLER_TO_CENTER").contains(s.getLeg()))
-                    && blocksNewHubShipment(s)))
+                    && blocksNewHubShipment(s)
+                    && !(outboundRetry && request.leg().equals(s.getLeg()) && isFailedLalamoveBooking(s))))
                 throw new ConflictException("A shipment is already active or uncertain; retry its original requestId");
             // A paid quotation can still be unexpired after its pickup schedule has passed.
             // Refresh only new booking attempts; existing requests return above without another provider mutation.
@@ -559,6 +594,51 @@ public class ShipmentServiceImpl implements ShipmentService {
     }
     private boolean blocksNewHubShipment(Shipment shipment) {
         return !"CANCELLED".equals(shipment.getStatus()) && !canRebookFailedHubShipment(shipment);
+    }
+
+    private boolean isBuyerDelivery(String leg) {
+        return "SELLER_TO_BUYER".equals(leg) || "CENTER_TO_BUYER".equals(leg);
+    }
+
+    private boolean isFailedLalamoveBooking(Shipment shipment) {
+        return "LALAMOVE".equals(shipment.getProvider()) && "FAILED".equals(shipment.getStatus())
+                && shipment.getOrderCode() != null && isLalamoveRejection(shipment.getProviderStatus());
+    }
+
+    private boolean isLalamoveRejection(String status) {
+        return "REJECTED".equals(status) || "EXPIRED".equals(status);
+    }
+
+    private boolean isCarrierHandover(String status) {
+        return "PICKED_UP".equals(status) || "COMPLETED".equals(status);
+    }
+
+    private boolean isAwaitingOutboundPickup(Order order) {
+        return (order.getStatus() == OrderStatus.CONFIRMED || order.getStatus() == OrderStatus.PROCESSING)
+                && order.getCarrierPickedUpAt() == null && order.getShippingDeliveredAt() == null;
+    }
+
+    private boolean hasNoHandoverEvidence(Shipment shipment) {
+        return shipment.getDeliveredAt() == null && shipment.getPodUrl() == null
+                && events.findByShipmentIdOrderByOccurredAtAsc(shipment.getId()).stream().noneMatch(event ->
+                        isCarrierHandover(event.getStatus()) || (event.getPayload() != null
+                                && "FAILED".equals(mapper.readTree(event.getPayload()).path("pod_status").asText())));
+    }
+
+    private Shipment rebookableOutboundShipment(Order order, List<Shipment> history, String leg) {
+        if (history.isEmpty() || order.getShippingQuoteId() == null || !isAwaitingOutboundPickup(order)
+                || (order.getConfirmationDeadline() != null && order.getSellerConfirmedAt() == null)) return null;
+        boolean frozen = order.getEscrowStatus() == EscrowStatus.FROZEN;
+        if (frozen) {
+            if (!order.isShippingHold() || history.stream().noneMatch(this::isFailedLalamoveBooking)) return null;
+        } else if (order.getEscrowStatus() != EscrowStatus.HELD) return null;
+        for (Shipment previous : history) {
+            if (!leg.equals(previous.getLeg()) || !"LALAMOVE".equals(previous.getProvider())
+                    || (!"CANCELLED".equals(previous.getStatus()) && !isFailedLalamoveBooking(previous))
+                    || !hasNoHandoverEvidence(previous)) return null;
+        }
+        if ((frozen || "CENTER_TO_BUYER".equals(leg)) && disputes.hasOrderHold(order.getId())) return null;
+        return history.getLast();
     }
 
     private boolean canRebookFailedHubShipment(Shipment shipment) {
@@ -641,7 +721,11 @@ public class ShipmentServiceImpl implements ShipmentService {
                 }
             }
         }
-        return list.stream().map(shipmentMapper::toResponse).toList();
+        var rebookable = actor.equals(order.getSeller().getId()) && inspections.findByOrderId(id).isEmpty()
+                ? rebookableOutboundShipment(order, list, "SELLER_TO_BUYER") : null;
+        return list.stream().map(shipment ->
+                shipmentMapper.toResponse(shipment, rebookable != null && rebookable.getId().equals(shipment.getId())))
+                .toList();
     }
     @Override
     @Transactional(readOnly = true)
@@ -709,7 +793,23 @@ public class ShipmentServiceImpl implements ShipmentService {
     @Transactional public ShipmentResponse refundReturned(UUID actor,boolean staff,UUID id,String reason,
             ReportRequests.ResponsibleParty responsibleParty) {
         if (!staff) throw new ForbiddenException("STAFF/ADMIN must approve the refund");
-        var shipment=lock(id);
+        return refundReturned(lock(id), actor, reason, responsibleParty);
+    }
+
+    @Override
+    @Transactional
+    public void refundDeliveredDisputeReturn(UUID shipmentId) {
+        var shipment = lock(shipmentId);
+        if (!"BUYER_TO_SELLER".equals(shipment.getLeg()) || !"DELIVERED".equals(shipment.getStatus())
+                || shipment.getDeliveredAt() == null || shipment.getOrderId() == null || shipment.getReportId() == null) {
+            return;
+        }
+        refundReturned(shipment, null, "Hệ thống tự động hoàn tiền sau khi hãng vận chuyển xác nhận giao hàng về người bán.", null);
+    }
+
+    private ShipmentResponse refundReturned(Shipment shipment, UUID actor, String reason,
+            ReportRequests.ResponsibleParty responsibleParty) {
+        UUID id = shipment.getId();
         if (shipment.getOrderId()==null) throw new ConflictException("Inspection shipping cannot refund a product order");
         boolean buyerReturn="BUYER_TO_SELLER".equals(shipment.getLeg());
         if (!(buyerReturn && "DELIVERED".equals(shipment.getStatus()))
@@ -722,7 +822,7 @@ public class ShipmentServiceImpl implements ShipmentService {
         if(order.getEscrowStatus()==EscrowStatus.REFUNDED) {
             if(order.getReturnResponsibleParty()!=null && !order.getReturnResponsibleParty().equals(party))
                 throw new ConflictException("Refund responsibility was already finalized; use the report review flow for a later finding");
-            if (returnDecision!=null) returnShippingFees.collectPendingForRefund(order,shipment,returnDecision,actor);
+            if (returnDecision != null && actor != null) returnShippingFees.collectPendingForRefund(order, shipment, returnDecision, actor);
             return shipmentMapper.toResponse(shipment);
         }
         if (order.getEscrowStatus()!=EscrowStatus.FROZEN) throw new ConflictException("Return refund requires frozen funds");
@@ -732,7 +832,9 @@ public class ShipmentServiceImpl implements ShipmentService {
         if (returnDecision!=null) returnShippingFees.recordForRefund(order,shipment,returnDecision,actor);
         reputation.recordClosedOrder(order,actor,reason,returnDecision==null && "SELLER".equals(party));
         if (returnDecision!=null) disputes.recordRefund(returnDecision,actor,order.getFinalPrice());
-        shipment.setReason(reason); shipment.setRequestedBy(actor); shipments.save(shipment);
+        shipment.setReason(reason);
+        if (actor != null) shipment.setRequestedBy(actor);
+        shipments.save(shipment);
         // Do not re-publish returned/disputed goods automatically; the seller must resolve their condition.
         return shipmentMapper.toResponse(shipment);
     }
@@ -847,6 +949,11 @@ public class ShipmentServiceImpl implements ShipmentService {
         if ("ORDER_STATUS_CHANGED".equals(type) && "PICKED_UP".equals(status)) {
             recordVerifiedPickup(shipment, time);
         }
+        if ((reconciled || olderStatus) && "CENTER_TO_BUYER".equals(shipment.getLeg())
+                && isCarrierHandover(status)
+                && (isFailedLalamoveBooking(shipment) || "CANCELLED".equals(shipment.getStatus()))) {
+            freeze(shipment);
+        }
         if (reconciled) return false;
         if (body.hasNonNull("replacement_order_code")) {
             String replacement = body.path("replacement_order_code").asText();
@@ -927,6 +1034,9 @@ public class ShipmentServiceImpl implements ShipmentService {
         Instant delivered=parseProviderTime(data.get("delivered_at"));
         BigDecimal observedFee = data.hasNonNull("total_fee") ? shipment.getActualFee() : null;
         applyLalamoveStatus(shipment,status,delivered!=null?delivered:observedAt,observedFee);
+        if ("CENTER_TO_BUYER".equals(shipment.getLeg()) && "FAILED".equals(data.path("pod_status").asText())) {
+            freeze(shipment);
+        }
         shipment.setLastReconciledAt(observedAt); shipment.setUpdatedAt(observedAt); shipment.setLastError(null); shipments.save(shipment);
         var event=new ShipmentEvent(); event.setShipmentId(shipment.getId()); event.setEventKey(listingFingerprint.sha256("LALAMOVE|sync|"+shipment.getId()+"|"+observedAt));
         event.setType("RECONCILIATION"); event.setStatus(status); event.setOccurredAt(observedAt); event.setPayload(mapper.writeValueAsString(data)); events.save(event);
@@ -936,18 +1046,30 @@ public class ShipmentServiceImpl implements ShipmentService {
             throw new ConflictException("Carrier order does not contain this shipment's verified client reference");
     }
     private void applyLalamoveStatus(Shipment shipment,String status,Instant time,BigDecimal observedFee) {
+        boolean toBuyer = isBuyerDelivery(shipment.getLeg());
+        boolean fromHub = "CENTER_TO_BUYER".equals(shipment.getLeg());
+        if (shipment.getOrderId() != null && toBuyer && isFailedLalamoveBooking(shipment)) {
+            var outbound = shipments.findByOrderIdOrderByCreatedAtAsc(shipment.getOrderId()).stream()
+                    .filter(candidate -> shipment.getLeg().equals(candidate.getLeg())).toList();
+            if (!outbound.isEmpty() && !shipment.getId().equals(outbound.getLast().getId())) {
+                if (isCarrierHandover(status)) freeze(shipment);
+                return;
+            }
+        }
         if (Set.of("DELIVERED","CANCELLED").contains(shipment.getStatus()) && !Objects.equals(shipment.getProviderStatus(),status)) {
-            if (Set.of("REJECTED","EXPIRED").contains(status)) freeze(shipment);
+            if (isLalamoveRejection(status) || (fromHub && isCarrierHandover(status))) freeze(shipment);
             return;
         }
         shipment.setProviderStatus(status); shipment.setStatus(canonicalLalamove(status)); shipment.setLastEventAt(time); shipment.setLastError(null);
         if ("COMPLETED".equals(status) && shipment.getDeliveredAt()==null) shipment.setDeliveredAt(time);
-        if (Set.of("REJECTED","EXPIRED").contains(status)) freeze(shipment);
 
         if (shipment.getOrderId()!=null) {
             var order=orders.findByIdForUpdate(shipment.getOrderId()).orElseThrow();
+            if (isLalamoveRejection(status)
+                    && (!fromHub || !isAwaitingOutboundPickup(order) || !hasNoHandoverEvidence(shipment))) {
+                freeze(shipment);
+            }
             if (!Set.of(OrderStatus.COMPLETED,OrderStatus.CANCELLED).contains(order.getStatus())) {
-                boolean toBuyer=Set.of("SELLER_TO_BUYER","CENTER_TO_BUYER").contains(shipment.getLeg());
                 if (toBuyer && "PICKED_UP".equals(status) && order.getShippingDeliveredAt()==null) {
                     boolean statusChanged = order.getStatus() != OrderStatus.SHIPPED;
                     order.setStatus(OrderStatus.SHIPPED);
@@ -1116,6 +1238,8 @@ public class ShipmentServiceImpl implements ShipmentService {
         if(order.getCarrierPickedUpAt()==null || pickup.isBefore(order.getCarrierPickedUpAt())) {
             order.setCarrierPickedUpAt(pickup); orders.save(order);
         }
+        // Contradictory pickup evidence for a terminal booking needs review, even after a retry.
+        if (isFailedLalamoveBooking(shipment) || "CANCELLED".equals(shipment.getStatus())) freeze(shipment);
     }
     private void freeze(Shipment shipment) {
         if (shipment.getOrderId()!=null) {

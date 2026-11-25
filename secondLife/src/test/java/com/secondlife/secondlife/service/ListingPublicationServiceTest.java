@@ -7,6 +7,7 @@ import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
+import com.secondlife.secondlife.integration.ai.ListingPhotoContentReview;
 import com.secondlife.secondlife.service.impl.ListingPublicationServiceImpl;
 
 import org.junit.jupiter.api.Test;
@@ -116,7 +117,7 @@ class ListingPublicationServiceTest {
         var access = mock(ListingAccessService.class);
         var credits = mock(ListingCreditService.class);
         var service = new ListingPublicationServiceImpl(credits, access, posts, inspections,
-                mock(HighValueInspectionPolicyService.class), 90, 2);
+                mock(HighValueInspectionPolicyService.class), mock(ListingPhotoContentReview.class), 90, 2);
         User seller = new User();
         seller.setId(UUID.randomUUID());
         Post post = new Post();
@@ -150,6 +151,6 @@ class ListingPublicationServiceTest {
         when(policies.get()).thenReturn(new com.secondlife.secondlife.dto.response.HighValueInspectionPolicyResponse(
                 new BigDecimal("100"), "VND", 1, Instant.now(), null));
         return new ListingPublicationServiceImpl(mock(ListingCreditService.class), mock(ListingAccessService.class),
-                posts, inspections, policies, window, limit);
+                posts, inspections, policies, mock(ListingPhotoContentReview.class), window, limit);
     }
 }

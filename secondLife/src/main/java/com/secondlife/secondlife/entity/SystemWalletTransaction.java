@@ -21,7 +21,6 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "system_wallet_transactions", uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"order_id", "type"}),
         @UniqueConstraint(columnNames = {"inspection_order_id", "inspection_entry"})
 })
 @Immutable

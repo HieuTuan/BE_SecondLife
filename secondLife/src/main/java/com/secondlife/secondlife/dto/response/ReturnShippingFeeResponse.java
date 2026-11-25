@@ -8,5 +8,5 @@ import java.util.UUID;
 
 public record ReturnShippingFeeResponse(UUID shipmentId, UUID orderId, UUID reportId, UUID sellerId,
         ReturnShippingFeeStatus status, BigDecimal feeAmount, BigDecimal collectedAmount, BigDecimal debtAmount,
-        Instant createdAt, Instant assessedAt, UUID assessedBy) {
+        Instant createdAt, Instant assessedAt, UUID assessedBy, Instant lastCollectedAt) {
 }

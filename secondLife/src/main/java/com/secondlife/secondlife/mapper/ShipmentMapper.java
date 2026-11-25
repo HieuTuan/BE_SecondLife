@@ -19,7 +19,11 @@ public class ShipmentMapper {
     }
 
     public ShipmentResponse toResponse(Shipment source) {
-        return delegate.toResponse(source);
+        return toResponse(source, false);
+    }
+
+    public ShipmentResponse toResponse(Shipment source, boolean canRebook) {
+        return delegate.toResponse(source, canRebook);
     }
 
     public void snapshotRoute(Shipment shipment, ShippingAddress sender, ShippingAddress receiver) {
@@ -28,9 +32,10 @@ public class ShipmentMapper {
 
     @Mapper(config = MapStructConfiguration.class)
     public interface Delegate {
-        @Mapping(target = "shipmentId", source = "id")
-        @Mapping(target = "trackingUrl", source = "shareLink")
-        ShipmentResponse toResponse(Shipment source);
+        @Mapping(target = "shipmentId", source = "source.id")
+        @Mapping(target = "trackingUrl", source = "source.shareLink")
+        @Mapping(target = "canRebook", source = "canRebook")
+        ShipmentResponse toResponse(Shipment source, boolean canRebook);
 
         @BeanMapping(ignoreByDefault = true)
         @Mapping(target = "senderName", source = "sender.name")

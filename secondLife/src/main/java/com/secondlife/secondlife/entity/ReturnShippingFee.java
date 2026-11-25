@@ -51,4 +51,5 @@ public class ReturnShippingFee {
 
     private Instant assessedAt;
     private UUID assessedBy;
+    private Instant lastCollectedAt;
 }

@@ -40,6 +40,11 @@ import java.util.UUID;
 @Service
 @Transactional(propagation = Propagation.MANDATORY)
 public class OrderDisputeServiceImpl implements OrderDisputeService {
+    @Override
+    public boolean hasOrderHold(UUID orderId) {
+        return reports.hasOrderHold(orderId);
+    }
+
     private final OrderRepository orders;
     private final UserReportRepository reports;
     private final ShipmentRepository shipments;
@@ -177,8 +182,8 @@ public class OrderDisputeServiceImpl implements OrderDisputeService {
                 "Tiền hàng đã được hoàn vào ví SecondLife của bạn.", NotificationType.REPORT,
                 report.getId(), "REPORT", "/reports/" + report.getId());
         notifications.notifyInApp(report.getSellerId(), "Đơn hoàn hàng đã được hoàn tiền",
-                "Nhân viên đã hoàn tất xử lý hoàn tiền cho đơn hàng.", NotificationType.REPORT,
-                report.getId(), "REPORT", "/seller/orders/" + report.getOrderId());
+                "Đơn hàng đã được hoàn tiền theo phán quyết khiếu nại.", NotificationType.REPORT,
+                report.getId(), "REPORT", null);
     }
 
     private Instant deadline(Order order) {
@@ -195,9 +200,21 @@ public class OrderDisputeServiceImpl implements OrderDisputeService {
     private void releaseDisputeHold(Order order) {
         if (order.getStatus() != OrderStatus.DELIVERED || order.getEscrowStatus() != EscrowStatus.FROZEN
                 || order.isShippingHold() || reports.hasOrderHold(order.getId())) return;
-        boolean shippingHold = shipments.findByOrderIdOrderByCreatedAtAsc(order.getId()).stream()
-                .anyMatch(shipment -> ("BUYER_TO_SELLER".equals(shipment.getLeg()) && !"CANCELLED".equals(shipment.getStatus()))
-                        || !Set.of("DELIVERED", "CANCELLED").contains(shipment.getStatus()));
+        boolean shippingHold = false;
+        boolean newerDirectDelivery = false;
+        for (var shipment : shipments.findByOrderIdOrderByCreatedAtAsc(order.getId()).reversed()) {
+            boolean direct = "SELLER_TO_BUYER".equals(shipment.getLeg());
+            if (direct && "DELIVERED".equals(shipment.getStatus())) newerDirectDelivery = true;
+            // An earlier failed booking can remain in the history after its replacement delivered the order.
+            if (newerDirectDelivery && direct && "LALAMOVE".equals(shipment.getProvider())
+                    && "FAILED".equals(shipment.getStatus()) && shipment.getDeliveredAt() == null
+                    && ("REJECTED".equals(shipment.getProviderStatus()) || "EXPIRED".equals(shipment.getProviderStatus()))) continue;
+            if (("BUYER_TO_SELLER".equals(shipment.getLeg()) && !"CANCELLED".equals(shipment.getStatus()))
+                    || !Set.of("DELIVERED", "CANCELLED").contains(shipment.getStatus())) {
+                shippingHold = true;
+                break;
+            }
+        }
         if (!shippingHold) {
             order.setEscrowStatus(EscrowStatus.HELD);
             orders.saveAndFlush(order);

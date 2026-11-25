@@ -77,9 +77,14 @@ public class CloudinaryVideoStorageImpl implements CloudinaryVideoStorage {
             String format = text(resource, "format");
             long bytes = positiveInteger(resource, "bytes");
             double duration = positiveNumber(resource, "duration");
-            if (!FORMATS.contains(format) || bytes > properties.maxBytes()
-                    || duration > properties.maxDurationSeconds()) {
-                throw new IOException("Uploaded video exceeds supported limits");
+            if (!FORMATS.contains(format)) {
+                throw new IOException("Unsupported video format");
+            }
+            if (bytes > properties.maxBytes()) {
+                throw new VideoLimitExceededException("Dung lượng video bằng chứng vượt mức cho phép (tối đa " + properties.maxBytes() + " byte).");
+            }
+            if (duration >= properties.maxDurationSeconds()) {
+                throw new VideoLimitExceededException("Video bằng chứng phải ngắn hơn " + properties.maxDurationSeconds() + " giây.");
             }
             // Cloudinary uses resource_type=video for audio too; require real video dimensions.
             positiveNumber(resource, "width");
@@ -98,6 +103,8 @@ public class CloudinaryVideoStorageImpl implements CloudinaryVideoStorage {
             }
             return new VerifiedVideo(publicId, videoUrl, bytes, format, duration,
                     text(resource, "asset_id"), positiveInteger(resource, "version"));
+        } catch (VideoLimitExceededException exception) {
+            throw exception;
         } catch (Exception exception) {
             // Provider exceptions can contain credentials or signed request details.
             throw new IOException("Unable to verify uploaded video");

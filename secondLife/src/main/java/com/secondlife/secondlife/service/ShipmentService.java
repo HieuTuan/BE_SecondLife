@@ -32,6 +32,7 @@ public interface ShipmentService {
 
     ShipmentResponse refundReturned(UUID actor, boolean staff, UUID id, String reason, ReportRequests.ResponsibleParty responsibleParty);
 
+    void refundDeliveredDisputeReturn(UUID shipmentId);
     ShipmentResponse confirmCashPayment(UUID actor, boolean reviewer, UUID shipmentId, ConfirmShipmentCashRequest request);
 
     ShipmentResponse sync(UUID actor, boolean staff, UUID id);

@@ -40,6 +40,7 @@ class LalamoveShipmentServiceTest {
     private final ShippingQuoteService quoteService=mock(ShippingQuoteService.class);
     private final ShippingProvider router=mock(ShippingProvider.class), lala=mock(ShippingProvider.class), ghn=mock(ShippingProvider.class);
     private final WalletService wallets=mock(WalletService.class);
+    private final OrderDisputeService disputes=mock(OrderDisputeService.class);
     private final InspectionFeeSettlementService inspectionFeeSettlement = mock(InspectionFeeSettlementService.class);
     private final InspectionShippingQuoteService inspectionShipping = mock(InspectionShippingQuoteService.class);
     private final InspectionCenterProfileService centerProfiles = mock(InspectionCenterProfileService.class);
@@ -48,7 +49,7 @@ class LalamoveShipmentServiceTest {
     private ShipmentService service;
     private Order order;
     private ShippingQuote quote;
-    private final Map<UUID,Shipment> rows=new HashMap<>();
+    private final Map<UUID,Shipment> rows=new LinkedHashMap<>();
     @BeforeEach void setup() {
         when(router.code()).thenReturn("LALAMOVE");
         when(router.forProvider("LALAMOVE")).thenReturn(lala);
@@ -76,7 +77,7 @@ class LalamoveShipmentServiceTest {
         service = new ShipmentServiceImpl(shipments, events, orders, inspections, quotes, quoteService,
                 mock(ReverseGeocodingService.class), router, mapper, wallets, transactions,
                 mock(SystemWalletService.class), mock(SellerReputationService.class), null, null, new ListingFingerprintImpl(),
-                MapperTestSupport.mapper(ShipmentMapper.class), mock(OrderDisputeService.class), mock(ReturnShippingFeeService.class), centerProfiles, inspectionShipping, inspectionFeeSettlement, publication, true);
+                MapperTestSupport.mapper(ShipmentMapper.class), disputes, mock(ReturnShippingFeeService.class), centerProfiles, inspectionShipping, inspectionFeeSettlement, publication, true);
     }
     private CreateShipmentRequest request(UUID id) { return new CreateShipmentRequest(id,"SELLER_TO_BUYER",null,null,null); }
     private Shipment booked() { service.createForOrder(seller,false,order.getId(),request(UUID.randomUUID())); return rows.values().iterator().next(); }
@@ -114,17 +115,29 @@ class LalamoveShipmentServiceTest {
     private void event(Shipment s,String eventId,String status,Instant time) {
         service.receiveLalamove(mapper.valueToTree(Map.of("event_id",eventId,"event_type","ORDER_STATUS_CHANGED","order_code",s.getOrderCode(),"occurred_at",time.toString(),"status",status)));
     }
-    @Test void onlyAssignedCenterCanBookPaidBuyerDeliveryAndReplayIsSafe() {
-        UUID centerId = UUID.randomUUID();
+    private InspectionOrder hubBuyerDelivery() {
         User center = new User();
-        center.setId(centerId);
+        center.setId(UUID.randomUUID());
         InspectionOrder inspection = new InspectionOrder();
         inspection.setId(UUID.randomUUID());
         inspection.setInspectionCenter(center);
         inspection.setOrderType(InspectionOrderType.AT_CENTER);
         inspection.setStatus("DELIVERING_TO_BUYER");
         inspection.setOrder(order);
+        inspection.setFinalPaymentPaidAt(Instant.now());
         quote.setLeg("CENTER_TO_BUYER");
+        when(inspections.findById(inspection.getId())).thenReturn(Optional.of(inspection));
+        return inspection;
+    }
+
+    private CreateShipmentRequest hubBuyerShipmentRequest() {
+        return new CreateShipmentRequest(UUID.randomUUID(), "CENTER_TO_BUYER", null, null, null);
+    }
+
+    @Test void onlyAssignedCenterCanBookPaidBuyerDeliveryAndReplayIsSafe() {
+        var inspection = hubBuyerDelivery();
+        UUID centerId = inspection.getInspectionCenter().getId();
+        inspection.setFinalPaymentPaidAt(null);
         var route = (tools.jackson.databind.node.ObjectNode) mapper.readTree(quote.getPayload());
         route.put("from_name", "Hub Lab");
         route.put("from_phone", "0922222222");
@@ -133,8 +146,7 @@ class LalamoveShipmentServiceTest {
         route.put("to_phone", "0933333333");
         route.put("to_address", "Buyer delivery");
         quote.setPayload(mapper.writeValueAsString(route));
-        when(inspections.findById(inspection.getId())).thenReturn(Optional.of(inspection));
-        var request = new CreateShipmentRequest(UUID.randomUUID(), "CENTER_TO_BUYER", null, null, null);
+        var request = hubBuyerShipmentRequest();
 
         assertThrows(ForbiddenException.class, () -> service.createCenterDelivery(UUID.randomUUID(), inspection.getId(), request));
         assertThrows(ConflictException.class, () -> service.createCenterDelivery(centerId, inspection.getId(), request));
@@ -156,6 +168,102 @@ class LalamoveShipmentServiceTest {
         assertEquals(first.shareLink(), first.trackingUrl());
         assertEquals(first, replay);
         verify(lala, times(1)).create(anyMap());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"REJECTED", "EXPIRED"})
+    void hubCanReplaceAnUnpickedLalamoveDelivery(String status) {
+        var inspection = hubBuyerDelivery();
+        UUID centerId = inspection.getInspectionCenter().getId();
+        var first = service.createCenterDelivery(centerId, inspection.getId(), hubBuyerShipmentRequest());
+        var failed = rows.get(first.shipmentId());
+        Instant rejectedAt = Instant.now();
+        event(failed, "hub-rejected", status, rejectedAt);
+        assertEquals("FAILED", failed.getStatus());
+        assertEquals(EscrowStatus.HELD, order.getEscrowStatus());
+        assertFalse(order.isShippingHold());
+
+        var retry = hubBuyerShipmentRequest();
+        when(lala.create(anyMap())).thenReturn(mapper.valueToTree(Map.of(
+                "order_code", "replacement-hub-trip", "status", "ASSIGNING_DRIVER", "total_fee", 27000)));
+        var replacement = service.createCenterDelivery(centerId, inspection.getId(), retry);
+        assertNotEquals(first.shipmentId(), replacement.shipmentId());
+        assertEquals(replacement, service.createCenterDelivery(centerId, inspection.getId(), retry));
+        assertThrows(ConflictException.class,
+                () -> service.createCenterDelivery(centerId, inspection.getId(), hubBuyerShipmentRequest()));
+
+        event(failed, "hub-repeated-rejection", status, rejectedAt.plusSeconds(1));
+        assertEquals(EscrowStatus.HELD, order.getEscrowStatus());
+        event(failed, "hub-stale-completion", "COMPLETED", rejectedAt.plusSeconds(2));
+        assertEquals("FAILED", failed.getStatus());
+        assertEquals(OrderStatus.PROCESSING, order.getStatus());
+        assertNull(order.getShippingDeliveredAt());
+        assertEquals(EscrowStatus.FROZEN, order.getEscrowStatus());
+        verify(lala, times(2)).create(anyMap());
+        verifyNoInteractions(wallets);
+    }
+
+    @Test void hubCanRecoverAnOldShippingHoldOnlyAfterTheDisputeHoldIsGone() {
+        var inspection = hubBuyerDelivery();
+        UUID centerId = inspection.getInspectionCenter().getId();
+        var first = service.createCenterDelivery(centerId, inspection.getId(), hubBuyerShipmentRequest());
+        event(rows.get(first.shipmentId()), "old-hub-rejection", "REJECTED", Instant.now());
+        order.setEscrowStatus(EscrowStatus.FROZEN);
+        order.setShippingHold(true);
+        when(disputes.hasOrderHold(order.getId())).thenReturn(true);
+
+        var retry = hubBuyerShipmentRequest();
+        assertThrows(ConflictException.class, () -> service.createCenterDelivery(centerId, inspection.getId(), retry));
+        assertEquals(EscrowStatus.FROZEN, order.getEscrowStatus());
+        verify(lala, times(1)).create(anyMap());
+
+        when(disputes.hasOrderHold(order.getId())).thenReturn(false);
+        when(lala.create(anyMap())).thenReturn(mapper.valueToTree(Map.of(
+                "order_code", "recovered-hub-trip", "status", "ASSIGNING_DRIVER", "total_fee", 27000)));
+        var replacement = service.createCenterDelivery(centerId, inspection.getId(), retry);
+        assertNotEquals(first.shipmentId(), replacement.shipmentId());
+        assertEquals(EscrowStatus.HELD, order.getEscrowStatus());
+        assertFalse(order.isShippingHold());
+        verify(lala, times(2)).create(anyMap());
+        verifyNoInteractions(wallets);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"REJECTED", "CANCELED"})
+    void hubCannotReplaceALalamoveDeliveryAfterPickup(String status) {
+        var inspection = hubBuyerDelivery();
+        UUID centerId = inspection.getInspectionCenter().getId();
+        var first = service.createCenterDelivery(centerId, inspection.getId(), hubBuyerShipmentRequest());
+        var shipment = rows.get(first.shipmentId());
+        Instant pickedUpAt = Instant.now();
+        event(shipment, "hub-pickup", "PICKED_UP", pickedUpAt);
+        event(shipment, "hub-interrupted", status, pickedUpAt.plusSeconds(1));
+
+        assertThrows(ConflictException.class,
+                () -> service.createCenterDelivery(centerId, inspection.getId(), hubBuyerShipmentRequest()));
+        assertEquals(OrderStatus.SHIPPED, order.getStatus());
+        verify(lala, times(1)).create(anyMap());
+        verifyNoInteractions(wallets);
+    }
+
+    @Test void hubCannotRebookAfterDelayedPickupIsRecordedForARejectedTrip() {
+        var inspection = hubBuyerDelivery();
+        UUID centerId = inspection.getInspectionCenter().getId();
+        var first = service.createCenterDelivery(centerId, inspection.getId(), hubBuyerShipmentRequest());
+        var shipment = rows.get(first.shipmentId());
+        Instant rejectedAt = Instant.now();
+        event(shipment, "hub-rejected-before-pickup-event", "REJECTED", rejectedAt);
+        var pickup = new ShipmentEvent();
+        pickup.setStatus("PICKED_UP");
+        when(events.findByShipmentIdOrderByOccurredAtAsc(shipment.getId())).thenReturn(List.of(pickup));
+        event(shipment, "hub-delayed-pickup", "PICKED_UP", rejectedAt.minusSeconds(1));
+
+        assertEquals("FAILED", shipment.getStatus());
+        assertEquals(EscrowStatus.FROZEN, order.getEscrowStatus());
+        assertThrows(ConflictException.class,
+                () -> service.createCenterDelivery(centerId, inspection.getId(), hubBuyerShipmentRequest()));
+        verify(lala, times(1)).create(anyMap());
+        verifyNoInteractions(wallets);
     }
 
     @ParameterizedTest
@@ -302,6 +410,42 @@ class LalamoveShipmentServiceTest {
         var s=booked(); event(s,"a","PICKED_UP",Instant.now()); event(s,"b","REJECTED",Instant.now().plusSeconds(1));
         assertEquals("FAILED",s.getStatus()); assertEquals(EscrowStatus.FROZEN,order.getEscrowStatus());
         assertThrows(ConflictException.class,() -> service.refundReturned(seller,true,s.getId(),"not physically returned")); verifyNoInteractions(wallets);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"CANCELED", "REJECTED", "EXPIRED"})
+    void sellerCanRebookAnInterruptedDirectShipmentBeforePickup(String status) {
+        var first = booked();
+        var now = Instant.now();
+        event(first, "interrupted", status, now);
+        assertTrue(service.orderShipments(seller, false, order.getId()).getFirst().canRebook());
+        assertFalse(service.orderShipments(buyer, false, order.getId()).getFirst().canRebook());
+        var next = request(UUID.randomUUID());
+        when(lala.create(anyMap())).thenReturn(mapper.valueToTree(Map.of(
+                "order_code", "replacement-trip", "status", "ASSIGNING_DRIVER", "total_fee", 27000)));
+        var replacement = service.createForOrder(seller, false, order.getId(), next);
+        assertNotEquals(first.getId(), replacement.shipmentId());
+        assertEquals(EscrowStatus.HELD, order.getEscrowStatus());
+        assertFalse(order.isShippingHold());
+        assertEquals(replacement.shipmentId(), service.createForOrder(seller, false, order.getId(), next).shipmentId());
+        event(first, "duplicate-terminal", status, now.plusSeconds(1));
+        assertEquals(EscrowStatus.HELD, order.getEscrowStatus());
+        assertThrows(ConflictException.class, () -> service.createForOrder(seller, false, order.getId(), request(UUID.randomUUID())));
+        verify(lala, times(2)).create(anyMap());
+        verifyNoInteractions(wallets);
+    }
+
+    @Test void proofOfDeliveryFailureStillPreventsRebooking() {
+        var first = booked();
+        event(first, "rejected", "REJECTED", Instant.now());
+        var proofFailure = new ShipmentEvent();
+        proofFailure.setPayload("{\"pod_status\":\"FAILED\"}");
+        when(events.findByShipmentIdOrderByOccurredAtAsc(first.getId())).thenReturn(List.of(proofFailure));
+        assertFalse(service.orderShipments(seller, false, order.getId()).getFirst().canRebook());
+        assertThrows(ConflictException.class, () -> service.createForOrder(seller, false, order.getId(), request(UUID.randomUUID())));
+        assertEquals(EscrowStatus.FROZEN, order.getEscrowStatus());
+        verify(lala, times(1)).create(anyMap());
+        verifyNoInteractions(wallets);
     }
     private InspectionOrder inspectionWithFailedHubReturn(Shipment failedReturn) {
         var inspection = new InspectionOrder();

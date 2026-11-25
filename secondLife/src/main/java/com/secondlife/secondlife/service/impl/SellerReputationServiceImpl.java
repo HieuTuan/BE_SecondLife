@@ -121,8 +121,9 @@ public class SellerReputationServiceImpl implements SellerReputationService {
     @Transactional(propagation=Propagation.MANDATORY)
     public void confirmSellerFault(ReportResponse report, UUID reviewerId, String decisionReason) {
         Order order=report.orderId()==null?null:orders.findByIdForUpdate(report.orderId()).orElseThrow();
+        boolean responseTimedOut = order != null && report.status() == ReportRequests.Status.DISMISSED;
         String faultType="PRODUCT_OR_REPORT";
-        if(order!=null) {
+        if (order != null && !responseTimedOut) {
             if(report.reasonCode()==ReportRequests.ReasonCode.LATE_HANDOVER) {
                 if(order.getHandoverDeadline()==null || order.getCarrierPickedUpAt()==null || !order.getCarrierPickedUpAt().isAfter(order.getHandoverDeadline()))
                     throw new ConflictException("Late handover requires carrier pickup after the recorded deadline; unknown historical deadlines cannot be penalized");
@@ -138,24 +139,25 @@ public class SellerReputationServiceImpl implements SellerReputationService {
             } else if(order.getStatus()==OrderStatus.CANCELLED && order.getEscrowStatus()==EscrowStatus.REFUNDED) {
                 faultType=isReturn(order)?"RETURN":"CANCELLATION";
             }
-        } else if(Set.of(ReportRequests.ReasonCode.LATE_HANDOVER,ReportRequests.ReasonCode.SELLER_CANCELLATION,
+        } else if(order == null && Set.of(ReportRequests.ReasonCode.LATE_HANDOVER,ReportRequests.ReasonCode.SELLER_CANCELLATION,
                 ReportRequests.ReasonCode.RETURN_NOT_AS_DESCRIBED).contains(report.reasonCode()))
             throw new BadRequestException("This report reason requires an orderId");
         UUID sellerId=report.sellerId(); State before=lock(sellerId);
-        boolean serious=report.reasonCode()==ReportRequests.ReasonCode.FRAUD;
+        boolean serious = !responseTimedOut && report.reasonCode() == ReportRequests.ReasonCode.FRAUD;
+        String faultReason = responseTimedOut ? "Người bán quá hạn phản hồi khiếu nại." : decisionReason;
         String key=order!=null?"ORDER:"+order.getId():"POST:"+report.postId()+":"+report.reasonCode();
         var incidents=reputations.findIncidentSeverities(key);
         boolean first=incidents.isEmpty(),escalation=!first && serious && !incidents.getFirst();
         if(first) reputations.createIncident(key,sellerId,report.id(),serious);
         else if(escalation) reputations.escalateIncident(key,report.id());
-        boolean faultAdded=order!=null && fault(order,faultType,report.id(),reviewerId,decisionReason);
+        boolean faultAdded=order!=null && fault(order,faultType,report.id(),reviewerId,faultReason);
         if(!first && !escalation && !faultAdded) return;
         int seriousIncrement=(first || escalation) && serious?1:0;
         boolean restrictSelling=seriousIncrement>0 && before.serious()+seriousIncrement>=properties.fraudRestrictionThreshold();
         reputations.incrementIncidentCounts(sellerId,first?1:0,seriousIncrement,restrictSelling);
         if(order!=null) evaluate(order);
         event(sellerId,escalation?"SERIOUS_VIOLATION_CONFIRMED":"SELLER_FAULT_CONFIRMED",report.orderId(),report.id(),reviewerId,
-                decisionReason,before,state(sellerId,false).orElseThrow());
+                faultReason,before,state(sellerId,false).orElseThrow());
     }
 
     @Transactional(propagation=Propagation.MANDATORY)

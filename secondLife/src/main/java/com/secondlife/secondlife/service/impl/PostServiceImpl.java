@@ -28,6 +28,7 @@ import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.integration.ai.AiChatGateway;
+import com.secondlife.secondlife.integration.ai.ListingPhotoContentReview;
 import com.secondlife.secondlife.mapper.PostMapper;
 import com.secondlife.secondlife.repository.AiChatMessageRepository;
 import com.secondlife.secondlife.repository.AiChatSessionRepository;
@@ -88,6 +89,7 @@ public class PostServiceImpl implements PostService {
     private final int minImages;
     private final int maxImages;
     private final ImageUploadValidator imageValidator;
+    private final ListingPhotoContentReview photoContentReview;
     private final ListingImageSimilarity imageSimilarity;
     private final ListingFingerprint listingFingerprint;
     private final PostRepository postRepository;
@@ -134,10 +136,12 @@ public class PostServiceImpl implements PostService {
                            @Value("${app.listing.max-images}") int maxImages,
                            PostMapper postMapper,
                            PlatformTransactionManager transactions,
-                           ImageUploadValidator imageValidator) {
+                           ImageUploadValidator imageValidator,
+                           ListingPhotoContentReview photoContentReview) {
         this.transactionTemplate = transactions != null ? new TransactionTemplate(transactions) : null;
         this.postMapper = postMapper;
         this.imageValidator = imageValidator;
+        this.photoContentReview = photoContentReview;
 
         if (maxUnfinishedDrafts <= 0 || maxImageBytes <= 0)
             throw new IllegalArgumentException("Listing draft and image byte limits must be positive");
@@ -201,6 +205,7 @@ public class PostServiceImpl implements PostService {
             throw new ConflictException("Maximum " + maxUnfinishedDrafts + " unfinished drafts; finish an existing draft first");
 
         var prepared = imageValidator.prepareListingImages(request.images(), minImages, maxImages, maxImageBytes);
+        photoContentReview.validateUploads(prepared);
         List<PostImage> postImages = new ArrayList<>();
         for (var image : prepared) {
             try {
@@ -229,6 +234,7 @@ public class PostServiceImpl implements PostService {
                 p.setBrand(declaredBrand);
                 p.setStatus("DRAFT");
                 p.getImages().addAll(postImages);
+                p.setImageContentReviewedAt(Instant.now());
                 if (!postImages.isEmpty()) {
                     p.setImageUrl(postImages.getFirst().getImageUrl());
                     p.setImageFingerprint(postImages.getFirst().getImageFingerprint());
@@ -419,7 +425,7 @@ public class PostServiceImpl implements PostService {
                     templateText,
                     cleanDescription);
         } else {
-            // Manual mode: No AI visual scan, no credit deducted
+            // The image set already passed moderation. Manual mode uses no AI chat credit.
             runInTransaction(() -> {
                 post.setAiDescription(null);
                 post.setDescription(null);
@@ -662,6 +668,7 @@ public class PostServiceImpl implements PostService {
         if (post.getImageUrl() == null || post.getImageUrl().isBlank()) throw new BadRequestException("A product image is required");
 
         publication.requirePublishAvailable(userId);
+        photoContentReview.requireReviewed(post);
 
         post.setTitle(request.title().trim());
         post.setDescription(request.description().trim());
@@ -880,7 +887,9 @@ public class PostServiceImpl implements PostService {
         if (post.getUser() == null || !userId.equals(post.getUser().getId())) {
             throw new ForbiddenException("This post belongs to another user");
         }
-        return postMapper.toResponse(post);
+        boolean reclassify = canOfferReclassification(post)
+                && !postRepository.findReclassifiableIds(List.of(postId)).isEmpty();
+        return toSellerPost(post, reclassify);
     }
 
     @Override
@@ -1064,7 +1073,20 @@ public class PostServiceImpl implements PostService {
         if (!page.isEmpty()) {
             postRepository.findAllWithImagesByIdIn(page.getContent().stream().map(Post::getId).toList());
         }
-        return page.map(postMapper::toResponse);
+        var candidates = page.getContent().stream().filter(this::canOfferReclassification).map(Post::getId).toList();
+        Set<UUID> reclassifiable = candidates.isEmpty()
+                ? Set.of() : Set.copyOf(postRepository.findReclassifiableIds(candidates));
+        return page.map(post -> toSellerPost(post, reclassifiable.contains(post.getId())));
+    }
+
+    private boolean canOfferReclassification(Post post) {
+        return "ACTIVE".equals(post.getStatus()) || ListingAccessService.canEditDraft(post);
+    }
+
+    private PostDto toSellerPost(Post post, boolean reclassify) {
+        var actions = new PostDto.SellerActions(
+                ListingAccessService.canEditDraft(post), "ACTIVE".equals(post.getStatus()), reclassify);
+        return postMapper.toResponse(post).toBuilder().sellerActions(actions).build();
     }
 
     @Override

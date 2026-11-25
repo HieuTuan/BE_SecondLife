@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.List;
@@ -82,13 +83,23 @@ public class ReportSubmissionServiceImpl implements ReportSubmissionService {
         if (report.getStatus() != Status.OPEN && report.getStatus() != Status.IN_REVIEW) {
             throw new ConflictException("Responses can only be added to an open report or a report under review");
         }
+        Instant submittedAt = clock.instant().truncatedTo(ChronoUnit.MICROS);
+        boolean sellerSubmission = report.getSellerId().equals(actorId);
+        Instant deadline = report.getSellerResponseDeadlineAt();
+        if (sellerSubmission && report.getSellerRespondedAt() == null && deadline != null && !submittedAt.isBefore(deadline)) {
+            throw new ConflictException("The seller response deadline has expired");
+        }
+
         validateRequest(request);
         evidence.validateOwner(actorId, request.evidenceUrls());
         evidence.bind(actorId, reportId, request.evidenceUrls());
         var submission = new ReportSubmission(UUID.randomUUID(), reportId, actorId,
                 report.getReporterId().equals(actorId) ? "BUYER" : "SELLER", request.requestId(),
                 request.description(), json.writeValueAsString(request.evidenceUrls()),
-                clock.instant().truncatedTo(ChronoUnit.MICROS));
+                submittedAt);
+        if (sellerSubmission && report.getSellerRespondedAt() == null) {
+            report.setSellerRespondedAt(submittedAt);
+        }
         return mapper.toResponse(submissions.saveAndFlush(submission), json);
     }
 
@@ -124,7 +135,9 @@ public class ReportSubmissionServiceImpl implements ReportSubmissionService {
             throw new BadRequestException("Response description is required and must not exceed 2000 characters");
         }
         List<String> urls = request.evidenceUrls();
-        if (urls.size() > 10) throw new BadRequestException("A response may contain at most 10 evidence items");
+        if (urls.size() > ReportEvidenceService.MAX_ATTACHMENTS_PER_SUBMISSION) {
+            throw new BadRequestException("Có thể đính kèm tối đa " + ReportEvidenceService.MAX_ATTACHMENTS_PER_SUBMISSION + " tệp bằng chứng.");
+        }
         if (urls.stream().anyMatch(url -> url == null || url.isBlank() || url.length() > 2048)) {
             throw new BadRequestException("Evidence references must be nonblank and must not exceed 2048 characters");
         }

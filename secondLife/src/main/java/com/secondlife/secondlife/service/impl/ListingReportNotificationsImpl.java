@@ -8,6 +8,9 @@ import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.ListingReportNotifications;
 import com.secondlife.secondlife.service.NotificationService;
 import lombok.RequiredArgsConstructor;
+
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,9 +33,19 @@ public class ListingReportNotificationsImpl implements ListingReportNotification
         }
         if (orderReport) {
             notifications.notifyInApp(report.sellerId(), "Đơn hàng có khiếu nại",
-                    "Tiền hàng đang được giữ trong thời gian nhân viên xem xét khiếu nại.",
-                    NotificationType.REPORT, report.id(), "REPORT", "/seller/orders/" + report.orderId());
+                    "Đơn hàng đang được giữ tiền. Vào tab Khiếu Nại để xem hồ sơ và gửi phản hồi.",
+                    NotificationType.REPORT, report.id(), "REPORT", null);
         }
+    }
+
+    @Override
+    public void sellerResponseRequested(ReportResponse report) {
+        String deadline = DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy")
+                .withZone(ZoneId.of("Asia/Ho_Chi_Minh")).format(report.sellerResponseDeadlineAt());
+        notifications.notifyInApp(report.sellerId(), "Cần phản hồi khiếu nại đơn hàng",
+                "Vào tab Khiếu Nại và cung cấp phản hồi trước " + deadline
+                        + " (giờ Việt Nam). Quá hạn 24 giờ sẽ ghi nhận trách nhiệm thuộc người bán.",
+                NotificationType.REPORT, report.id(), "REPORT", null);
     }
 
     public void reviewStarted(ReportResponse report) {
@@ -54,7 +67,7 @@ public class ListingReportNotificationsImpl implements ListingReportNotification
         if (report.orderId() != null) {
             notifications.notifyInApp(report.sellerId(), "Đã có kết quả xử lý tranh chấp",
                     "Nhân viên đã cập nhật kết quả xử lý khiếu nại của đơn hàng.",
-                    NotificationType.REPORT, report.id(), "REPORT", "/seller/orders/" + report.orderId());
+                    NotificationType.REPORT, report.id(), "REPORT", null);
         }
     }
 }

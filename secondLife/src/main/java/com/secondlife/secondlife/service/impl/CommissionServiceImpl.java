@@ -15,6 +15,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
@@ -82,7 +83,12 @@ public class CommissionServiceImpl implements CommissionService {
     }
     @Override @Transactional(readOnly = true)
     public Page<CommissionAuditResponse> history(UUID id, Pageable pageable) {
-        rule(id); return audits.findByRuleIdOrderByChangedAtDesc(id, pageable).map(commissionMapper::toAuditResponse);
+        rule(id);
+        return audits.findHistory(id, pageable).map(row -> {
+            var audit = row.getAudit();
+            return commissionMapper.toAuditResponse(audit, row.getActorName(),
+                    readAuditSnapshot(audit.getOldValue()), readAuditSnapshot(audit.getNewValue()));
+        });
     }
     @Override @Transactional(propagation = Propagation.MANDATORY)
     public OrderCommissionSnapshot capture(Order order, UUID actorId, String reason) {
@@ -135,6 +141,14 @@ public class CommissionServiceImpl implements CommissionService {
         if (!r.active()) return;
         rules.findByTypeAndActiveTrue(CommissionRuleType.DEFAULT).filter(other -> !other.getId().equals(excludedId))
                 .ifPresent(other -> { throw new ConflictException("An active default commission policy already exists"); });
+    }
+    private CommissionAuditResponse.Snapshot readAuditSnapshot(String storedValue) {
+        if (storedValue == null || storedValue.isBlank()) return null;
+        try {
+            return mapper.readValue(storedValue, CommissionAuditResponse.Snapshot.class);
+        } catch (JacksonException ignored) {
+            return null;
+        }
     }
     private String json(CommissionRule rule) { return mapper.writeValueAsString(commissionMapper.toRuleResponse(rule)); }
     private void audit(CommissionRule rule, UUID actor, String action, String old, String reason) {

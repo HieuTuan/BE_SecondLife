@@ -21,8 +21,9 @@ public class CommissionMapper {
         this.delegate = delegate;
     }
 
-    public CommissionAuditResponse toAuditResponse(CommissionRuleAudit source) {
-        return delegate.toAuditResponse(source);
+    public CommissionAuditResponse toAuditResponse(CommissionRuleAudit source, String actorName,
+            CommissionAuditResponse.Snapshot before, CommissionAuditResponse.Snapshot after) {
+        return delegate.toAuditResponse(source, actorName, before, after);
     }
 
     public CommissionRuleResponse toRuleResponse(CommissionRule source) {
@@ -35,7 +36,8 @@ public class CommissionMapper {
 
     @Mapper(config = MapStructConfiguration.class)
     public interface Delegate {
-        CommissionAuditResponse toAuditResponse(CommissionRuleAudit source);
+        CommissionAuditResponse toAuditResponse(CommissionRuleAudit source, String actorName,
+                CommissionAuditResponse.Snapshot before, CommissionAuditResponse.Snapshot after);
 
         CommissionRuleResponse toRuleResponse(CommissionRule source);
 

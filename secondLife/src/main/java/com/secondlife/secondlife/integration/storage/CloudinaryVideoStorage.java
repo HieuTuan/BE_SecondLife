@@ -11,6 +11,12 @@ public interface CloudinaryVideoStorage {
     record VerifiedVideo(String publicId, String videoUrl, long bytes, String format, double duration,
                          String assetId, long version) { }
 
+    class VideoLimitExceededException extends IOException {
+        public VideoLimitExceededException(String message) {
+            super(message);
+        }
+    }
+
     SignedUpload sign(String publicId);
 
     VerifiedVideo inspect(String publicId) throws IOException;

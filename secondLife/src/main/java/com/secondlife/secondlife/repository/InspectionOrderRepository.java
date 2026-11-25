@@ -82,17 +82,22 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
 
     @Query(value = """
             SELECT DISTINCT ON (o.post_id) o.post_id AS "postId",
-                   o.tamper_seal_id AS "tamperSealId", o.condition_grade AS "conditionGrade"
+                   o.tamper_seal_id AS "tamperSealId", o.condition_grade AS "conditionGrade",
+                   o.order_type AS "inspectionMethod"
             FROM inspection_orders o
             WHERE o.post_id IN (:postIds)
-              AND (o.tamper_seal_id IS NOT NULL OR o.status = 'PASSED'
-                OR (o.status = 'COMPLETED' AND o.inspection_scope = 'PRE_LISTING')
+              AND (o.status IN ('PASSED', 'DELIVERING_TO_BUYER', 'COMPLETED')
                 OR (o.status = 'CANCELLED' AND EXISTS (
                     SELECT 1 FROM inspection_fee_settlements s
                     WHERE s.inspection_order_id = o.id
                       AND s.outcome = 'PASSED_BUYER_DEFAULTED'
-                      AND s.return_shipping_settled_at IS NOT NULL
+                      AND (o.order_type = 'AT_HOME' OR s.return_shipping_settled_at IS NOT NULL)
                 )))
+              AND NOT EXISTS (
+                  SELECT 1 FROM inspection_orders failed
+                  WHERE failed.post_id = o.post_id AND failed.status = 'FAILED'
+                    AND (failed.created_at, failed.id) > (o.created_at, o.id)
+              )
             ORDER BY o.post_id, o.created_at DESC NULLS LAST, o.id DESC
             """, nativeQuery = true)
     List<ListingInspection> findLatestListingInspections(@Param("postIds") Collection<UUID> postIds);
@@ -103,6 +108,8 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
         String getTamperSealId();
 
         String getConditionGrade();
+
+        String getInspectionMethod();
     }
 
     List<InspectionOrder> findAllByPostIdOrderByCreatedAtDesc(UUID postId);

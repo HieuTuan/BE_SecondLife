@@ -7,6 +7,7 @@ import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionScope;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.integration.ai.ListingPhotoContentReview;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.service.HighValueInspectionPolicyService;
@@ -30,12 +31,14 @@ public class ListingPublicationServiceImpl implements ListingPublicationService 
     private final PostRepository posts;
     private final InspectionOrderRepository inspections;
     private final HighValueInspectionPolicyService policies;
+    private final ListingPhotoContentReview photoContentReview;
     private final long publishWindowSeconds;
     private final int publishLimit;
 
     public ListingPublicationServiceImpl(ListingCreditService credits, ListingAccessService access, PostRepository posts,
                                      InspectionOrderRepository inspections,
                                      HighValueInspectionPolicyService policies,
+                                     ListingPhotoContentReview photoContentReview,
                                      @Value("${app.listing.publish-window-seconds}") long publishWindowSeconds,
                                      @Value("${app.listing.publish-limit}") int publishLimit) {
         if (publishWindowSeconds <= 0 || publishLimit <= 0)
@@ -45,6 +48,7 @@ public class ListingPublicationServiceImpl implements ListingPublicationService 
         this.posts = posts;
         this.inspections = inspections;
         this.policies = policies;
+        this.photoContentReview = photoContentReview;
         this.publishWindowSeconds = publishWindowSeconds;
         this.publishLimit = publishLimit;
     }
@@ -66,6 +70,7 @@ public class ListingPublicationServiceImpl implements ListingPublicationService 
     @Transactional(propagation = Propagation.MANDATORY)
     public void accept(Post post) {
         access.requireVerifiedSeller(post.getUser().getId());
+        photoContentReview.requireReviewed(post);
         post.setRejectionReason(null);
         if (post.getInspectionPolicyVersion() == null) snapshotPolicy(post);
         if (Boolean.TRUE.equals(post.getMandatoryInspection())) {
@@ -87,6 +92,7 @@ public class ListingPublicationServiceImpl implements ListingPublicationService 
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void activate(Post post) {
+        photoContentReview.requireReviewed(post);
         preparePublication(post);
         publish(post);
     }

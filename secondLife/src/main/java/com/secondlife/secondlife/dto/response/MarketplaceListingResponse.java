@@ -9,4 +9,4 @@ public record MarketplaceListingResponse(UUID id, UUID postId, UUID sellerId, St
         String title, String brand, String description, String itemCondition, String imageUrl, List<String> imageUrls,
         BigDecimal price, String status, Instant publishedAt,
         Integer shippingWeight, Integer shippingLength, Integer shippingWidth, Integer shippingHeight,
-        Boolean isInspected, String tamperSealId, String conditionGrade) {}
+        Boolean isInspected, String tamperSealId, String conditionGrade, String inspectionMethod) {}

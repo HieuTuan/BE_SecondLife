@@ -14,6 +14,7 @@ import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.entity.UserReport;
 import com.secondlife.secondlife.enums.EscrowStatus;
 import com.secondlife.secondlife.enums.OrderStatus;
+import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.integration.shipping.ShippingProvider;
 import com.secondlife.secondlife.mapper.OrderMapper;
 import com.secondlife.secondlife.mapper.ShipmentMapper;
@@ -107,10 +108,15 @@ class LalamoveReturnSafetyTest {
                 mock(InspectionOrderRepository.class), quotes, mock(ShippingQuoteService.class), mock(ReverseGeocodingService.class), router,
                 mapper, wallets, transactions, mock(SystemWalletService.class), mock(SellerReputationService.class), new ListingFingerprintImpl(),
                 MapperTestSupport.mapper(ShipmentMapper.class), disputes, mock(ReturnShippingFeeService.class), mock(InspectionCenterProfileService.class), mock(InspectionShippingQuoteService.class), mock(InspectionFeeSettlementService.class));
-        var request = new CreateShipmentRequest(UUID.randomUUID(), "BUYER_TO_SELLER", null, null, "Approved dispute return", decision.getId());
+        var request = new CreateShipmentRequest(UUID.randomUUID(), "BUYER_TO_SELLER", null, null, null, decision.getId());
 
-        var first = service.createForOrder(UUID.randomUUID(), true, order.getId(), request);
-        var replay = service.createForOrder(UUID.randomUUID(), true, order.getId(), request);
+        assertThrows(ForbiddenException.class, () -> service.createForOrder(UUID.randomUUID(), true, order.getId(), request));
+        assertThrows(ForbiddenException.class, () -> service.createForOrder(order.getSeller().getId(), false, order.getId(), request));
+        verify(lalamove, never()).create(anyMap());
+
+        UUID buyerId = order.getBuyer().getId();
+        var first = service.createForOrder(buyerId, false, order.getId(), request);
+        var replay = service.createForOrder(buyerId, false, order.getId(), request);
 
         assertEquals(first.shipmentId(), replay.shipmentId());
         assertEquals("BUYER_TO_SELLER", first.leg());

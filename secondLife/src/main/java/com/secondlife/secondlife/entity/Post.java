@@ -53,6 +53,9 @@ public class Post {
     @Column(name = "image_url")
     private String imageUrl; // the original image uploaded by the user
 
+    @Column(name = "image_content_reviewed_at")
+    private Instant imageContentReviewedAt;
+
     @ElementCollection
     @CollectionTable(name = "post_images", joinColumns = @JoinColumn(name = "post_id"))
     @OrderColumn(name = "image_position")

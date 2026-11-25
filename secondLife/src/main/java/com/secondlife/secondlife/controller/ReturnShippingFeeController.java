@@ -2,6 +2,7 @@ package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.common.PageResponse;
+import com.secondlife.secondlife.dto.response.ReturnShippingDeductionResponse;
 import com.secondlife.secondlife.dto.response.ReturnShippingFeeResponse;
 import com.secondlife.secondlife.dto.response.SellerReturnShippingDebtResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
@@ -58,9 +59,18 @@ public class ReturnShippingFeeController {
         return ApiResponse.success(fees.mine(currentUser.resolveUserId(user), outstandingOnly, pageable));
     }
 
+    @GetMapping("/seller/return-shipping-fees/deductions")
+    @PreAuthorize("hasRole('SELLER') and hasAuthority('PROFILE_READ_SELF')")
+    @Operation(summary = "List individual return shipping deductions from the seller's wallet")
+    public ApiResponse<PageResponse<ReturnShippingDeductionResponse>> deductions(
+            @AuthenticationPrincipal CustomUserDetails user,
+            @RequestParam(defaultValue = "false") boolean outstandingOnly, @Parameter(hidden = true) Pageable pageable) {
+        return ApiResponse.success(fees.deductions(currentUser.resolveUserId(user), outstandingOnly, pageable));
+    }
+
     @GetMapping("/seller/return-shipping-fees/debt")
     @PreAuthorize("hasRole('SELLER') and hasAuthority('PROFILE_READ_SELF')")
-    @Operation(summary = "Read own outstanding return shipping debt", description = "Sum of unpaid amounts from immutable assessments; pending carrier fees are not included.")
+    @Operation(summary = "Read own outstanding return shipping debt", description = "Sum of unpaid amounts remaining after collections; pending carrier fees are excluded.")
     public ApiResponse<SellerReturnShippingDebtResponse> debt(@AuthenticationPrincipal CustomUserDetails user) {
         return ApiResponse.success(fees.debt(currentUser.resolveUserId(user)));
     }

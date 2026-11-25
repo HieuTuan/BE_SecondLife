@@ -135,11 +135,6 @@ public class RbacDataSeeder implements ApplicationRunner {
         seedInspectorUser(roles.get(RoleCode.INSPECTOR));
         seedStaffUser(roles.get(RoleCode.STAFF));
 
-        // Ensure all users with SELLER role have an approved seller verification in database
-        userRepository.findAll().stream()
-                .filter(u -> u.hasRole(RoleCode.SELLER.name()))
-                .forEach(this::ensureSellerVerification);
-
         log.info("RBAC and Initial Data Seeding completed successfully.");
     }
 
@@ -353,8 +348,7 @@ public class RbacDataSeeder implements ApplicationRunner {
         User sellerUser = userRepository.findByEmailIgnoreCase(normalizedSellerEmail).orElse(null);
 
         if (sellerUser != null) {
-            log.warn("Seller seed account already exists; ensuring approved seller verification");
-            ensureSellerVerification(sellerUser);
+            log.info("Seller seed account [{}] already exists; skipping", normalizedSellerEmail);
             return;
         }
 

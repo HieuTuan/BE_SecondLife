@@ -165,6 +165,88 @@ class InspectionGovernanceIntegrationTest {
     }
 
     @Test
+    void adminHistoryIncludesOnlyActualReserveChangesWithActorAndTimestamp() throws Exception {
+        String policyPath = "/api/v1/admin/inspection/return-shipping-policy";
+        String historyPath = policyPath + "/history";
+        mvc.perform(get(historyPath).header("Authorization", auth(seller))).andExpect(status().isForbidden());
+        mvc.perform(get(historyPath).header("Authorization", auth(admin)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(0));
+
+        Instant before = Instant.now();
+        for (String percentage : List.of("25.50", "25.5", "0")) {
+            mvc.perform(put(policyPath).header("Authorization", auth(admin)).contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"markupPercentage\":" + percentage + "}"))
+                    .andExpect(status().isOk());
+        }
+
+        String newest = mvc.perform(get(historyPath).param("page", "0").param("size", "1")
+                        .header("Authorization", auth(admin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(2))
+                .andExpect(jsonPath("$.data.totalPages").value(2))
+                .andExpect(jsonPath("$.data.items[0].previousMarkupPercentage").value(25.5))
+                .andExpect(jsonPath("$.data.items[0].newMarkupPercentage").value(0))
+                .andExpect(jsonPath("$.data.items[0].changedBy").value(admin.getId().toString()))
+                .andReturn().getResponse().getContentAsString();
+        Instant changedAt = Instant.parse(json.readTree(newest).at("/data/items/0/changedAt").asString());
+        assertFalse(changedAt.isBefore(before));
+        assertFalse(changedAt.isAfter(Instant.now()));
+
+        mvc.perform(get(historyPath).param("page", "1").param("size", "1").header("Authorization", auth(admin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].previousMarkupPercentage").value(20))
+                .andExpect(jsonPath("$.data.items[0].newMarkupPercentage").value(25.5))
+                .andExpect(jsonPath("$.data.isLast").value(true));
+    }
+
+    @Test
+    void commissionHistoryReturnsStructuredChangesAlongsideExistingAuditFields() throws Exception {
+        UserProfile profile = new UserProfile();
+        profile.setFullName("Quản trị viên kiểm thử");
+        admin.setProfile(profile);
+        users.saveAndFlush(admin);
+
+        String base = "/api/v1/admin/commission-rules";
+        var created = mvc.perform(post(base).header("Authorization", auth(admin)).contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Commission test","rate":0.05,"minCommission":10000,"maxCommission":100000,
+                                 "active":false,"reason":"Initial policy"}
+                                """))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String ruleId = json.readTree(created).at("/data/id").asString();
+        mvc.perform(put(base + "/" + ruleId).header("Authorization", auth(admin)).contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Updated commission","rate":0.075,"minCommission":12000,"maxCommission":null,
+                                 "active":false,"reason":"Adjust commission and fees"}
+                                """))
+                .andExpect(status().isOk());
+
+        String history = base + "/" + ruleId + "/history";
+        mvc.perform(get(history).header("Authorization", auth(seller))).andExpect(status().isForbidden());
+        mvc.perform(get(history).param("size", "1").header("Authorization", auth(admin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(2))
+                .andExpect(jsonPath("$.data.items[0].action").value("UPDATE"))
+                .andExpect(jsonPath("$.data.items[0].actorId").value(admin.getId().toString()))
+                .andExpect(jsonPath("$.data.items[0].actorName").value("Quản trị viên kiểm thử"))
+                .andExpect(jsonPath("$.data.items[0].reason").value("Adjust commission and fees"))
+                .andExpect(jsonPath("$.data.items[0].changedAt").isString())
+                .andExpect(jsonPath("$.data.items[0].oldValue").isString())
+                .andExpect(jsonPath("$.data.items[0].newValue").isString())
+                .andExpect(jsonPath("$.data.items[0].before.rate").value(0.05))
+                .andExpect(jsonPath("$.data.items[0].before.maxCommission").value(100000))
+                .andExpect(jsonPath("$.data.items[0].after.rate").value(0.075))
+                .andExpect(jsonPath("$.data.items[0].after.minCommission").value(12000))
+                .andExpect(jsonPath("$.data.items[0].after.maxCommission").doesNotExist())
+                .andExpect(jsonPath("$.data.items[0].after.revision").value(2));
+        mvc.perform(get(history).param("page", "1").param("size", "1").header("Authorization", auth(admin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].action").value("CREATE"))
+                .andExpect(jsonPath("$.data.items[0].before").doesNotExist())
+                .andExpect(jsonPath("$.data.items[0].after.name").value("Commission test"));
+    }
+
+    @Test
     void centerTravelTiersIncludeLastUpdatedTimestamp() throws Exception {
         String updatedAt = "2026-11-14T09:00:00Z";
         jdbc.update("UPDATE inspection_travel_tiers SET updated_at = CAST(? AS timestamptz) WHERE tier_number = 1",
@@ -598,12 +680,66 @@ class InspectionGovernanceIntegrationTest {
         oldItem.setSelectable(false);
         items.saveAndFlush(oldItem);
         Post product = listing(oldItem);
-        String path = "/api/v1/posts/my-posts/" + product.getId() + "/item";
-        mvc.perform(patch(path)
+        String detailPath = "/api/v1/posts/my-posts/" + product.getId();
+        mvc.perform(get(detailPath).header("Authorization", auth(seller)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sellerActions.editContent").value(false))
+                .andExpect(jsonPath("$.sellerActions.updateShippingPackage").value(true))
+                .andExpect(jsonPath("$.sellerActions.reclassifyItem").value(true));
+        mvc.perform(get("/api/v1/posts/my-posts").header("Authorization", auth(seller)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].sellerActions.reclassifyItem").value(true));
+
+        InspectionOrder inspection = new InspectionOrder();
+        inspection.setPost(product);
+        inspection.setBuyer(buyer);
+        inspection.setSeller(seller);
+        orders.saveAndFlush(inspection);
+        mvc.perform(get(detailPath).header("Authorization", auth(seller)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sellerActions.reclassifyItem").value(false));
+
+        inspection.setStatus("CANCELLED");
+        orders.saveAndFlush(inspection);
+        mvc.perform(patch(detailPath + "/item")
                         .header("Authorization", auth(seller)).contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsString(Map.of("itemId", riceCooker.getId()))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.itemId").value(riceCooker.getId().toString()));
         assertEquals(riceCooker.getId(), product.getItemId());
+        mvc.perform(get(detailPath).header("Authorization", auth(seller)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sellerActions.reclassifyItem").value(false));
+    }
+
+    @Test
+    void sellerCanUpdateOnlyThePackageOfAnActiveListing() throws Exception {
+        Post product = listing(riceCooker);
+        product.setListingCreditCharged(true);
+        posts.saveAndFlush(product);
+        String authorization = auth(seller);
+        String packagePath = "/api/v1/posts/" + product.getId() + "/shipping-package";
+        String body = """
+                {"weight":2000,"length":30,"width":25,"height":20}
+                """;
+        mvc.perform(put(packagePath).header("Authorization", authorization)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.weight").value(2000));
+        mvc.perform(get("/api/v1/posts/my-posts/" + product.getId()).header("Authorization", authorization))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.listingCreditCharged").value(true))
+                .andExpect(jsonPath("$.price").value(1000000))
+                .andExpect(jsonPath("$.shippingWeight").value(2000))
+                .andExpect(jsonPath("$.shippingLength").value(30))
+                .andExpect(jsonPath("$.shippingWidth").value(25))
+                .andExpect(jsonPath("$.shippingHeight").value(20));
+
+        product.setStatus("RESERVED");
+        posts.saveAndFlush(product);
+        mvc.perform(put(packagePath).header("Authorization", authorization)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict());
     }
 
     private Item item(String name) {

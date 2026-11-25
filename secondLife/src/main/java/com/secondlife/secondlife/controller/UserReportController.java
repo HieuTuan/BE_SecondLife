@@ -2,6 +2,8 @@ package com.secondlife.secondlife.controller;
 import com.secondlife.secondlife.common.*;
 import com.secondlife.secondlife.dto.request.ReportRequests;
 import com.secondlife.secondlife.dto.response.ReportResponse;
+import com.secondlife.secondlife.dto.response.SellerOrderDisputeResponse;
+import com.secondlife.secondlife.dto.response.SellerOrderDisputeDetailResponse;
 import com.secondlife.secondlife.security.*;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.UserReportService;
@@ -51,6 +53,23 @@ public class UserReportController {
             @RequestParam(required=false) ReportRequests.TargetType targetType,@Parameter(hidden=true) Pageable pageable) {
         return ApiResponse.success(reports.mine(currentUser.resolveUserId(user),targetType,pageable));
     }
+    @GetMapping("/seller")
+    @PreAuthorize("hasRole('SELLER') and hasAuthority('PROFILE_READ_SELF')")
+    @Operation(summary="List order dispute summaries for the authenticated seller",
+            description="Returns only order reports belonging to the seller, newest first. Buyer evidence is private.")
+    public ApiResponse<PageResponse<SellerOrderDisputeResponse>> sellerDisputes(
+            @AuthenticationPrincipal CustomUserDetails user,@Parameter(hidden=true) Pageable pageable) {
+        return ApiResponse.success(reports.sellerDisputes(currentUser.resolveUserId(user),pageable));
+    }
+
+    @GetMapping("/seller/{id}")
+    @PreAuthorize("hasRole('SELLER') and hasAuthority('PROFILE_READ_SELF')")
+    @Operation(summary="Read the buyer complaint and its initial evidence for your own order")
+    public ApiResponse<SellerOrderDisputeDetailResponse> sellerDisputeDetail(
+            @AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID id) {
+        return ApiResponse.success(reports.sellerDisputeDetail(currentUser.resolveUserId(user), id));
+    }
+
     @GetMapping("/{id}")
     @Operation(summary="Private report detail; only reporter or authorized STAFF/ADMIN")
     public ApiResponse<ReportResponse> get(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID id) {

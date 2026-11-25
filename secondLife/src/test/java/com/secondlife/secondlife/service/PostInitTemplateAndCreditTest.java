@@ -12,6 +12,7 @@ import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.CreditType;
 import com.secondlife.secondlife.exception.AiProviderException;
 import com.secondlife.secondlife.integration.ai.AiChatGateway;
+import com.secondlife.secondlife.integration.ai.ListingPhotoContentReview;
 import com.secondlife.secondlife.mapper.PostMapper;
 import com.secondlife.secondlife.repository.AiChatMessageRepository;
 import com.secondlife.secondlife.repository.AiChatSessionRepository;
@@ -106,7 +107,8 @@ class PostInitTemplateAndCreditTest {
                 6,
                 mock(PostMapper.class),
                 null,
-                mock(com.secondlife.secondlife.common.validation.ImageUploadValidator.class)
+                mock(com.secondlife.secondlife.common.validation.ImageUploadValidator.class),
+                 mock(ListingPhotoContentReview.class)
         );
 
         userId = UUID.randomUUID();

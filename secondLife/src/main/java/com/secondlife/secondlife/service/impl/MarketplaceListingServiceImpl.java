@@ -5,8 +5,8 @@ import com.secondlife.secondlife.dto.response.MarketplaceListingResponse;
 import com.secondlife.secondlife.entity.InspectionFeeSettlement;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Post;
+import com.secondlife.secondlife.enums.InspectionOrderType;
 import com.secondlife.secondlife.enums.InspectionSettlementOutcome;
-import com.secondlife.secondlife.enums.InspectionScope;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.PostMapper;
@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -160,14 +161,21 @@ public class MarketplaceListingServiceImpl implements MarketplaceListingService 
             settlements.select(cb.literal(1)).where(
                     cb.equal(settlement.get("inspectionOrder"), inspection),
                     cb.equal(settlement.get("outcome"), InspectionSettlementOutcome.PASSED_BUYER_DEFAULTED),
-                    cb.isNotNull(settlement.get("returnShippingSettledAt")));
+                    cb.or(cb.equal(inspection.get("orderType"), InspectionOrderType.AT_HOME),
+                            cb.isNotNull(settlement.get("returnShippingSettledAt"))));
+            var newerFailures = inspections.subquery(Integer.class);
+            var failed = newerFailures.from(InspectionOrder.class);
+            newerFailures.select(cb.literal(1)).where(
+                    cb.equal(failed.get("post"), inspection.get("post")),
+                    cb.equal(failed.get("status"), "FAILED"),
+                    cb.or(cb.greaterThan(failed.<Instant>get("createdAt"), inspection.<Instant>get("createdAt")),
+                            cb.and(cb.equal(failed.get("createdAt"), inspection.get("createdAt")),
+                                    cb.greaterThan(failed.<UUID>get("id"), inspection.<UUID>get("id")))));
             inspections.select(cb.literal(1)).where(
                     cb.equal(inspection.get("post"), post),
-                    cb.or(cb.isNotNull(inspection.get("tamperSealId")),
-                            cb.equal(inspection.get("status"), "PASSED"),
-                            cb.and(cb.equal(inspection.get("status"), "COMPLETED"),
-                                    cb.equal(inspection.get("inspectionScope"), InspectionScope.PRE_LISTING)),
-                            cb.and(cb.equal(inspection.get("status"), "CANCELLED"), cb.exists(settlements))));
+                    cb.or(inspection.get("status").in("PASSED", "DELIVERING_TO_BUYER", "COMPLETED"),
+                            cb.and(cb.equal(inspection.get("status"), "CANCELLED"), cb.exists(settlements))),
+                    cb.not(cb.exists(newerFailures)));
             return cb.exists(inspections);
         };
     }
@@ -185,8 +193,9 @@ public class MarketplaceListingServiceImpl implements MarketplaceListingService 
 
     private MarketplaceListingResponse toResponse(Post post, ListingInspection inspection) {
         if (inspection == null) {
-            return postMapper.toMarketplaceResponse(post, false, null, null);
+            return postMapper.toMarketplaceResponse(post, false, null, null, null);
         }
-        return postMapper.toMarketplaceResponse(post, true, inspection.getTamperSealId(), inspection.getConditionGrade());
+        return postMapper.toMarketplaceResponse(post, true, inspection.getTamperSealId(),
+                inspection.getConditionGrade(), inspection.getInspectionMethod());
     }
 }

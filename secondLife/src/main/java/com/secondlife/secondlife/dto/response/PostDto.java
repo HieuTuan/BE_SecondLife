@@ -1,5 +1,6 @@
 package com.secondlife.secondlife.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Builder;
 
 import java.math.BigDecimal;
@@ -7,7 +8,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-@Builder
+@Builder(toBuilder = true)
 public record PostDto(
     UUID id,
     UUID categoryId,
@@ -29,8 +30,12 @@ public record PostDto(
     Integer shippingLength,
     Integer shippingWidth,
     Integer shippingHeight,
-    SellerSummary user
+    SellerSummary user,
+    @JsonInclude(JsonInclude.Include.NON_NULL) SellerActions sellerActions
 ) {
+
+    public record SellerActions(boolean editContent, boolean updateShippingPackage, boolean reclassifyItem) {
+    }
 
     @Builder
     public record SellerSummary(

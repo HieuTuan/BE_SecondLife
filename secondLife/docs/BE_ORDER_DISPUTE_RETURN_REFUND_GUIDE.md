@@ -28,7 +28,7 @@ Cờ `orders.shipping_hold` giữ riêng lý do đóng băng do sự cố vận 
 
 ## 2. Buyer tạo và theo dõi tranh chấp
 
-Có thể tải ảnh qua `POST /api/v1/reports/evidence` (`multipart/form-data`, field `file`) trước khi tạo báo cáo. Dùng `evidenceUrl` riêng tư do endpoint này trả về; ảnh phải thuộc người tạo và không được dùng URL CDN công khai. `evidenceUrls` có thể bỏ qua hoặc là mảng rỗng.
+Khi mở khiếu nại đơn hàng, buyer phải đính kèm từ 1 đến 5 ảnh hoặc video bằng chứng. Tải ảnh qua `POST /api/v1/reports/evidence` (`multipart/form-data`, field `file`) hoặc tải video qua API upload video. Gửi các `evidenceUrl` riêng tư thuộc buyer. Nếu bỏ qua `evidenceUrls` hoặc gửi mảng rỗng, BE trả `400` trước khi đóng băng Escrow.
 
 `POST /api/v1/reports` trả `201 Created`:
 
@@ -38,7 +38,7 @@ Có thể tải ảnh qua `POST /api/v1/reports/evidence` (`multipart/form-data`
   "orderId": "22222222-2222-4222-8222-222222222222",
   "reasonCode": "MISLEADING_DESCRIPTION",
   "description": "Sản phẩm nhận được khác mô tả; đề nghị kiểm tra và hoàn hàng.",
-  "evidenceUrls": []
+  "evidenceUrls": ["/api/v1/reports/evidence/{evidenceId}"]
 }
 ```
 

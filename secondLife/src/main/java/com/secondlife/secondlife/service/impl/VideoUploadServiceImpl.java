@@ -14,6 +14,7 @@ import com.secondlife.secondlife.exception.VideoUploadException;
 import com.secondlife.secondlife.integration.storage.CloudinaryVideoStorage;
 import com.secondlife.secondlife.integration.storage.CloudinaryVideoStorage.SignedUpload;
 import com.secondlife.secondlife.integration.storage.CloudinaryVideoStorage.VerifiedVideo;
+import com.secondlife.secondlife.integration.storage.CloudinaryVideoStorage.VideoLimitExceededException;
 import com.secondlife.secondlife.mapper.VideoUploadMapper;
 import com.secondlife.secondlife.repository.ReportEvidenceRepository;
 import com.secondlife.secondlife.repository.UserRepository;
@@ -84,6 +85,7 @@ public class VideoUploadServiceImpl implements VideoUploadService {
         verification.acquire(ownerId,session.getId());
         VerifiedVideo video;
         try { video=storage.inspect(session.getPublicId()); }
+        catch(VideoLimitExceededException error) { throw new BadRequestException(error.getMessage()); }
         catch(IOException error) { throw new VideoUploadException("Video is not available for verification; finish uploading all chunks and retry",502); }
         validateVerifiedVideo(session,video);
         compareClientMetadata(request,video.videoUrl(),video.bytes(),video.format(),video.duration());
@@ -105,11 +107,17 @@ public class VideoUploadServiceImpl implements VideoUploadService {
         catch(IOException error) { throw new VideoUploadException("Video playback is temporarily unavailable",502); }
     }
     private void validateVerifiedVideo(VideoUploadSession session,VerifiedVideo video) {
-        if(video==null || !session.getPublicId().equals(video.publicId()) || video.bytes()<=0 || video.bytes()>limits.maxBytes()
-                || !Double.isFinite(video.duration()) || video.duration()<=0 || video.duration()>limits.maxDurationSeconds()
+        if(video==null || !session.getPublicId().equals(video.publicId()) || video.bytes()<=0
+                || !Double.isFinite(video.duration()) || video.duration()<=0
                 || !Set.of("mp4","mov","webm").contains(video.format()) || video.assetId()==null || video.assetId().isBlank()
                 || video.version()<=0 || video.videoUrl()==null || !video.videoUrl().startsWith("https://"))
-            throw new BadRequestException("Verified video exceeds the evidence limits or has invalid metadata");
+            throw new BadRequestException("Video bằng chứng có thông tin không hợp lệ.");
+        if (video.bytes() > limits.maxBytes()) {
+            throw new BadRequestException("Dung lượng video bằng chứng vượt mức cho phép (tối đa " + limits.maxBytes() + " byte).");
+        }
+        if (video.duration() >= limits.maxDurationSeconds()) {
+            throw new BadRequestException("Video bằng chứng phải ngắn hơn " + limits.maxDurationSeconds() + " giây.");
+        }
     }
     private void compareClientMetadata(VideoCompleteRequest request,String url,long bytes,String format,double duration) {
         if((request.videoUrl()!=null && !request.videoUrl().equals(url)) || (request.bytes()!=null && request.bytes()!=bytes)

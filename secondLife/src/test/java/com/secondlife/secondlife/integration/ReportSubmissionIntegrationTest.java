@@ -52,6 +52,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -128,6 +129,121 @@ class ReportSubmissionIntegrationTest {
         mvc.perform(get("/api/v1/reports/" + reportId).header("Authorization", bearer(seller))).andExpect(status().isForbidden());
         mvc.perform(get(buyerEvidence).header("Authorization", bearer(seller))).andExpect(status().isForbidden());
         mvc.perform(get(sellerEvidence).header("Authorization", bearer(buyer))).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void sellerDisputesListOnlyOwnOrderSummariesWithoutPrivateEvidence() throws Exception {
+        var buyer = actor("BUYER");
+        var seller = actor("SELLER");
+        var otherSeller = actor("SELLER");
+        var order = order(seller, buyer);
+        var reportId = report(order, buyer, seller);
+        report(order(otherSeller, buyer), buyer, otherSeller);
+        jdbc.update("""
+                INSERT INTO user_reports(id,reporter_id,request_id,seller_id,post_id,reason_code,description,
+                    evidence_urls,status,created_at,updated_at)
+                VALUES (?,?,?,?,?,'OTHER','Listing report','[]'::jsonb,'OPEN',now(),now())
+                """, UUID.randomUUID(), buyer.getId(), UUID.randomUUID(), seller.getId(), order.getPost().getId());
+
+        mvc.perform(get("/api/v1/reports/seller").header("Authorization", bearer(seller)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.items[0].id").value(reportId.toString()))
+                .andExpect(jsonPath("$.data.items[0].orderId").value(order.getId().toString()))
+                .andExpect(jsonPath("$.data.items[0].postTitle").value("Order dispute product"))
+                .andExpect(jsonPath("$.data.items[0].status").value("OPEN"))
+                .andExpect(jsonPath("$.data.items[0].description").doesNotExist())
+                .andExpect(jsonPath("$.data.items[0].evidenceUrls").doesNotExist())
+                .andExpect(jsonPath("$.data.items[0].reporterId").doesNotExist());
+        mvc.perform(get("/api/v1/reports/seller").header("Authorization", bearer(buyer)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void sellerCanReadInitialBuyerComplaintAndEvidenceOnlyForOwnOrder() throws Exception {
+        var buyer = actor("BUYER");
+        var seller = actor("SELLER");
+        var anotherSeller = actor("SELLER");
+        var reportId = report(order(seller, buyer), buyer, seller);
+        String originalEvidence = evidence(buyer);
+        String supplementaryEvidence = evidence(buyer);
+        jdbc.update("UPDATE user_reports SET evidence_urls = CAST(? AS JSONB) WHERE id = ?",
+                json.writeValueAsString(List.of(originalEvidence)), reportId);
+        jdbc.update("UPDATE report_evidence_uploads SET report_id = ? WHERE id = ?", reportId, evidenceId(originalEvidence));
+        submit(buyer, reportId, body("Later supplemental evidence", List.of(supplementaryEvidence)))
+                .andExpect(status().isCreated());
+
+        mvc.perform(get("/api/v1/reports/seller/" + reportId).header("Authorization", bearer(seller)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.description").value("Original buyer report"))
+                .andExpect(jsonPath("$.data.buyerEvidenceUrls[0]").value(originalEvidence))
+                .andExpect(jsonPath("$.data.reporterId").doesNotExist());
+        mvc.perform(get("/api/v1/reports/seller/" + reportId).header("Authorization", bearer(anotherSeller)))
+                .andExpect(status().isNotFound());
+        mvc.perform(get(originalEvidence + "/metadata").header("Authorization", bearer(seller))).andExpect(status().isOk());
+        mvc.perform(get(originalEvidence + "/metadata").header("Authorization", bearer(anotherSeller))).andExpect(status().isForbidden());
+        mvc.perform(get(supplementaryEvidence + "/metadata").header("Authorization", bearer(seller))).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void sellerResponseOrExpiryIsRequiredBeforeReviewAndRequestKeepsOriginalDeadline() throws Exception {
+        var buyer = actor("BUYER");
+        var seller = actor("SELLER");
+        var staff = actor("STAFF");
+        var reportId = report(order(seller, buyer), buyer, seller);
+        var base = "/api/v1/staff/reports/" + reportId;
+        var request = post(base + "/request-seller-response").header("Authorization", bearer(staff));
+        var start = post(base + "/start-review").header("Authorization", bearer(staff));
+        mvc.perform(start).andExpect(status().isConflict());
+        mvc.perform(post(base + "/request-seller-response").header("Authorization", bearer(seller))).andExpect(status().isForbidden());
+        Instant before = Instant.now();
+        var first = data(mvc.perform(request).andExpect(status().isOk()));
+        Instant deadline = Instant.parse(first.path("sellerResponseDeadlineAt").asText());
+        assertFalse(deadline.isBefore(before.plusSeconds(24 * 3600)));
+        assertFalse(deadline.isAfter(Instant.now().plusSeconds(24 * 3600)));
+        mvc.perform(request).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sellerResponseDeadlineAt").value(first.path("sellerResponseDeadlineAt").asText()));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM notifications WHERE user_id=? AND reference_id=?",
+                Integer.class, seller.getId(), reportId));
+
+        submit(buyer, reportId, body("Buyer followup", List.of())).andExpect(status().isCreated());
+        mvc.perform(start).andExpect(status().isConflict());
+        submit(seller, reportId, body("Seller description of packaging", List.of())).andExpect(status().isCreated());
+        mvc.perform(start).andExpect(status().isOk()).andExpect(jsonPath("$.data.sellerRespondedAt").isNotEmpty());
+    }
+
+    @Test
+    void expiredSellerResponseForcesSellerResponsibilityAndStillRequiresStaffDecision() throws Exception {
+        var buyer = actor("BUYER");
+        var seller = actor("SELLER");
+        var staff = actor("STAFF");
+        var order = order(seller, buyer);
+        var reportId = report(order, buyer, seller);
+        var base = "/api/v1/staff/reports/" + reportId;
+        mvc.perform(post(base + "/request-seller-response").header("Authorization", bearer(staff))).andExpect(status().isOk());
+        jdbc.update("UPDATE user_reports SET seller_response_deadline_at = now() - interval '1 second', reason_code = 'FRAUD' WHERE id = ?", reportId);
+        submit(seller, reportId, body("Seller missed the reply window", List.of())).andExpect(status().isConflict());
+        mvc.perform(post(base + "/start-review").header("Authorization", bearer(staff))).andExpect(status().isOk());
+        for (String party : List.of("NONE", "BUYER")) {
+            var invalid = Map.of("decision", "DISMISSED", "responsibleParty", party,
+                    "reason", "Reviewed the response deadline", "resolutionAction", "NONE");
+            mvc.perform(post(base + "/resolve").header("Authorization", bearer(staff))
+                            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(invalid)))
+                    .andExpect(status().isConflict());
+        }
+        var dismissal = Map.of("decision", "DISMISSED", "reason", "Reviewed the response deadline", "resolutionAction", "NONE");
+        var resolve = post(base + "/resolve").header("Authorization", bearer(staff))
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(dismissal));
+        mvc.perform(resolve).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("DISMISSED"))
+                .andExpect(jsonPath("$.data.responsibleParty").value("SELLER"))
+                .andExpect(jsonPath("$.data.resolutionAction").value("NONE"));
+        mvc.perform(resolve).andExpect(status().isOk());
+        assertEquals("HELD", jdbc.queryForObject("SELECT escrow_status FROM orders WHERE id=?", String.class, order.getId()));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM reputation_order_faults WHERE source_report_id=?",
+                Integer.class, reportId));
+        assertEquals(0, jdbc.queryForObject("SELECT serious_incidents FROM seller_reputations WHERE seller_id=?",
+                Integer.class, seller.getId()));
     }
 
     @Test

@@ -9,6 +9,7 @@ import com.secondlife.secondlife.integration.shipping.ShippingProvider;
 import com.secondlife.secondlife.mapper.InspectionShippingQuoteMapper;
 import com.secondlife.secondlife.mapper.ShippingVehicleSelectionMapper;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
+import com.secondlife.secondlife.repository.InspectionReturnShippingPolicyHistoryRepository;
 import com.secondlife.secondlife.repository.InspectionReturnShippingPolicyRepository;
 import com.secondlife.secondlife.repository.InspectionShippingQuoteRepository;
 import com.secondlife.secondlife.repository.PostRepository;
@@ -43,7 +44,8 @@ class InspectionShippingQuoteServiceImplTest {
         var locations = mock(InspectionLocationService.class);
         var provider = mock(ShippingProvider.class);
         var json = new ObjectMapper();
-        var service = new InspectionShippingQuoteServiceImpl(quotes, policies, mock(InspectionOrderRepository.class),
+        var service = new InspectionShippingQuoteServiceImpl(quotes, policies,
+                mock(InspectionReturnShippingPolicyHistoryRepository.class), mock(InspectionOrderRepository.class),
                 posts, centers, locations, provider, MapperTestSupport.mapper(InspectionShippingQuoteMapper.class),
                 mock(ShippingVehicleSelectionMapper.class), json);
 

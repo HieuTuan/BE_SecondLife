@@ -19,8 +19,9 @@ public class PostMapper {
     }
 
     public MarketplaceListingResponse toMarketplaceResponse(Post post, boolean isInspected,
-                                                            String tamperSealId, String conditionGrade) {
-        return delegate.toMarketplaceResponse(post, isInspected, tamperSealId, conditionGrade);
+                                                            String tamperSealId, String conditionGrade,
+                                                            String inspectionMethod) {
+        return delegate.toMarketplaceResponse(post, isInspected, tamperSealId, conditionGrade, inspectionMethod);
     }
 
     public PostDto toResponse(Post post) {
@@ -37,10 +38,13 @@ public class PostMapper {
         @Mapping(target = "isInspected", source = "isInspected")
         @Mapping(target = "tamperSealId", source = "tamperSealId")
         @Mapping(target = "conditionGrade", source = "conditionGrade")
+        @Mapping(target = "inspectionMethod", source = "inspectionMethod")
         MarketplaceListingResponse toMarketplaceResponse(Post post, boolean isInspected,
-                                                        String tamperSealId, String conditionGrade);
+                                                        String tamperSealId, String conditionGrade,
+                                                        String inspectionMethod);
 
         @Mapping(target = "user", expression = "java(toSellerSummary(post.getUser(), post.getSellerPickupAddress()))")
+        @Mapping(target = "sellerActions", ignore = true)
         PostDto toResponse(Post post);
 
         @Mapping(target = "fullName", source = "user.profile.fullName")
