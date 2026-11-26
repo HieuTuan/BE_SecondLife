@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.service.impl;
 
 import com.secondlife.secondlife.dto.request.InspectionAppealRequest;
+import com.secondlife.secondlife.dto.request.InspectionAppointmentCounterRequest;
 import com.secondlife.secondlife.dto.request.InspectionAppointmentRequest;
 import com.secondlife.secondlife.enums.InspectionAppointmentShift;
 import com.secondlife.secondlife.dto.request.InspectionBuyerRespondRequest;
@@ -9,6 +10,7 @@ import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionResultRequest;
 import com.secondlife.secondlife.dto.request.InspectionStartRequest;
 import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
+import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.dto.response.InspectionQuoteResponse;
 import com.secondlife.secondlife.entity.InspectionOrder;
@@ -525,6 +527,28 @@ class InspectionServiceImplWorkflowTest {
         verify(postRepository, times(1)).save(post);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"AT_HOME", "AT_CENTER"})
+    void buyerCanSaveDeliveryAddressOnlyWhileWaitingForPurchase(String inspectionType) {
+        order.setOrderType(InspectionOrderType.valueOf(inspectionType));
+        order.setStatus("PASSED");
+        order.setFinalPaymentDeadline(Instant.now().plus(1, ChronoUnit.HOURS));
+        var address = new ShippingAddress("Buyer", "0901234567", "Địa chỉ đã chọn", new BigDecimal("10.78"), new BigDecimal("106.7"));
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+        when(inspectionOrderMapper.toResponse(eq(order), any(), eq(address), isNull(), isNull()))
+                .thenReturn(InspectionOrderResponse.builder().id(order.getId()).status("PASSED").build());
+
+        assertThrows(ForbiddenException.class, () -> service.updatePurchaseDeliveryAddress(seller.getId(), order.getId(), address));
+        var updated = service.updatePurchaseDeliveryAddress(buyer.getId(), order.getId(), address);
+
+        assertEquals(address, updated.buyerDeliveryAddress());
+        assertEquals(address, objectMapper.readValue(order.getBuyerDeliveryAddressJson(), ShippingAddress.class));
+        order.setFinalPaymentDeadline(Instant.now().minusSeconds(1));
+        assertThrows(ConflictException.class, () -> service.updatePurchaseDeliveryAddress(buyer.getId(), order.getId(), address));
+        order.setStatus("DELIVERING_TO_BUYER");
+        assertThrows(ConflictException.class, () -> service.updatePurchaseDeliveryAddress(buyer.getId(), order.getId(), address));
+    }
+
     @Test
     void homeCheckInRequiresFundedAppointmentAndAssignedTechnician() {
         order.setOrderType(InspectionOrderType.AT_HOME);
@@ -559,6 +583,70 @@ class InspectionServiceImplWorkflowTest {
         assertTrue(order.getAssignmentLocked());
         assertNotNull(order.getInspectorConfirmedAt());
         verify(inspectionOrderRepository).save(order);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {-31, 31})
+    void homeCheckInRejectsRequestsOutsideAppointmentWindow(int appointmentOffsetMinutes) {
+        order.setOrderType(InspectionOrderType.AT_HOME);
+        order.setStatus("SCHEDULED");
+        order.setBuyerPaidAt(Instant.now());
+        order.setAppointmentScheduledAt(Instant.now().plus(appointmentOffsetMinutes, ChronoUnit.MINUTES));
+        order.setAppointmentStatus(InspectionAppointmentStatus.CONFIRMED);
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+
+        ConflictException error = assertThrows(ConflictException.class, () -> service.startInspection(
+                inspector.getId(), order.getId(), new InspectionStartRequest(order.getId().toString(), null, null)));
+        assertTrue(error.getMessage().contains(appointmentOffsetMinutes < 0 ? "hẹn lại" : "30 phút trước"));
+        assertNull(order.getHomeCheckedInAt());
+        assertEquals("SCHEDULED", order.getStatus());
+        verify(inspectionOrderRepository, never()).save(any());
+    }
+
+    @Test
+    void centerCanProposeNewAppointmentOnlyAfterMissedCheckIn() {
+        User center = new User();
+        center.setId(UUID.randomUUID());
+        center.addRole(new Role("INSPECTION_CENTER", "Center", null));
+        order.setInspectionCenter(center);
+        order.setOrderType(InspectionOrderType.AT_HOME);
+        order.setStatus("DISPATCHED");
+        order.setBuyerPaidAt(Instant.now());
+        order.setAppointmentStatus(InspectionAppointmentStatus.CONFIRMED);
+        order.setAppointmentScheduledAt(Instant.now().minus(15, ChronoUnit.MINUTES));
+        order.setInspectorConfirmed(true);
+        order.setInspectorConfirmedAt(Instant.now());
+        order.setAssignmentLocked(true);
+        order.setHomeCheckInCode(UUID.randomUUID());
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+        when(userRepository.findById(center.getId())).thenReturn(Optional.of(center));
+
+        Instant newTime = ZonedDateTime.now(ZoneId.of("Asia/Ho_Chi_Minh")).plusDays(1)
+                .withHour(9).withMinute(0).withSecond(0).withNano(0).toInstant();
+        var request = new InspectionAppointmentCounterRequest(newTime, InspectionAppointmentShift.MORNING, "Quá hạn check-in");
+        assertThrows(ConflictException.class, () -> service.counterAppointment(center.getId(), order.getId(), request));
+
+        order.setAppointmentScheduledAt(Instant.now().minus(31, ChronoUnit.MINUTES));
+        order.setHomeCheckedInAt(Instant.now().minus(35, ChronoUnit.MINUTES));
+        assertThrows(ConflictException.class, () -> service.counterAppointment(center.getId(), order.getId(), request));
+        order.setHomeCheckedInAt(null);
+        assertThrows(ConflictException.class, () -> service.getOrCreateHomeCheckInCode(seller.getId(), order.getId()));
+        assertThrows(ConflictException.class, () -> service.confirmTask(inspector.getId(), order.getId()));
+        service.counterAppointment(center.getId(), order.getId(), request);
+
+        assertEquals(InspectionAppointmentStatus.COUNTERED_BY_CENTER, order.getAppointmentStatus());
+        assertEquals("CONFIRMED_PENDING_DISPATCH", order.getStatus());
+        assertEquals(newTime, order.getCounterScheduledAt());
+        assertNull(order.getInspector());
+        assertNull(order.getHomeCheckInCode());
+        assertNull(order.getInspectorConfirmedAt());
+        assertFalse(order.getAssignmentLocked());
+        assertFalse(order.getInspectorConfirmed());
+
+        service.acceptAppointmentCounter(seller.getId(), order.getId());
+        assertEquals(InspectionAppointmentStatus.CONFIRMED, order.getAppointmentStatus());
+        assertEquals("SCHEDULED", order.getStatus());
+        assertEquals(newTime, order.getAppointmentScheduledAt());
     }
 
     @Test

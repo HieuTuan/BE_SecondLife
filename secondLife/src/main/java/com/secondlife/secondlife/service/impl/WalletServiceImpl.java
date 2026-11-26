@@ -234,19 +234,27 @@ public class WalletServiceImpl implements WalletService {
         if (fee == null || fee.signum() < 0 || fee.compareTo(new BigDecimal("1000000000")) > 0) {
             throw new ConflictException("Invalid return shipping fee");
         }
-        return collectSellerFee(sellerId, fee, shipmentId, WalletTransactionType.RETURN_SHIPPING_FEE,
+        return collectAvailableFee(sellerId, fee, shipmentId, WalletTransactionType.RETURN_SHIPPING_FEE,
                 WalletTransactionReferenceType.SHIPMENT);
     }
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public BigDecimal collectFailedInspectionFee(UUID sellerId, BigDecimal fee, UUID inspectionOrderId) {
-        return collectSellerFee(sellerId, fee, inspectionOrderId, WalletTransactionType.PAYMENT,
+        return collectAvailableFee(sellerId, fee, inspectionOrderId, WalletTransactionType.PAYMENT,
                 WalletTransactionReferenceType.INSPECTION_ORDER);
     }
 
-    private BigDecimal collectSellerFee(UUID sellerId, BigDecimal fee, UUID referenceId,
-                                        WalletTransactionType type, WalletTransactionReferenceType referenceType) {
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public BigDecimal collectInspectionReturnFee(UUID userId, BigDecimal fee, UUID inspectionOrderId) {
+        if (fee == null || fee.signum() < 0) throw new ConflictException("Invalid inspection return fee");
+        return collectAvailableFee(userId, fee, inspectionOrderId, WalletTransactionType.PAYMENT,
+                WalletTransactionReferenceType.INSPECTION_ORDER);
+    }
+
+    private BigDecimal collectAvailableFee(UUID sellerId, BigDecimal fee, UUID referenceId,
+                                           WalletTransactionType type, WalletTransactionReferenceType referenceType) {
         BigDecimal amount = fee.setScale(2, RoundingMode.UNNECESSARY);
         if (amount.signum() == 0) return amount;
 

@@ -21,6 +21,7 @@ public interface SystemWalletService {
     void holdInspectionFee(InspectionOrder order, boolean buyer, BigDecimal feeShare, BigDecimal deposit);
     boolean lockInspectionFunds(UUID inspectionOrderId);
     void settleInspectionFees(InspectionFeeSettlement settlement);
+    void recordInspectionReturnCollection(UUID inspectionOrderId, BigDecimal amount, boolean debtPayment);
     void settleInspectionReturn(UUID inspectionOrderId, BigDecimal carrierFee, BigDecimal sellerCollected,
                                 BigDecimal reserveRefund);
     SystemWalletResponse getWallet();

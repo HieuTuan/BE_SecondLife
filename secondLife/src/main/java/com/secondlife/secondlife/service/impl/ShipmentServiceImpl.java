@@ -5,8 +5,9 @@ import com.secondlife.secondlife.dto.request.CreateShipmentRequest;
 import com.secondlife.secondlife.dto.request.ReportRequests;
 import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.request.ShippingAddressRequest;
-import com.secondlife.secondlife.dto.response.ShipmentResponse;
+import com.secondlife.secondlife.dto.response.InspectionReturnFeeResponse;
 import com.secondlife.secondlife.dto.response.InspectionReturnQuoteResponse;
+import com.secondlife.secondlife.dto.response.ShipmentResponse;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.InspectionSealLog;
 import com.secondlife.secondlife.entity.Order;
@@ -228,7 +229,10 @@ public class ShipmentServiceImpl implements ShipmentService {
                 linkedInspectionId = linkedInspection
                         .or(() -> inspections.findFirstByPostIdAndStatusOrderByCreatedAtDesc(order.getPost().getId(), "PASSED"))
                         .map(InspectionOrder::getId).orElse(null);
-                if (linkedInspection.isEmpty() && "LALAMOVE".equals(quote.getProvider())) {
+                boolean sellerDirectLegAllowed = linkedInspection
+                        .map(inspection -> inspection.getOrderType() == InspectionOrderType.AT_HOME)
+                        .orElse(true);
+                if (sellerDirectLegAllowed && "LALAMOVE".equals(quote.getProvider())) {
                     outboundRetry = rebookableOutboundShipment(order,
                             shipments.findByOrderIdOrderByCreatedAtAsc(orderId), request.leg()) != null;
                 }
@@ -421,11 +425,18 @@ public class ShipmentServiceImpl implements ShipmentService {
         var route = mapper.valueToTree(payload);
         String carrierCode = activeCarrier();
         var preview = carrier(carrierCode).preview(payload);
+        BigDecimal quoteFee = returnQuoteFee(preview);
+        InspectionReturnFeeResponse adjustment = inspectionFeeSettlement.previewReturnFee(inspection, quoteFee);
         return new InspectionReturnQuoteResponse(
-                ShippingPayloads.storedAddress(route, "from"), ShippingPayloads.storedAddress(route, "to"),
-                returnQuoteFee(preview), inspection.getReturnShippingReserveFee(), carrierCode,
+                ShippingPayloads.storedAddress(route, "from"),
+                ShippingPayloads.storedAddress(route, "to"),
+                quoteFee,
+                inspection.getReturnShippingReserveFee(),
+                carrierCode,
                 preview.path("provider_quote").path("serviceType").asText(null),
-                preview.path("expires_at").asText(null));
+                preview.path("expires_at").asText(null),
+                adjustment,
+                adjustment != null);
     }
 
     private void requireAssignedCenter(UUID centerId, InspectionOrder inspection) {
@@ -484,11 +495,13 @@ public class ShipmentServiceImpl implements ShipmentService {
         }
         UUID buyer = inspection.getBuyer() == null ? null : inspection.getBuyer().getId();
         BigDecimal returnBudget = inspection.getReturnShippingReserveFee();
+        boolean allowOverReserve = inspectionFeeSettlement.previewReturnFee(
+                inspection, returnBudget != null ? returnBudget : BigDecimal.ZERO) != null;
         if (inspection.isCorporateShipping() && "FAILED".equals(inspection.getStatus()) && request.maxReturnFee() != null) {
             returnBudget = request.maxReturnFee();
         }
         return prepare(actor, null, inspectionId, seller, buyer, request, payload,
-                returnBudget, saved.map(Shipment::getProvider).orElse(activeCarrier()));
+                returnBudget, saved.map(Shipment::getProvider).orElse(activeCarrier()), false, allowOverReserve);
     }
 
     private ShippingAddress legacyCenterPickup(InspectionOrder inspection, CreateShipmentRequest request,
@@ -526,12 +539,18 @@ public class ShipmentServiceImpl implements ShipmentService {
     private Prepared prepare(UUID actor, UUID orderId, UUID inspectionId, UUID seller, UUID buyer,
                              CreateShipmentRequest request, Map<String, Object> payload, BigDecimal fee,
                              String carrierCode) {
-        return prepare(actor, orderId, inspectionId, seller, buyer, request, payload, fee, carrierCode, false);
+        return prepare(actor, orderId, inspectionId, seller, buyer, request, payload, fee, carrierCode, false, false);
     }
 
     private Prepared prepare(UUID actor, UUID orderId, UUID inspectionId, UUID seller, UUID buyer,
                              CreateShipmentRequest request, Map<String, Object> payload, BigDecimal fee,
                              String carrierCode, boolean outboundRetry) {
+        return prepare(actor, orderId, inspectionId, seller, buyer, request, payload, fee, carrierCode, outboundRetry, false);
+    }
+
+    private Prepared prepare(UUID actor, UUID orderId, UUID inspectionId, UUID seller, UUID buyer,
+                             CreateShipmentRequest request, Map<String, Object> payload, BigDecimal fee,
+                             String carrierCode, boolean outboundRetry, boolean allowOverReserve) {
         UUID parent=orderId!=null?orderId:inspectionId;
         UUID id=shipmentId(parent,request);
         payload.put("client_order_code","SL"+id);
@@ -565,7 +584,7 @@ public class ShipmentServiceImpl implements ShipmentService {
                 if (checkConfirmedReturnFee && total.compareTo(request.maxReturnFee()) > 0) {
                     throw new ConflictException("Cước chiều về đã tăng. Vui lòng lấy lại báo giá trước khi đặt chuyến.");
                 }
-                if (fee != null && total.compareTo(fee) > 0) {
+                if (fee != null && total.compareTo(fee) > 0 && !allowOverReserve) {
                     if ("CENTER_TO_SELLER".equals(request.leg())) {
                         throw new ConflictException("Cước Lalamove chiều về vượt khoản dự phòng đã thu; cần xử lý chênh lệch trước khi đặt chuyến");
                     }
@@ -573,7 +592,7 @@ public class ShipmentServiceImpl implements ShipmentService {
                             ? "Phí Lalamove hiện tại vượt ngân sách vận chuyển của đơn kiểm định; cần xử lý hủy/hoàn phí đơn chưa gửi và xác nhận lại báo giá mới trước khi đặt chuyến"
                             : "The current Lalamove fee exceeds the paid shipping fee; cancel the unshipped order and checkout with a new quote");
                 }
-                if (fee==null) fee=total;
+                if (fee == null || allowOverReserve) fee = total;
                 if ("LALAMOVE".equals(carrierCode)) {
                     if (!preview.hasNonNull("provider_quote")) throw new ShippingProviderException("Lalamove returned no quotation context");
                     payload.put("provider_quote",preview.get("provider_quote"));
@@ -721,7 +740,10 @@ public class ShipmentServiceImpl implements ShipmentService {
                 }
             }
         }
-        var rebookable = actor.equals(order.getSeller().getId()) && inspections.findByOrderId(id).isEmpty()
+        boolean sellerDirectLegAllowed = inspections.findByOrderId(id)
+                .map(inspection -> inspection.getOrderType() == InspectionOrderType.AT_HOME)
+                .orElse(true);
+        var rebookable = actor.equals(order.getSeller().getId()) && sellerDirectLegAllowed
                 ? rebookableOutboundShipment(order, list, "SELLER_TO_BUYER") : null;
         return list.stream().map(shipment ->
                 shipmentMapper.toResponse(shipment, rebookable != null && rebookable.getId().equals(shipment.getId())))
@@ -1186,20 +1208,29 @@ public class ShipmentServiceImpl implements ShipmentService {
                     sealLogs.save(sealLog);
                 }
             }
-        } else if ("CENTER_TO_SELLER".equals(shipment.getLeg()) && "COMPLETED".equals(status)) {
-            if ("PASSED".equals(inspection.getStatus())) {
-                inspection.setStatus("CANCELLED");
+        } else if ("CENTER_TO_SELLER".equals(shipment.getLeg())) {
+            if ((Set.of("ASSIGNING_DRIVER", "ON_GOING", "PICKED_UP").contains(status)
+                    || ("COMPLETED".equals(status) && observedFee == null))
+                    && shipment.getOrderCode() != null && shipment.getCashPayerId() == null) {
+                inspectionFeeSettlement.chargeReturnQuote(inspection, shipment);
+            } else if (Set.of("CANCELED", "REJECTED", "EXPIRED").contains(status)) {
+                inspectionFeeSettlement.clearCancelledReturnQuote(inspection, shipment);
             }
-            if (observedFee != null) {
-                if (shipment.getCashPayerId() != null) {
-                    reimburseDeliveredCashReturn(inspection, shipment, observedFee);
-                } else {
-                    inspectionFeeSettlement.settleReturnShipping(inspection, observedFee);
+            if ("COMPLETED".equals(status)) {
+                if ("PASSED".equals(inspection.getStatus())) {
+                    inspection.setStatus("CANCELLED");
                 }
-            }
-            if (publication != null && inspection.getInspectionScope() == InspectionScope.PRE_LISTING
-                    && "COMPLETED".equals(inspection.getStatus())) {
-                publication.markReadyAfterInspectionReturn(inspection.getPost().getId());
+                if (observedFee != null) {
+                    if (shipment.getCashPayerId() != null) {
+                        reimburseDeliveredCashReturn(inspection, shipment, observedFee);
+                    } else {
+                        inspectionFeeSettlement.settleReturnShipping(inspection, observedFee);
+                    }
+                }
+                if (publication != null && inspection.getInspectionScope() == InspectionScope.PRE_LISTING
+                        && "COMPLETED".equals(inspection.getStatus())) {
+                    publication.markReadyAfterInspectionReturn(inspection.getPost().getId());
+                }
             }
         }
         inspections.save(inspection);

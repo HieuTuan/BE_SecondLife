@@ -25,6 +25,7 @@ public interface WalletService {
     void reimburseShipping(UUID userId, BigDecimal amount, UUID shipmentId);
     BigDecimal collectFailedInspectionFee(UUID sellerId, BigDecimal fee, UUID inspectionOrderId);
     BigDecimal collectReturnShippingFee(UUID sellerId, BigDecimal fee, UUID shipmentId);
+    BigDecimal collectInspectionReturnFee(UUID userId, BigDecimal fee, UUID inspectionOrderId);
     Page<WalletTransaction> getTransactions(UUID userId, Pageable pageable);
 
     WalletWithdrawalResponse requestWithdrawal(UUID userId, WalletWithdrawalRequest request);

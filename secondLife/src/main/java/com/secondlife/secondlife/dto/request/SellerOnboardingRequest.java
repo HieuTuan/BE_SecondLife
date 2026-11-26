@@ -6,7 +6,7 @@ import java.util.Locale;
 
 public record SellerOnboardingRequest(
         @NotBlank @Size(max = 30) String shopName,
-        @NotNull @Valid SellerPickupAddressRequest pickupAddress,
+        @Valid SellerPickupAddressRequest pickupAddress,
         @NotBlank @Email @Size(max = 255) String email,
         @NotBlank @Pattern(regexp = "\\+?[0-9]{9,15}") String phone) {
     public SellerOnboardingRequest {

@@ -63,6 +63,21 @@ public class InspectionFeeSettlement {
     @Column(name = "platform_retained_amount", precision = 18, scale = 2, nullable = false)
     private BigDecimal platformRetainedAmount = BigDecimal.ZERO;
 
+    @Column(name = "return_original_reserve", precision = 18, scale = 2)
+    private BigDecimal returnOriginalReserve;
+
+    @Column(name = "return_quote_fee", precision = 18, scale = 2)
+    private BigDecimal returnQuoteFee;
+
+    @Column(name = "return_charge_shipment_id")
+    private UUID returnChargeShipmentId;
+
+    @Column(name = "return_buyer_collected", precision = 18, scale = 2, nullable = false)
+    private BigDecimal returnBuyerCollected = BigDecimal.ZERO;
+
+    @Column(name = "return_seller_collected", precision = 18, scale = 2, nullable = false)
+    private BigDecimal returnSellerCollected = BigDecimal.ZERO;
+
     @Column(name = "return_shipping_settled_at")
     private Instant returnShippingSettledAt;
 

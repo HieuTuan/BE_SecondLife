@@ -120,6 +120,7 @@ import java.util.stream.Stream;
 public class InspectionServiceImpl implements InspectionService {
 
     private static final ZoneId INSPECTION_TIME_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
+    private static final Duration HOME_CHECK_IN_WINDOW = Duration.ofMinutes(30);
     private static final Set<String> APPOINTMENT_ORDER_STATES = Set.of(
             InspectionOrderStatus.CONFIRMED_PENDING_DISPATCH.name(),
             InspectionOrderStatus.DISPATCHED.name(),
@@ -716,13 +717,25 @@ public class InspectionServiceImpl implements InspectionService {
         InspectionOrder order = loadAppointmentOrder(orderId);
         requireAppointmentReviewer(order, actorId);
         requireAppointmentEditable(order);
-        if (order.getAppointmentStatus() != InspectionAppointmentStatus.PENDING_CENTER_CONFIRMATION
+        boolean missedAppointment = order.getAppointmentStatus() == InspectionAppointmentStatus.CONFIRMED
+                && isHomeCheckInExpired(order, Instant.now());
+        if (!missedAppointment && order.getAppointmentStatus() != InspectionAppointmentStatus.PENDING_CENTER_CONFIRMATION
                 && order.getAppointmentStatus() != InspectionAppointmentStatus.COUNTERED_BY_CENTER) {
-            throw new ConflictException("Chỉ được đề xuất lịch khi đang chờ phản hồi từ trung tâm hoặc người bán");
+            throw new ConflictException("Chỉ được đề xuất lịch khi đang chờ phản hồi hoặc lịch đã quá hạn check-in");
         }
         InspectionAppointmentShift shift = validateAppointmentSlot(request.counterScheduledAt(), request.counterShift());
         if (request.counterScheduledAt().equals(order.getAppointmentScheduledAt())) {
             throw new BadRequestException("Lịch đề xuất phải khác lịch hiện tại của người bán");
+        }
+
+        if (missedAppointment) {
+            order.setInspectionCenter(requireAppointmentCenter(order));
+            order.setInspector(null);
+            order.setInspectorConfirmed(false);
+            order.setInspectorConfirmedAt(null);
+            order.setAssignmentLocked(false);
+            order.setHomeCheckInCode(null);
+            order.setStatus(InspectionOrderStatus.CONFIRMED_PENDING_DISPATCH.name());
         }
 
         String note = request.counterNote().strip();
@@ -1029,6 +1042,26 @@ public class InspectionServiceImpl implements InspectionService {
 
     @Override
     @Transactional
+    public InspectionOrderResponse updatePurchaseDeliveryAddress(UUID buyerId, UUID orderId, ShippingAddress address) {
+        InspectionOrder order = inspectionOrderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
+        if (order.getBuyer() == null || !order.getBuyer().getId().equals(buyerId)) {
+            throw new ForbiddenException("Chỉ người mua của đơn kiểm định mới được chọn địa chỉ nhận hàng");
+        }
+        if (!InspectionOrderStatus.PASSED.name().equals(order.getStatus())
+                || order.getOrder() != null || order.getFinalPaymentPaidAt() != null) {
+            throw new ConflictException("Đơn kiểm định hiện không thể thay đổi địa chỉ nhận hàng");
+        }
+        if (order.getFinalPaymentDeadline() != null && order.getFinalPaymentDeadline().isBefore(Instant.now())) {
+            throw new ConflictException("Đã hết thời hạn xác nhận mua");
+        }
+        ShippingPayloads.requireCoordinates(address, "Buyer delivery");
+        order.setBuyerDeliveryAddressJson(objectMapper.writeValueAsString(address));
+        return toOrderDetail(order).toBuilder().buyerDeliveryAddress(address).build();
+    }
+
+    @Override
+    @Transactional
     public InspectionOrderResponse confirmFinalPurchase(UUID buyerId, UUID orderId,
             ConfirmInspectionPurchaseRequest request) {
         Post post = lockPostForFinalDecision(orderId);
@@ -1294,6 +1327,7 @@ public class InspectionServiceImpl implements InspectionService {
 
         if (order.getOrderType() == InspectionOrderType.AT_HOME) {
             requireAppointmentStatus(order, InspectionAppointmentStatus.CONFIRMED);
+            requireHomeCheckInNotExpired(order, Instant.now());
         }
         boolean firstAssignment = order.getInspector() == null;
         if (order.getOrderType() == InspectionOrderType.AT_HOME
@@ -1349,6 +1383,7 @@ public class InspectionServiceImpl implements InspectionService {
             throw new ForbiddenException("Chỉ người bán của đơn kiểm định mới được lấy mã check-in");
         }
         requireHomeCheckInReady(order);
+        requireHomeCheckInNotExpired(order, Instant.now());
         if (order.getHomeCheckInCode() == null) {
             order.setHomeCheckInCode(UUID.randomUUID());
         }
@@ -1367,6 +1402,17 @@ public class InspectionServiceImpl implements InspectionService {
         requireInspectionFeesPaid(order);
     }
 
+    private boolean isHomeCheckInExpired(InspectionOrder order, Instant now) {
+        Instant appointment = order.getAppointmentScheduledAt();
+        return appointment != null && now.isAfter(appointment.plus(HOME_CHECK_IN_WINDOW));
+    }
+
+    private void requireHomeCheckInNotExpired(InspectionOrder order, Instant now) {
+        if (isHomeCheckInExpired(order, now)) {
+            throw new ConflictException("Đã quá 30 phút sau giờ hẹn. Trung tâm kiểm định cần hẹn lại với người bán.");
+        }
+    }
+
     @Override
     @Transactional
     public InspectionOrderResponse confirmTask(UUID inspectorId, UUID orderId) {
@@ -1383,6 +1429,9 @@ public class InspectionServiceImpl implements InspectionService {
         }
         if (order.getOrderType() == InspectionOrderType.AT_HOME) {
             requireAppointmentStatus(order, InspectionAppointmentStatus.CONFIRMED);
+            if (order.getHomeCheckedInAt() == null) {
+                requireHomeCheckInNotExpired(order, Instant.now());
+            }
         }
         if (Boolean.TRUE.equals(order.getInspectorConfirmed()) && order.getInspectorConfirmedAt() != null
                 && Boolean.TRUE.equals(order.getAssignmentLocked())) {
@@ -1430,10 +1479,15 @@ public class InspectionServiceImpl implements InspectionService {
         if (order.getOrderType() == InspectionOrderType.AT_HOME) {
             requireAssignedHomeInspector(order, actorId);
             requireHomeCheckInReady(order);
+            Instant now = Instant.now();
+            if (now.isBefore(order.getAppointmentScheduledAt().minus(HOME_CHECK_IN_WINDOW))) {
+                throw new ConflictException("Check-in chỉ mở từ 30 phút trước giờ hẹn kiểm định tại nhà.");
+            }
+            requireHomeCheckInNotExpired(order, now);
             if (!matchesHomeCheckInCode(order, request)) {
                 throw new BadRequestException("Mã check-in của người bán không hợp lệ");
             }
-            order.setHomeCheckedInAt(Instant.now());
+            order.setHomeCheckedInAt(now);
             order.setHomeCheckInCode(null);
         } else {
             assignActorForInspectionWork(order, actorId);

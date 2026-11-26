@@ -26,7 +26,7 @@ public interface InspectionPricingService {
     List<InspectionTravelTierDto> getActiveTiers();
     List<InspectionTravelTierDto> updateTiers(List<InspectionTravelTierDto> dtoList);
     InspectionFeeProposalResponse proposeFee(UUID proposedById, InspectionFeeProposalRequest request);
-    Page<InspectionFeeProposalResponse> getProposals(InspectionFeeProposalStatus status, Pageable pageable);
+    Page<InspectionFeeProposalResponse> getProposals(InspectionFeeProposalStatus status, boolean travelOnly, Pageable pageable);
     Page<InspectionFeeProposalResponse> getCenterProposals(UUID centerId, InspectionFeeProposalStatus status, Pageable pageable);
     List<InspectionFeeProposalResponse> getCenterLevelFees(UUID centerId);
     InspectionFeeProposalResponse reviewProposal(UUID proposalId, UUID reviewerId, boolean approved, String reason);

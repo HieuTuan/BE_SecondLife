@@ -1,5 +1,6 @@
 package com.secondlife.secondlife.service.impl;
 
+import com.secondlife.secondlife.dto.response.InspectionReturnFeeResponse;
 import com.secondlife.secondlife.entity.InspectionFeeSettlement;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Shipment;
@@ -7,11 +8,17 @@ import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
 import com.secondlife.secondlife.enums.InspectionSettlementOutcome;
 import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
+import com.secondlife.secondlife.enums.InspectionOrderType;
+import com.secondlife.secondlife.enums.InspectionScope;
+import com.secondlife.secondlife.enums.NotificationType;
 import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.exception.ForbiddenException;
+import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.repository.InspectionFeeSettlementRepository;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.InspectionFeeSettlementService;
+import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.SystemWalletService;
 import com.secondlife.secondlife.service.WalletService;
 
@@ -23,9 +30,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.text.NumberFormat;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -41,6 +50,7 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
     private final SystemWalletService systemWallet;
     private final UserRepository userRepository;
     private final BigDecimal platformFeeRate;
+    private final NotificationService notifications;
 
     public InspectionFeeSettlementServiceImpl(
             InspectionFeeSettlementRepository settlements,
@@ -48,12 +58,14 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
             WalletService walletService,
             SystemWalletService systemWallet,
             UserRepository userRepository,
+            NotificationService notifications,
             @Value("${app.inspection.platform-fee-share-rate:0.00}") BigDecimal platformFeeRate) {
         this.settlements = settlements;
         this.inspectionOrders = inspectionOrders;
         this.walletService = walletService;
         this.systemWallet = systemWallet;
         this.userRepository = userRepository;
+        this.notifications = notifications;
         this.platformFeeRate = platformFeeRate != null ? platformFeeRate : BigDecimal.ZERO;
     }
 
@@ -198,6 +210,203 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public InspectionReturnFeeResponse previewReturnFee(InspectionOrder order, BigDecimal quoteFee) {
+        var settlement = settlements.findByInspectionOrderId(order.getId()).orElse(null);
+        return supportsReturnTopUp(order, settlement) && hasUnsettledReturnReserve(settlement)
+                ? returnFeeSummary(order, settlement, quoteFee) : null;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public InspectionReturnFeeResponse getReturnFee(UUID actorId, boolean staff, UUID inspectionId) {
+        var order = inspectionOrders.findById(inspectionId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn kiểm định"));
+        if (!staff && !isParticipant(actorId, order.getBuyer()) && !isParticipant(actorId, order.getSeller())
+                && !isParticipant(actorId, order.getInspectionCenter())) {
+            throw new ForbiddenException("Bạn không có quyền xem đối soát cước hoàn của đơn này");
+        }
+        var settlement = settlements.findByInspectionOrderId(inspectionId).orElse(null);
+        return settlement == null || settlement.getReturnOriginalReserve() == null
+                ? null : returnFeeSummary(order, settlement, null);
+    }
+
+    @Override
+    @Transactional
+    public InspectionReturnFeeResponse payReturnFee(UUID actorId, UUID inspectionId, BigDecimal maxAmount) {
+        var order = inspectionOrders.findByIdForUpdate(inspectionId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn kiểm định"));
+        boolean buyer = isParticipant(actorId, order.getBuyer());
+        if (!buyer && !isParticipant(actorId, order.getSeller())) {
+            throw new ForbiddenException("Chỉ người mua hoặc người bán của đơn mới được nộp thêm cước hoàn");
+        }
+        var settlement = settlements.findByInspectionOrderId(inspectionId)
+                .filter(row -> row.getReturnOriginalReserve() != null)
+                .orElseThrow(() -> new ConflictException("Đơn chưa có khoản phải thu cước hoàn"));
+        var summary = returnFeeSummary(order, settlement, null);
+        BigDecimal due = (buyer ? summary.buyer() : summary.seller()).outstanding();
+        if (due.signum() == 0) return summary;
+        if (maxAmount == null || due.compareTo(maxAmount) > 0) {
+            throw new ConflictException("Số tiền cần nộp đã thay đổi. Vui lòng tải lại để xác nhận");
+        }
+
+        boolean tracked = systemWallet.lockInspectionFunds(inspectionId);
+        BigDecimal collected = walletService.collectInspectionReturnFee(actorId, due, inspectionId);
+        if (collected.signum() == 0) throw new ConflictException("Ví chưa có số dư để nộp thêm cước hoàn");
+        if (buyer) settlement.setReturnBuyerCollected(settlement.getReturnBuyerCollected().add(collected));
+        else settlement.setReturnSellerCollected(settlement.getReturnSellerCollected().add(collected));
+        if (tracked) systemWallet.recordInspectionReturnCollection(inspectionId, collected,
+                settlement.getReturnShippingSettledAt() != null);
+        settlements.saveAndFlush(settlement);
+        notifyReturnFee(order, buyer, (buyer ? summary.buyer() : summary.seller()).percent(),
+                collected, due.subtract(collected), BigDecimal.ZERO);
+        return returnFeeSummary(order, settlement, null);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void chargeReturnQuote(InspectionOrder order, Shipment shipment) {
+        var settlement = settlements.findByInspectionOrderId(order.getId()).orElse(null);
+        if (!hasUnsettledReturnReserve(settlement) || !supportsReturnTopUp(order, settlement)
+                || shipment.getQuotedFee() == null || shipment.getId().equals(settlement.getReturnChargeShipmentId())) return;
+        captureOriginalReserve(settlement);
+        settlement.setReturnQuoteFee(shipment.getQuotedFee());
+        settlement.setReturnChargeShipmentId(shipment.getId());
+        var summary = returnFeeSummary(order, settlement, null);
+        if (summary.buyer().outstanding().signum() == 0 && summary.seller().outstanding().signum() == 0) {
+            settlements.saveAndFlush(settlement);
+            return;
+        }
+
+        boolean tracked = systemWallet.lockInspectionFunds(order.getId());
+        BigDecimal buyerPaid = collectShare(order, settlement, true, summary.buyer().outstanding());
+        BigDecimal sellerPaid = collectShare(order, settlement, false, summary.seller().outstanding());
+        if (tracked) systemWallet.recordInspectionReturnCollection(order.getId(), buyerPaid.add(sellerPaid), false);
+        settlements.saveAndFlush(settlement);
+        notifyReturnFee(order, true, summary.buyer().percent(), buyerPaid,
+                summary.buyer().outstanding().subtract(buyerPaid), BigDecimal.ZERO);
+        notifyReturnFee(order, false, summary.seller().percent(), sellerPaid,
+                summary.seller().outstanding().subtract(sellerPaid), BigDecimal.ZERO);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void clearCancelledReturnQuote(InspectionOrder order, Shipment shipment) {
+        settlements.findByInspectionOrderId(order.getId())
+                .filter(this::hasUnsettledReturnReserve)
+                .filter(row -> shipment.getId().equals(row.getReturnChargeShipmentId()))
+                .ifPresent(row -> {
+                    row.setReturnQuoteFee(null);
+                    settlements.saveAndFlush(row);
+                });
+    }
+
+    private boolean supportsReturnTopUp(InspectionOrder order, InspectionFeeSettlement settlement) {
+        return settlement != null && order.getOrderType() == InspectionOrderType.AT_CENTER
+                && order.getInspectionScope() == InspectionScope.BUYER_REQUEST
+                && !order.isCashShippingSimulation()
+                && order.getBuyer() != null && order.getSeller() != null && !legacySellerPays(settlement);
+    }
+
+    private boolean legacySellerPays(InspectionFeeSettlement settlement) {
+        return settlement.getOutcome() == InspectionSettlementOutcome.FAILED_INSPECTION
+                && (settlement.getSellerAdditionalCollected().signum() > 0
+                    || settlement.getSellerOutstandingAmount().signum() > 0);
+    }
+
+    private boolean isParticipant(UUID actor, User user) {
+        return user != null && actor.equals(user.getId());
+    }
+
+    private void captureOriginalReserve(InspectionFeeSettlement settlement) {
+        if (settlement.getReturnOriginalReserve() == null) {
+            settlement.setReturnOriginalReserve(settlement.getReturnReserveAllocated());
+        }
+    }
+
+    private InspectionReturnFeeResponse returnFeeSummary(InspectionOrder order, InspectionFeeSettlement settlement,
+                                                          BigDecimal previewFee) {
+        BigDecimal reserve = settlement.getReturnOriginalReserve() == null
+                ? settlement.getReturnReserveAllocated() : settlement.getReturnOriginalReserve();
+        BigDecimal actual = settlement.getReturnShippingSettledAt() == null ? null : settlement.getReturnReserveAllocated();
+        BigDecimal quote = previewFee == null ? settlement.getReturnQuoteFee() : previewFee;
+        BigDecimal fee = actual == null ? quote : actual;
+        BigDecimal shortfall = fee == null ? BigDecimal.ZERO : fee.subtract(reserve).max(BigDecimal.ZERO);
+        BigDecimal buyerDue = buyerShare(order, shortfall);
+        int buyerPercent = order.resolveBuyerFeePercent();
+        return new InspectionReturnFeeResponse(reserve, quote, actual,
+                share(buyerPercent, settlement.getReturnBuyerCollected(), buyerDue),
+                share(100 - buyerPercent, settlement.getReturnSellerCollected(), shortfall.subtract(buyerDue)));
+    }
+
+    private InspectionReturnFeeResponse.Share share(int percent, BigDecimal collected, BigDecimal target) {
+        return new InspectionReturnFeeResponse.Share(percent, collected, target.subtract(collected).max(BigDecimal.ZERO));
+    }
+
+    private BigDecimal collectShare(InspectionOrder order, InspectionFeeSettlement settlement, boolean buyer, BigDecimal due) {
+        if (due.signum() <= 0) return BigDecimal.ZERO;
+        UUID userId = (buyer ? order.getBuyer() : order.getSeller()).getId();
+        BigDecimal paid = walletService.collectInspectionReturnFee(userId, due, order.getId());
+        if (paid == null || paid.signum() <= 0) return BigDecimal.ZERO;
+        if (buyer) settlement.setReturnBuyerCollected(settlement.getReturnBuyerCollected().add(paid));
+        else settlement.setReturnSellerCollected(settlement.getReturnSellerCollected().add(paid));
+        return paid;
+    }
+
+    private void reconcileSharedReturn(InspectionOrder order, InspectionFeeSettlement settlement, BigDecimal actualFee) {
+        captureOriginalReserve(settlement);
+        BigDecimal reserveDifference = settlement.getReturnOriginalReserve().subtract(actualFee);
+        BigDecimal shortfall = reserveDifference.negate().max(BigDecimal.ZERO);
+        BigDecimal excessReserve = reserveDifference.max(BigDecimal.ZERO);
+        BigDecimal buyerTarget = buyerShare(order, shortfall);
+        BigDecimal sellerTarget = shortfall.subtract(buyerTarget);
+        BigDecimal buyerReserveRefund = buyerShare(order, excessReserve);
+        BigDecimal sellerReserveRefund = excessReserve.subtract(buyerReserveRefund);
+
+        boolean tracked = systemWallet.lockInspectionFunds(order.getId());
+        BigDecimal buyerPaid = collectShare(order, settlement, true, buyerTarget.subtract(settlement.getReturnBuyerCollected()));
+        BigDecimal sellerPaid = collectShare(order, settlement, false, sellerTarget.subtract(settlement.getReturnSellerCollected()));
+        BigDecimal buyerTopUpRefund = settlement.getReturnBuyerCollected().subtract(buyerTarget).max(BigDecimal.ZERO);
+        BigDecimal sellerTopUpRefund = settlement.getReturnSellerCollected().subtract(sellerTarget).max(BigDecimal.ZERO);
+        settlement.setReturnBuyerCollected(settlement.getReturnBuyerCollected().subtract(buyerTopUpRefund));
+        settlement.setReturnSellerCollected(settlement.getReturnSellerCollected().subtract(sellerTopUpRefund));
+
+        BigDecimal buyerRefund = buyerReserveRefund.add(buyerTopUpRefund);
+        BigDecimal sellerRefund = sellerReserveRefund.add(sellerTopUpRefund);
+        if (buyerRefund.signum() > 0) walletService.processRefund(order.getBuyer().getId(), buyerRefund,
+                order.getId(), WalletTransactionReferenceType.INSPECTION_ORDER);
+        if (sellerRefund.signum() > 0) walletService.processRefund(order.getSeller().getId(), sellerRefund,
+                order.getId(), WalletTransactionReferenceType.INSPECTION_ORDER);
+
+        settlement.setReturnReserveAllocated(actualFee);
+        settlement.setBuyerRefundAmount(settlement.getBuyerRefundAmount().add(buyerRefund));
+        settlement.setSellerRefundAmount(settlement.getSellerRefundAmount().add(sellerRefund));
+        settlement.setReturnShippingSettledAt(Instant.now());
+        if (tracked) {
+            systemWallet.recordInspectionReturnCollection(order.getId(), buyerPaid.add(sellerPaid), false);
+            systemWallet.settleInspectionReturn(order.getId(), actualFee, BigDecimal.ZERO, buyerRefund.add(sellerRefund));
+        }
+        settlements.saveAndFlush(settlement);
+        var summary = returnFeeSummary(order, settlement, null);
+        notifyReturnFee(order, true, summary.buyer().percent(), buyerPaid, summary.buyer().outstanding(), buyerRefund);
+        notifyReturnFee(order, false, summary.seller().percent(), sellerPaid, summary.seller().outstanding(), sellerRefund);
+    }
+
+    private void notifyReturnFee(InspectionOrder order, boolean buyer, int percent, BigDecimal paid,
+                                 BigDecimal outstanding, BigDecimal refund) {
+        if (paid.signum() == 0 && outstanding.signum() == 0 && refund.signum() == 0) return;
+        var currency = NumberFormat.getIntegerInstance(Locale.forLanguageTag("vi-VN"));
+        currency.setMaximumFractionDigits(2);
+        String message = "Phần cước hoàn của bạn theo tỷ lệ " + percent + "%. "
+                + "Đã trừ thêm " + currency.format(paid) + " ₫, còn phải nộp "
+                + currency.format(outstanding) + " ₫, hoàn lại " + currency.format(refund) + " ₫.";
+        String role = buyer ? "buyer" : "seller";
+        notifications.notifyInApp((buyer ? order.getBuyer() : order.getSeller()).getId(), "Đối soát cước hoàn từ Hub",
+                message, NotificationType.SHIPPING, order.getId(), "INSPECTION_ORDER",
+                "/" + role + "/inspections/" + order.getId() + "/decision");
+    }
+
+    @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public void settleReturnShipping(InspectionOrder order, BigDecimal actualFee) {
         // The shipment workflow locks the inspection before changing its settlement.
@@ -208,9 +417,11 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
 
         // Earlier settlements already refunded the buyer's fee and charged the seller.
         // Keep their return reconciliation consistent with those recorded transactions.
-        boolean sellerPays = settlement.getOutcome() == InspectionSettlementOutcome.FAILED_INSPECTION
-                && (settlement.getSellerAdditionalCollected().signum() > 0
-                    || settlement.getSellerOutstandingAmount().signum() > 0);
+        if (supportsReturnTopUp(order, settlement)) {
+            reconcileSharedReturn(order, settlement, actualFee);
+            return;
+        }
+        boolean sellerPays = legacySellerPays(settlement);
         if (!sellerPays && settlement.getReturnReserveAllocated().compareTo(actualFee) < 0) {
             log.warn("Inspection {} return shipping fee {} exceeds reserve {}",
                     order.getId(), actualFee, settlement.getReturnReserveAllocated());
@@ -247,7 +458,7 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
 
         var settlement = settlements.findByInspectionOrderId(order.getId()).orElse(null);
         if (!hasUnsettledReturnReserve(settlement)) return false;
-        if (actualFee.compareTo(settlement.getReturnReserveAllocated()) > 0) {
+        if (!supportsReturnTopUp(order, settlement) && actualFee.compareTo(settlement.getReturnReserveAllocated()) > 0) {
             log.warn("Inspection {} return shipping fee {} exceeds reserve {}",
                     order.getId(), actualFee, settlement.getReturnReserveAllocated());
             return false;
@@ -287,7 +498,7 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
         if (!"CENTER_TO_SELLER".equals(shipment.getLeg()) || !hasUnsettledReturnReserve(settlement)) {
             throw new ConflictException("Không có khoản dự phòng chặng hoàn chờ quyết toán");
         }
-        if (paidAmount.compareTo(settlement.getReturnReserveAllocated()) > 0) {
+        if (!supportsReturnTopUp(order, settlement) && paidAmount.compareTo(settlement.getReturnReserveAllocated()) > 0) {
             throw new ConflictException("Cước thực tế vượt khoản dự phòng chặng hoàn đã thu");
         }
         applyCashReturnShippingSettlement(order, shipment, settlement, paidAmount);
@@ -296,8 +507,12 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
 
     private void applyCashReturnShippingSettlement(InspectionOrder order, Shipment shipment,
                                                    InspectionFeeSettlement settlement, BigDecimal actualFee) {
+        if (supportsReturnTopUp(order, settlement)) {
+            reconcileSharedReturn(order, settlement, actualFee);
+        } else {
+            applyReturnShippingSettlement(order, settlement, actualFee);
+        }
         reimburse(shipment, actualFee);
-        applyReturnShippingSettlement(order, settlement, actualFee);
     }
 
     private void reimburse(Shipment shipment, BigDecimal amount) {

@@ -203,7 +203,7 @@ public class OrderDisputeServiceImpl implements OrderDisputeService {
         boolean shippingHold = false;
         boolean newerDirectDelivery = false;
         for (var shipment : shipments.findByOrderIdOrderByCreatedAtAsc(order.getId()).reversed()) {
-            boolean direct = "SELLER_TO_BUYER".equals(shipment.getLeg());
+            boolean direct = Set.of("SELLER_TO_BUYER", "CENTER_TO_BUYER").contains(shipment.getLeg());
             if (direct && "DELIVERED".equals(shipment.getStatus())) newerDirectDelivery = true;
             // An earlier failed booking can remain in the history after its replacement delivered the order.
             if (newerDirectDelivery && direct && "LALAMOVE".equals(shipment.getProvider())

@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.dto.request.ConfirmInspectionPurchaseRequest;
+import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.request.InspectionAppealRequest;
 import com.secondlife.secondlife.dto.request.InspectionAppointmentCounterRequest;
 import com.secondlife.secondlife.dto.request.InspectionAppointmentRejectRequest;
@@ -74,6 +75,8 @@ public interface InspectionService {
      * Người mua xác nhận hoàn tất mua hàng kèm địa chỉ/phương thức mới
      */
     InspectionOrderResponse confirmFinalPurchase(UUID buyerId, UUID orderId, ConfirmInspectionPurchaseRequest request);
+
+    InspectionOrderResponse updatePurchaseDeliveryAddress(UUID buyerId, UUID orderId, ShippingAddress address);
 
     /**
      * Người mua từ chối mua tiếp sau khi có kết quả kiểm định đạt chuẩn (hủy đơn)

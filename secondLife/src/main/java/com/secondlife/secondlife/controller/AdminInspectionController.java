@@ -40,9 +40,10 @@ public class AdminInspectionController {
     @Operation(summary = "Admin xem danh sách các đề xuất biểu phí từ Trung tâm kiểm định (lọc theo status)")
     public ResponseEntity<ApiResponse<PageResponse<InspectionFeeProposalResponse>>> getFeeProposals(
             @RequestParam(required = false) InspectionFeeProposalStatus status,
+            @RequestParam(defaultValue = "false") boolean travelOnly,
             Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success(
-                PageResponse.from(pricingService.getProposals(status, pageable))));
+                PageResponse.from(pricingService.getProposals(status, travelOnly, pageable))));
     }
 
     @PostMapping(value = {"/inspection/fee-proposals/{id}/review", "/inspection-fee-proposals/{id}/review"})

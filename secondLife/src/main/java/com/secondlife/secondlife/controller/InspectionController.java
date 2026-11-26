@@ -10,15 +10,19 @@ import com.secondlife.secondlife.dto.request.InspectionQuoteRequest;
 import com.secondlife.secondlife.dto.request.InspectionRejectPurchaseRequest;
 import com.secondlife.secondlife.dto.request.InspectionSealScanRequest;
 import com.secondlife.secondlife.dto.request.InspectionSellerRespondRequest;
+import com.secondlife.secondlife.dto.request.PayInspectionReturnFeeRequest;
+import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.response.InspectionCenterOptionResponse;
 import com.secondlife.secondlife.dto.response.InspectionCheckInCodeResponse;
 import com.secondlife.secondlife.dto.response.InspectionOrderResponse;
 import com.secondlife.secondlife.dto.response.InspectionQuoteResponse;
+import com.secondlife.secondlife.dto.response.InspectionReturnFeeResponse;
 import com.secondlife.secondlife.dto.response.InspectionSealLogResponse;
 import com.secondlife.secondlife.dto.response.InspectionSealVerificationResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
 import com.secondlife.secondlife.service.InspectionEscrowService;
+import com.secondlife.secondlife.service.InspectionFeeSettlementService;
 import com.secondlife.secondlife.service.InspectionPricingService;
 import com.secondlife.secondlife.service.InspectionService;
 
@@ -29,15 +33,18 @@ import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @RestController
@@ -47,15 +54,18 @@ public class InspectionController {
     private final InspectionService inspectionService;
     private final InspectionPricingService pricingService;
     private final InspectionEscrowService escrowService;
+    private final InspectionFeeSettlementService settlementService;
     private final CurrentUserProvider currentUserProvider;
 
     public InspectionController(InspectionService inspectionService,
                                 InspectionPricingService pricingService,
                                 InspectionEscrowService escrowService,
+                                InspectionFeeSettlementService settlementService,
                                 CurrentUserProvider currentUserProvider) {
         this.inspectionService = inspectionService;
         this.pricingService = pricingService;
         this.escrowService = escrowService;
+        this.settlementService = settlementService;
         this.currentUserProvider = currentUserProvider;
     }
 
@@ -151,6 +161,16 @@ public class InspectionController {
                 PageResponse.from(inspectionService.getSellerOrders(sellerId, pageable))));
     }
 
+    @PutMapping("/orders/{orderId}/delivery-address")
+    @Operation(summary = "Người mua chọn địa chỉ nhận hàng sau khi kiểm định đạt")
+    public ResponseEntity<InspectionOrderResponse> updatePurchaseDeliveryAddress(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID orderId,
+            @Valid @RequestBody ShippingAddress address) {
+        UUID buyerId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(inspectionService.updatePurchaseDeliveryAddress(buyerId, orderId, address));
+    }
+
     @PostMapping("/orders/{orderId}/confirm-purchase")
     @Operation(summary = "Người mua thanh toán tiền hàng và ship cuối cùng sau khi sản phẩm kiểm định PASSED (trong vòng 6h)")
     public ResponseEntity<InspectionOrderResponse> confirmFinalPurchase(
@@ -190,6 +210,32 @@ public class InspectionController {
         UUID sellerId = currentUserProvider.resolveUserId(userDetails);
         return ResponseEntity.ok(ApiResponse.success(
                 "Đã xác nhận chấp nhận kết quả kiểm định không đạt", inspectionService.acceptFailedResult(sellerId, orderId)));
+    }
+
+    @GetMapping("/orders/{orderId}/return-fee")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Xem chi tiết đối soát và công nợ bù cước hoàn từ Hub về người bán")
+    public ResponseEntity<ApiResponse<InspectionReturnFeeResponse>> getReturnFee(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID orderId) {
+        UUID actorId = currentUserProvider.resolveUserId(userDetails);
+        boolean staff = SecurityContextHolder.getContext().getAuthentication().getAuthorities().stream()
+                .anyMatch(authority -> Set.of("ROLE_ADMIN", "ROLE_STAFF").contains(authority.getAuthority()));
+        return ResponseEntity.ok(ApiResponse.success(
+                settlementService.getReturnFee(actorId, staff, orderId)));
+    }
+
+    @PostMapping("/orders/{orderId}/return-fee/pay")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Người mua hoặc người bán nộp bổ sung công nợ cước hoàn từ ví")
+    public ResponseEntity<ApiResponse<InspectionReturnFeeResponse>> payReturnFee(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID orderId,
+            @Valid @RequestBody PayInspectionReturnFeeRequest request) {
+        UUID actorId = currentUserProvider.resolveUserId(userDetails);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Nộp bổ sung cước hoàn thành công",
+                settlementService.payReturnFee(actorId, orderId, request.maxAmount())));
     }
 
     @GetMapping("/seal/{tamperSealId}")

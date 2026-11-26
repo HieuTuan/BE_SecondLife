@@ -14,6 +14,7 @@ public record OrderFeedItemResponse(
         UUID itemId,
         String itemCondition,
         @JsonInclude(JsonInclude.Include.NON_NULL) SellerCommissionPreviewResponse sellerCommissionPreview,
-        @JsonInclude(JsonInclude.Include.NON_NULL) OrderReturnResponse orderReturn
+        @JsonInclude(JsonInclude.Include.NON_NULL) OrderReturnResponse orderReturn,
+        boolean hasActiveDispute
 ) {
 }

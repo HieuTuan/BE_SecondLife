@@ -439,7 +439,7 @@ class InspectionOrderListIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElements").value(1))
                 .andExpect(jsonPath("$.data.items[0].carrierFee").value(25000))
-                .andExpect(jsonPath("$.data.items[0].shippingDelta").value(-30000))
+                .andExpect(jsonPath("$.data.items[0].shippingDelta").value(-5000))
                 .andExpect(jsonPath("$.data.items[0].unfundedExpense").value(0));
     }
 
@@ -505,23 +505,28 @@ class InspectionOrderListIntegrationTest {
         mvc.perform(get(history).header("Authorization", admin).param("orderId", buyerRequestId.toString())
                         .param("hasShipping", "true").param("size", "10"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.totalElements").value(4))
+                .andExpect(jsonPath("$.data.totalElements").value(3))
                 .andExpect(jsonPath("$.data.items[0].type").value("INSPECTION_RETURN_SHIPPING"))
                 .andExpect(jsonPath("$.data.items[0].fundCategory").value("USER_SHIPPING"))
-                .andExpect(jsonPath("$.data.items[0].shippingDelta").value(-30000))
-                .andExpect(jsonPath("$.data.items[0].totalDelta").value(30000))
+                .andExpect(jsonPath("$.data.items[0].shippingDelta").value(-5000))
+                .andExpect(jsonPath("$.data.items[0].totalDelta").value(5000))
                 .andExpect(jsonPath("$.data.items[0].carrierFee").value(25000))
                 .andExpect(jsonPath("$.data.items[0].unfundedExpense").value(0))
                 .andExpect(jsonPath("$.data.items[0].breakdownDescription").value(
-                        containsString("5000.00")))
-                .andExpect(jsonPath("$.data.items[1].type").value("INSPECTION_SETTLEMENT"))
-                .andExpect(jsonPath("$.data.items[1].heldDelta").value(-10000))
-                .andExpect(jsonPath("$.data.items[1].shippingDelta").value(-30000))
-                .andExpect(jsonPath("$.data.items[1].revenueDelta").value(0))
-                .andExpect(jsonPath("$.data.items[1].userShippingFee").value(60000));
+                        containsString("5000.00")));
         assertEquals(0, new BigDecimal("90000").compareTo(walletBalance(centerId)));
         assertEquals(0, new BigDecimal("12500").compareTo(walletBalance(buyerId)));
         assertEquals(0, new BigDecimal("32500").compareTo(walletBalance(sellerId)));
+
+        mvc.perform(get(history).header("Authorization", admin)
+                        .param("orderId", buyerRequestId.toString()).param("fundCategory", "HUB_PAYOUT"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.items[0].totalDelta").value(90000))
+                .andExpect(jsonPath("$.data.items[0].deltaAction").value("MINUS"))
+                .andExpect(jsonPath("$.data.items[0].userShippingFee").value(60000))
+                .andExpect(jsonPath("$.data.items[0].heldDelta").value(-10000))
+                .andExpect(jsonPath("$.data.items[0].revenueDelta").value(0));
     }
 
     @Test
@@ -540,15 +545,15 @@ class InspectionOrderListIntegrationTest {
         var after = systemWallet(admin);
         assertEquals(0, before.path("totalHubPaid").decimalValue().add(new BigDecimal("90000"))
                 .compareTo(after.path("totalHubPaid").decimalValue()));
+        assertEquals(0, before.path("shippingBalance").decimalValue().add(new BigDecimal("30000"))
+                .compareTo(after.path("shippingBalance").decimalValue()));
 
         String history = "/api/v1/admin/system-wallet/transactions";
         mvc.perform(get(history).header("Authorization", admin)
                         .param("orderId", buyerRequestId.toString()).param("type", "INSPECTION_SETTLEMENT")
-                        .param("size", "1").param("page", "1"))
+                        .param("size", "10").param("page", "0"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.totalElements").value(3))
-                .andExpect(jsonPath("$.data.items[0].fundCategory").value("USER_SHIPPING"))
-                .andExpect(jsonPath("$.data.items[0].totalDelta").value(30000));
+                .andExpect(jsonPath("$.data.totalElements").value(2));
         mvc.perform(get(history).header("Authorization", admin)
                         .param("orderId", buyerRequestId.toString()).param("fundCategory", "HUB_PAYOUT"))
                 .andExpect(status().isOk())

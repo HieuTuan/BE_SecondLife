@@ -60,44 +60,31 @@ public class SellerOnboardingServiceImpl implements SellerOnboardingService {
     public SellerOnboardingResponse save(UUID userId, SellerOnboardingRequest request) {
         User user = lockUser(userId);
         var row = onboarding.findById(userId).orElseGet(SellerOnboarding::new);
-        String addressJson = mapper.writeValueAsString(pickupAddresses.resolve(request.pickupAddress()));
-        boolean changed = !Objects.equals(row.getShopName(), request.shopName())
-                || !Objects.equals(row.getEmail(), request.email())
-                || !Objects.equals(row.getPhone(), request.phone())
-                || !Objects.equals(row.getPickupAddressJson(), addressJson);
-        if (!changed) return response(row);
-        // Existing verified profiles may complete missing coordinates without replacing verified shop details.
-        if (row.getPickupAddressJson() != null) {
-            var previous = mapper.readValue(row.getPickupAddressJson(), ShippingAddress.class);
-            var updated = mapper.readValue(addressJson, ShippingAddress.class);
-            boolean samePoint = previous.latitude()!=null && previous.longitude()!=null
-                    && previous.latitude().compareTo(updated.latitude())==0
-                    && previous.longitude().compareTo(updated.longitude())==0
-                    && Objects.equals(row.getShopName(),request.shopName())
-                    && Objects.equals(row.getEmail(),request.email()) && Objects.equals(row.getPhone(),request.phone())
-                    && Objects.equals(previous.name(),updated.name()) && Objects.equals(previous.phone(),updated.phone());
-            if (samePoint) {
-                row.setPickupAddressJson(addressJson);
-                row.setPickupProvinceId(null); row.setPickupWardId(null);
-                onboarding.save(row);
-                if (row.getEmailVerifiedAt()!=null) shipping.savePickup(userId,updated);
-                return response(row);
-            }
-            boolean coordinateCompletion = (previous.latitude() == null || previous.longitude() == null)
-                    && Objects.equals(row.getShopName(), request.shopName())
-                    && Objects.equals(row.getEmail(), request.email())
-                    && Objects.equals(row.getPhone(), request.phone())
-                    && Objects.equals(previous.name(), updated.name())
-                    && Objects.equals(previous.phone(), updated.phone());
-            if (coordinateCompletion) {
-                row.setPickupAddressJson(addressJson);
-                row.setPickupProvinceId(null); row.setPickupWardId(null);
-                onboarding.save(row);
-                if (row.getEmailVerifiedAt() != null) shipping.savePickup(userId, updated);
-                return response(row);
-            }
+        ShippingAddress updated = request.pickupAddress() == null ? null : pickupAddresses.resolve(request.pickupAddress());
+        String addressJson = updated == null ? row.getPickupAddressJson() : mapper.writeValueAsString(updated);
+        boolean sameShop = Objects.equals(row.getShopName(), request.shopName())
+                && Objects.equals(row.getEmail(), request.email())
+                && Objects.equals(row.getPhone(), request.phone());
+        if (sameShop && Objects.equals(row.getPickupAddressJson(), addressJson)) return response(row);
+
+        boolean isSeller = user.hasRole("SELLER");
+        boolean locked = isSeller || verifications.existsByUserIdAndStatusIn(userId, STARTED_VERIFICATION);
+        ShippingAddress previous = readPickup(row);
+        boolean sameContact = previous != null && updated != null
+                && Objects.equals(previous.name(), updated.name()) && Objects.equals(previous.phone(), updated.phone());
+        boolean sameLocationOrMissingCoordinates = sameContact && (previous.latitude() == null || previous.longitude() == null
+                || (previous.latitude().compareTo(updated.latitude()) == 0
+                    && previous.longitude().compareTo(updated.longitude()) == 0));
+
+        if (sameShop && updated != null && (!locked || sameLocationOrMissingCoordinates)) {
+            row.setPickupAddressJson(addressJson);
+            row.setPickupProvinceId(null);
+            row.setPickupWardId(null);
+            onboarding.save(row);
+            if (isSeller && row.getEmailVerifiedAt() != null) shipping.savePickup(userId, updated);
+            return response(row);
         }
-        if (user.hasRole("SELLER") || verifications.existsByUserIdAndStatusIn(userId, STARTED_VERIFICATION)) {
+        if (locked) {
             throw new ConflictException("Shop information cannot be changed after seller verification has started");
         }
         row.setUserId(userId);
@@ -156,7 +143,6 @@ public class SellerOnboardingServiceImpl implements SellerOnboardingService {
         row.setEmailVerifiedAt(Instant.now());
         clearCode(row);
         onboarding.save(row);
-        shipping.savePickup(userId, mapper.readValue(row.getPickupAddressJson(), ShippingAddress.class));
         return response(row);
     }
 
@@ -167,8 +153,17 @@ public class SellerOnboardingServiceImpl implements SellerOnboardingService {
         if (row.getEmailVerifiedAt() == null) {
             throw new ConflictException("Verify the shop email before starting eKYC");
         }
-        ShippingPayloads.requireCoordinates(
-                mapper.readValue(row.getPickupAddressJson(), ShippingAddress.class), "Seller pickup before eKYC");
+        ShippingPayloads.requireCoordinates(readPickup(row), "Seller pickup before eKYC");
+    }
+
+    @Override
+    @Transactional
+    public void savePickupAfterApproval(UUID userId) {
+        onboarding.findById(userId)
+                .filter(row -> row.getEmailVerifiedAt() != null)
+                .map(this::readPickup)
+                .filter(address -> address.latitude() != null && address.longitude() != null)
+                .ifPresent(address -> shipping.savePickup(userId, address));
     }
 
     private User lockUser(UUID userId) {
@@ -186,12 +181,16 @@ public class SellerOnboardingServiceImpl implements SellerOnboardingService {
         row.setEmailOtpAttempts(0);
     }
 
+    private ShippingAddress readPickup(SellerOnboarding row) {
+        return row.getPickupAddressJson() == null ? null : mapper.readValue(row.getPickupAddressJson(), ShippingAddress.class);
+    }
+
     private SellerOnboardingResponse response(SellerOnboarding row) {
         boolean verified = row.getEmailVerifiedAt() != null;
-        var address = mapper.readValue(row.getPickupAddressJson(), ShippingAddress.class);
-        boolean ready = verified && address.latitude() != null && address.longitude() != null;
-        String nextStep = address.latitude() == null || address.longitude() == null
-                ? "SHOP_INFORMATION" : ready ? "EKYC" : "EMAIL_VERIFICATION";
+        var address = readPickup(row);
+        boolean hasCoordinates = address != null && address.latitude() != null && address.longitude() != null;
+        boolean ready = verified && hasCoordinates;
+        String nextStep = ready ? "EKYC" : verified ? "SHOP_INFORMATION" : "EMAIL_VERIFICATION";
         return sellerOnboardingMapper.toResponse(row, address, verified, ready, nextStep);
     }
 

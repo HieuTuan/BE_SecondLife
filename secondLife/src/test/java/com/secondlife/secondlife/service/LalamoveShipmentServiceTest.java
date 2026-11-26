@@ -511,7 +511,10 @@ class LalamoveShipmentServiceTest {
         assertThrows(ConflictException.class, () -> service.createCenterDelivery(centerId, inspectionId,
                 new CreateShipmentRequest(UUID.randomUUID(), "CENTER_TO_SELLER", null, null, null)));
         verify(lala, times(1)).create(anyMap());
-        verifyNoInteractions(wallets, inspectionFeeSettlement);
+        verifyNoInteractions(wallets);
+        verify(inspectionFeeSettlement, times(1)).chargeReturnQuote(eq(inspection),
+                argThat(created -> replacement.shipmentId().equals(created.getId())));
+        verify(inspectionFeeSettlement, never()).settleReturnShipping(any(), any());
     }
 
     @Test void centerCannotQuoteOrRebookAnUncertainOrPickedUpReturn() {
@@ -707,5 +710,94 @@ class LalamoveShipmentServiceTest {
                 "raw",Map.of("metadata",Map.of("secondlifeClientOrderCode",shipment.getClientOrderCode())))));
         var recovered=service.reconcileCreation(seller,true,shipment.getId(),"EXISTING"); assertEquals("EXISTING",recovered.orderCode()); assertEquals(OrderStatus.SHIPPED,order.getStatus());
         verify(lala,times(1)).create(anyMap()); verifyNoInteractions(wallets);
+    }
+
+    @Test
+    void overReserveCenterReturnRequiresLiveQuoteLimitAndChargesOnlyConfirmedShipment() {
+        var inspection = new InspectionOrder();
+        inspection.setId(UUID.randomUUID());
+        inspection.setPost(order.getPost());
+        order.getPost().setPrice(order.getFinalPrice());
+        inspection.setSeller(order.getSeller());
+        inspection.setBuyer(order.getBuyer());
+        var center = new User();
+        center.setId(UUID.randomUUID());
+        inspection.setInspectionCenter(center);
+        inspection.setOrderType(InspectionOrderType.AT_CENTER);
+        inspection.setStatus("FAILED");
+        inspection.setFeeSettledAt(Instant.now());
+        inspection.setReturnShippingReserveFee(new BigDecimal("36000"));
+        when(inspections.findById(inspection.getId())).thenReturn(Optional.of(inspection));
+        when(inspections.findByIdForUpdate(inspection.getId())).thenReturn(Optional.of(inspection));
+
+        var inbound = new Shipment();
+        inbound.setId(UUID.randomUUID());
+        inbound.setLeg("SELLER_TO_CENTER");
+        inbound.setStatus("DELIVERED");
+        var route = (tools.jackson.databind.node.ObjectNode) mapper.readTree(quote.getPayload());
+        route.put("to_address", "Inspection Hub");
+        inbound.setPayload(mapper.writeValueAsString(route));
+        when(shipments.findByInspectionOrderIdOrderByCreatedAtAsc(inspection.getId())).thenReturn(List.of(inbound));
+
+        when(lala.preview(anyMap())).thenReturn(mapper.valueToTree(Map.of(
+                "total_fee", 45000,
+                "expires_at", Instant.now().plusSeconds(300).toString(),
+                "provider_quote", Map.of("serviceType", "MOTORCYCLE", "quoteId", "q-over"))));
+        var previewAdjustment = new com.secondlife.secondlife.dto.response.InspectionReturnFeeResponse(
+                new BigDecimal("36000"), new BigDecimal("45000"), null,
+                new com.secondlife.secondlife.dto.response.InspectionReturnFeeResponse.Share(65, BigDecimal.ZERO, new BigDecimal("5850")),
+                new com.secondlife.secondlife.dto.response.InspectionReturnFeeResponse.Share(35, BigDecimal.ZERO, new BigDecimal("3150")));
+        when(inspectionFeeSettlement.previewReturnFee(eq(inspection), any())).thenReturn(previewAdjustment);
+
+        var returnQuote = service.quoteCenterReturn(center.getId(), inspection.getId());
+        assertTrue(returnQuote.canBookOverReserve());
+        assertEquals(new BigDecimal("45000"), returnQuote.shippingFee());
+
+        // Live fee increased compared to confirmed maxReturnFee -> rejected before create
+        assertThrows(ConflictException.class, () -> service.createCenterDelivery(center.getId(), inspection.getId(),
+                new CreateShipmentRequest(UUID.randomUUID(), "CENTER_TO_SELLER", null, null, null, null, new BigDecimal("42000"))));
+
+        // Uncertain creation does not charge yet
+        when(lala.create(anyMap())).thenThrow(new ShippingProviderException("Timeout"));
+        var uncertain = service.createCenterDelivery(center.getId(), inspection.getId(),
+                new CreateShipmentRequest(UUID.randomUUID(), "CENTER_TO_SELLER", null, null, null, null, new BigDecimal("45000")));
+        assertEquals("CREATION_UNCERTAIN", uncertain.status());
+        verify(inspectionFeeSettlement, never()).chargeReturnQuote(any(), any());
+
+        // Reconciled as ASSIGNING_DRIVER -> charges quote
+        var entity = rows.get(uncertain.shipmentId());
+        when(lala.detail("LALA-OK")).thenReturn(mapper.valueToTree(Map.of(
+                "order_code", "LALA-OK", "status", "ASSIGNING_DRIVER",
+                "raw", Map.of("metadata", Map.of("secondlifeClientOrderCode", entity.getClientOrderCode())))));
+        service.reconcileCreation(center.getId(), true, uncertain.shipmentId(), "LALA-OK");
+        verify(inspectionFeeSettlement, times(1)).chargeReturnQuote(inspection, entity);
+
+        // Webhook CANCELED clears cancelled quote; duplicate COMPLETED webhook settles once
+        var canceledEvent = mapper.createObjectNode().put("event_id", "cancel-1")
+                .put("event_type", "ORDER_STATUS_CHANGED").put("order_code", "LALA-OK")
+                .put("occurred_at", Instant.now().plusSeconds(10).toString()).put("status", "CANCELED");
+        service.receiveLalamove(canceledEvent);
+        verify(inspectionFeeSettlement, times(1)).clearCancelledReturnQuote(inspection, entity);
+    }
+
+    @Test
+    void rejectedReturnAtCreationDoesNotChargeReturnQuote() {
+        var inspection = inspectionWithFailedHubReturn(new Shipment());
+        rows.clear();
+        when(inspectionFeeSettlement.previewReturnFee(eq(inspection), any())).thenReturn(
+                new com.secondlife.secondlife.dto.response.InspectionReturnFeeResponse(
+                        new BigDecimal("36000"), new BigDecimal("45000"), null,
+                        new com.secondlife.secondlife.dto.response.InspectionReturnFeeResponse.Share(65, BigDecimal.ZERO, new BigDecimal("5850")),
+                        new com.secondlife.secondlife.dto.response.InspectionReturnFeeResponse.Share(35, BigDecimal.ZERO, new BigDecimal("3150"))));
+        when(lala.preview(anyMap())).thenReturn(mapper.valueToTree(Map.of(
+                "total_fee", 45000,
+                "expires_at", Instant.now().plusSeconds(300).toString(),
+                "provider_quote", Map.of("serviceType", "MOTORCYCLE", "quoteId", "q-rej"))));
+        when(lala.create(anyMap())).thenReturn(mapper.valueToTree(Map.of("order_code", "LALA-REJ", "status", "REJECTED")));
+
+        var res = service.createCenterDelivery(inspection.getInspectionCenter().getId(), inspection.getId(),
+                new CreateShipmentRequest(UUID.randomUUID(), "CENTER_TO_SELLER", null, null, null, null, new BigDecimal("45000")));
+        assertEquals("FAILED", res.status());
+        verify(inspectionFeeSettlement, never()).chargeReturnQuote(any(), any());
     }
 }
