@@ -1,7 +1,6 @@
 package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.dto.request.WalletWithdrawalRequest;
-import com.secondlife.secondlife.dto.request.WalletWithdrawalReviewRequest;
 import com.secondlife.secondlife.dto.response.WalletWithdrawalResponse;
 import com.secondlife.secondlife.entity.UserWallet;
 import com.secondlife.secondlife.entity.WalletTransaction;
@@ -11,6 +10,10 @@ import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
 import java.util.UUID;
+import org.springframework.web.multipart.MultipartFile;
+import com.secondlife.secondlife.dto.response.ReportEvidenceContent;
+import com.secondlife.secondlife.dto.response.WalletWithdrawalStatusHistoryResponse;
+import com.secondlife.secondlife.dto.request.WalletWithdrawalReviewRequest;
 
 public interface WalletService {
     UserWallet getWalletByUserId(UUID userId);
@@ -28,7 +31,17 @@ public interface WalletService {
     Page<WalletTransaction> getTransactions(UUID userId, Pageable pageable);
 
     WalletWithdrawalResponse requestWithdrawal(UUID userId, WalletWithdrawalRequest request);
+    WalletWithdrawalResponse requestWithdrawal(UUID userId, WalletWithdrawalRequest request, String idempotencyKey, boolean bankInfoConfirmed);
+    WalletWithdrawalResponse requestWithdrawal(UUID userId, WalletWithdrawalRequest request, String idempotencyKey, boolean bankInfoConfirmed, String warningVersion);
     WalletWithdrawalResponse reviewWithdrawal(UUID adminId, UUID withdrawalId, WalletWithdrawalReviewRequest request);
+    WalletWithdrawalResponse reportWithdrawalIssue(UUID userId, UUID withdrawalId, String type, String description);
+    WalletWithdrawalResponse cancelWithdrawal(UUID userId, UUID withdrawalId, String reason);
+    WalletWithdrawalResponse confirmReceipt(UUID userId, UUID id);
+    int completeExpiredWithdrawals();
+    WalletWithdrawalResponse uploadWithdrawalEvidence(UUID staffId, UUID withdrawalId, MultipartFile file);
+    ReportEvidenceContent readWithdrawalEvidence(UUID actorId, boolean staff, UUID withdrawalId);
+    WalletWithdrawalResponse getMyWithdrawal(UUID userId, UUID withdrawalId);
+    java.util.List<WalletWithdrawalStatusHistoryResponse> getMyWithdrawalStatusHistory(UUID userId, UUID withdrawalId);
     Page<WalletWithdrawalResponse> getMyWithdrawals(UUID userId, Pageable pageable);
     Page<WalletWithdrawalResponse> getAllWithdrawals(String status, Pageable pageable);
 }

@@ -380,19 +380,10 @@ public class InspectionFeeSettlementServiceImpl implements InspectionFeeSettleme
     }
 
     private User resolveCenterRecipient(InspectionOrder order) {
-        if (order.getInspectionCenter() != null) return order.getInspectionCenter();
-        if (order.getInspector() != null) {
-            User inspector = order.getInspector();
-            if (inspector.getManager() != null) {
-                return inspector.getManager();
-            }
-            return inspector;
+        User center = order.getInspectionCenter();
+        if (center == null && order.getInspector() != null) {
+            center = order.getInspector().getManager();
         }
-        List<UUID> centerManagerIds = userRepository.findActiveInspectionCenterUserIds();
-        if (centerManagerIds != null && !centerManagerIds.isEmpty()) {
-            return userRepository.findById(centerManagerIds.getFirst()).orElse(null);
-        }
-        return null;
+        return center != null && center.hasRole("INSPECTION_CENTER") ? center : null;
     }
 }
-

@@ -108,16 +108,29 @@ class WalletServiceWithdrawalTest {
 
         assertNotNull(response);
         assertEquals(new BigDecimal("200000"), response.amount());
-        assertEquals("PENDING_REVIEW", response.status());
+        assertEquals("PENDING", response.status());
         assertEquals("VCB", response.bankCode());
         assertEquals("1234567890", response.accountNumber());
         assertEquals("NGUYEN VAN A", response.accountHolderName());
 
         // Wallet balance should be reduced from 1,000,000 to 800,000
         assertEquals(new BigDecimal("800000"), userWallet.getBalance());
+        assertEquals(new BigDecimal("200000"), userWallet.getReservedBalance());
         verify(userWalletRepository).save(userWallet);
         verify(walletTransactionRepository).save(any(WalletTransaction.class));
         verify(notificationService).notifyWithEmail(eq(userId), anyString(), anyString(), any(NotificationType.class), any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("requestWithdrawal - enforces 10,000 VND integer minimum")
+    void requestWithdrawal_RejectsUnderMinimumAndFractionalVnd() {
+        when(userWalletRepository.findByUserIdWithLock(userId)).thenReturn(Optional.of(userWallet));
+        assertThrows(BadRequestException.class, () -> walletService.requestWithdrawal(userId,
+                new WalletWithdrawalRequest(new BigDecimal("9999"), "VCB", "1234567890", "NGUYEN VAN A")));
+        assertThrows(BadRequestException.class, () -> walletService.requestWithdrawal(userId,
+                new WalletWithdrawalRequest(new BigDecimal("10000.5"), "VCB", "1234567890", "NGUYEN VAN A")));
+        assertEquals(new BigDecimal("1000000"), userWallet.getBalance());
+        verify(walletWithdrawalRepository, never()).save(any());
     }
 
     @Test
@@ -148,9 +161,16 @@ class WalletServiceWithdrawalTest {
                 user, new BigDecimal("200000"), "VCB", "1234567890", "NGUYEN VAN A"
         );
         withdrawal.setId(withdrawalId);
+        withdrawal.setStatus("PROCESSING");
+        withdrawal.setEvidenceStorageId("report-evidence/test");
+        withdrawal.setEvidenceUrl("/api/v1/wallets/withdrawals/evidence/" + withdrawalId);
+
+        userWallet.setBalance(new BigDecimal("800000"));
+        userWallet.setReservedBalance(new BigDecimal("200000"));
 
         when(walletWithdrawalRepository.findByIdForUpdate(withdrawalId)).thenReturn(Optional.of(withdrawal));
         when(userRepository.findById(adminId)).thenReturn(Optional.of(admin));
+        when(userWalletRepository.findByUserIdWithLock(userId)).thenReturn(Optional.of(userWallet));
         when(walletWithdrawalRepository.save(any(WalletWithdrawal.class))).thenAnswer(i -> i.getArgument(0));
 
         WalletWithdrawalReviewRequest reviewRequest = new WalletWithdrawalReviewRequest("APPROVE", "Đã chuyển tiền qua banking");
@@ -158,15 +178,37 @@ class WalletServiceWithdrawalTest {
         WalletWithdrawalResponse response = walletService.reviewWithdrawal(adminId, withdrawalId, reviewRequest);
 
         assertNotNull(response);
-        assertEquals("APPROVED", response.status());
+        assertEquals("TRANSFERRED_AWAITING_REVIEW", response.status());
         assertEquals("Đã chuyển tiền qua banking", response.adminNote());
         assertEquals(adminId, response.reviewedBy());
         assertNotNull(response.reviewedAt());
 
         verify(walletWithdrawalRepository).save(withdrawal);
-        verify(notificationService).notifyWithEmail(eq(userId), contains("phê duyệt"), anyString(), any(NotificationType.class), eq(withdrawalId), anyString(), anyString());
-        // No refund to wallet on approval
-        verify(userWalletRepository, never()).findByUserIdWithLock(any());
+        verify(notificationService).notifyInApp(eq(userId), contains("đã được chuyển khoản"), anyString(), any(NotificationType.class), eq(withdrawalId), anyString(), anyString());
+        assertEquals(BigDecimal.ZERO, userWallet.getReservedBalance());
+        assertEquals(new BigDecimal("800000"), userWallet.getBalance());
+        verify(userWalletRepository).findByUserIdWithLock(userId);
+    }
+
+    @Test
+    @DisplayName("reviewWithdrawal - Cho phép tiếp nhận lại yêu cầu chuyển khoản thất bại")
+    void reviewWithdrawal_WhenRetryFailedTransfer_ShouldReturnToProcessing() {
+        UUID withdrawalId = UUID.randomUUID();
+        WalletWithdrawal withdrawal = new WalletWithdrawal(
+                user, new BigDecimal("200000"), "VCB", "1234567890", "NGUYEN VAN A"
+        );
+        withdrawal.setId(withdrawalId);
+        withdrawal.setStatus("TRANSFER_FAILED");
+        when(walletWithdrawalRepository.findByIdForUpdate(withdrawalId)).thenReturn(Optional.of(withdrawal));
+        when(userRepository.findById(adminId)).thenReturn(Optional.of(admin));
+        when(walletWithdrawalRepository.save(any(WalletWithdrawal.class))).thenAnswer(i -> i.getArgument(0));
+
+        WalletWithdrawalResponse response = walletService.reviewWithdrawal(adminId, withdrawalId,
+                new WalletWithdrawalReviewRequest("CLAIM", "Thử chuyển khoản lại"));
+
+        assertEquals("PROCESSING", response.status());
+        assertEquals(adminId, response.acceptedBy());
+        verify(walletWithdrawalRepository).save(withdrawal);
     }
 
     @Test
@@ -180,6 +222,7 @@ class WalletServiceWithdrawalTest {
 
         // Current wallet balance is 800,000
         userWallet.setBalance(new BigDecimal("800000"));
+        userWallet.setReservedBalance(new BigDecimal("200000"));
 
         when(walletWithdrawalRepository.findByIdForUpdate(withdrawalId)).thenReturn(Optional.of(withdrawal));
         when(userRepository.findById(adminId)).thenReturn(Optional.of(admin));
@@ -198,7 +241,7 @@ class WalletServiceWithdrawalTest {
         assertEquals(new BigDecimal("1000000"), userWallet.getBalance());
         verify(userWalletRepository).save(userWallet);
         verify(walletTransactionRepository).save(any(WalletTransaction.class));
-        verify(notificationService).notifyWithEmail(eq(userId), contains("từ chối"), anyString(), any(NotificationType.class), eq(withdrawalId), anyString(), anyString());
+        verify(notificationService).notifyInApp(eq(userId), contains("đã bị từ chối"), anyString(), any(NotificationType.class), eq(withdrawalId), anyString(), anyString());
     }
 
     @Test
@@ -208,7 +251,7 @@ class WalletServiceWithdrawalTest {
         WalletWithdrawal withdrawal = new WalletWithdrawal(
                 user, new BigDecimal("200000"), "VCB", "1234567890", "NGUYEN VAN A"
         );
-        withdrawal.setStatus("APPROVED");
+        withdrawal.setStatus("COMPLETED");
 
         when(walletWithdrawalRepository.findByIdForUpdate(withdrawalId)).thenReturn(Optional.of(withdrawal));
 
@@ -217,7 +260,7 @@ class WalletServiceWithdrawalTest {
         BadRequestException ex = assertThrows(BadRequestException.class,
                 () -> walletService.reviewWithdrawal(adminId, withdrawalId, reviewRequest));
 
-        assertTrue(ex.getMessage().contains("đã được xử lý trước đó"));
+        assertTrue(ex.getMessage().contains("chỉ có thể bị từ chối"));
     }
 
     @Test
@@ -249,12 +292,12 @@ class WalletServiceWithdrawalTest {
         withdrawal.setId(UUID.randomUUID());
 
         Page<WalletWithdrawal> page = new PageImpl<>(List.of(withdrawal), pageable, 1);
-        when(walletWithdrawalRepository.findByStatusOrderByCreatedAtDesc("PENDING_REVIEW", pageable)).thenReturn(page);
+        when(walletWithdrawalRepository.findByStatusOrderByCreatedAtDesc("PENDING", pageable)).thenReturn(page);
 
-        Page<WalletWithdrawalResponse> result = walletService.getAllWithdrawals("PENDING_REVIEW", pageable);
+        Page<WalletWithdrawalResponse> result = walletService.getAllWithdrawals("PENDING", pageable);
 
         assertNotNull(result);
         assertEquals(1, result.getTotalElements());
-        verify(walletWithdrawalRepository).findByStatusOrderByCreatedAtDesc("PENDING_REVIEW", pageable);
+        verify(walletWithdrawalRepository).findByStatusOrderByCreatedAtDesc("PENDING", pageable);
     }
 }

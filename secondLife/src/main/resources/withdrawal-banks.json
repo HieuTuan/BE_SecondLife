@@ -1,0 +1,242 @@
+[
+  {
+    "code": "ICB",
+    "bin": "970415",
+    "name": "VietinBank"
+  },
+  {
+    "code": "VCB",
+    "bin": "970436",
+    "name": "Vietcombank"
+  },
+  {
+    "code": "BIDV",
+    "bin": "970418",
+    "name": "BIDV"
+  },
+  {
+    "code": "VBA",
+    "bin": "970405",
+    "name": "Agribank"
+  },
+  {
+    "code": "OCB",
+    "bin": "970448",
+    "name": "OCB"
+  },
+  {
+    "code": "MB",
+    "bin": "970422",
+    "name": "MBBank"
+  },
+  {
+    "code": "TCB",
+    "bin": "970407",
+    "name": "Techcombank"
+  },
+  {
+    "code": "ACB",
+    "bin": "970416",
+    "name": "ACB"
+  },
+  {
+    "code": "VPB",
+    "bin": "970432",
+    "name": "VPBank"
+  },
+  {
+    "code": "TPB",
+    "bin": "970423",
+    "name": "TPBank"
+  },
+  {
+    "code": "STB",
+    "bin": "970403",
+    "name": "Sacombank"
+  },
+  {
+    "code": "HDB",
+    "bin": "970437",
+    "name": "HDBank"
+  },
+  {
+    "code": "VCCB",
+    "bin": "970454",
+    "name": "VietCapitalBank"
+  },
+  {
+    "code": "SCB",
+    "bin": "970429",
+    "name": "SCB"
+  },
+  {
+    "code": "VIB",
+    "bin": "970441",
+    "name": "VIB"
+  },
+  {
+    "code": "SHB",
+    "bin": "970443",
+    "name": "SHB"
+  },
+  {
+    "code": "EIB",
+    "bin": "970431",
+    "name": "Eximbank"
+  },
+  {
+    "code": "MSB",
+    "bin": "970426",
+    "name": "MSB"
+  },
+  {
+    "code": "CAKE",
+    "bin": "546034",
+    "name": "CAKE"
+  },
+  {
+    "code": "Ubank",
+    "bin": "546035",
+    "name": "Ubank"
+  },
+  {
+    "code": "TIMO",
+    "bin": "963388",
+    "name": "Timo"
+  },
+  {
+    "code": "SGICB",
+    "bin": "970400",
+    "name": "SaigonBank"
+  },
+  {
+    "code": "BAB",
+    "bin": "970409",
+    "name": "BacABank"
+  },
+  {
+    "code": "PVDB",
+    "bin": "971133",
+    "name": "PVcomBank Pay"
+  },
+  {
+    "code": "momo",
+    "bin": "971025",
+    "name": "MoMo"
+  },
+  {
+    "code": "PVCB",
+    "bin": "970412",
+    "name": "PVcomBank"
+  },
+  {
+    "code": "MBV",
+    "bin": "970414",
+    "name": "MBV"
+  },
+  {
+    "code": "NCB",
+    "bin": "970419",
+    "name": "NCB"
+  },
+  {
+    "code": "SHBVN",
+    "bin": "970424",
+    "name": "ShinhanBank"
+  },
+  {
+    "code": "ABB",
+    "bin": "970425",
+    "name": "ABBANK"
+  },
+  {
+    "code": "VAB",
+    "bin": "970427",
+    "name": "VietABank"
+  },
+  {
+    "code": "NAB",
+    "bin": "970428",
+    "name": "NamABank"
+  },
+  {
+    "code": "PGB",
+    "bin": "970430",
+    "name": "PGBank"
+  },
+  {
+    "code": "VIETBANK",
+    "bin": "970433",
+    "name": "VietBank"
+  },
+  {
+    "code": "BVB",
+    "bin": "970438",
+    "name": "BaoVietBank"
+  },
+  {
+    "code": "SEAB",
+    "bin": "970440",
+    "name": "SeABank"
+  },
+  {
+    "code": "COOPBANK",
+    "bin": "970446",
+    "name": "COOPBANK"
+  },
+  {
+    "code": "LPB",
+    "bin": "970449",
+    "name": "LPBank"
+  },
+  {
+    "code": "KLB",
+    "bin": "970452",
+    "name": "KienLongBank"
+  },
+  {
+    "code": "KBank",
+    "bin": "668888",
+    "name": "KBank"
+  },
+  {
+    "code": "ZALOPAY",
+    "bin": "971101",
+    "name": "ZaloPay"
+  },
+  {
+    "code": "MVAS",
+    "bin": "971032",
+    "name": "MVAS"
+  },
+  {
+    "code": "IVB",
+    "bin": "970434",
+    "name": "IndovinaBank"
+  },
+  {
+    "code": "CIMB",
+    "bin": "422589",
+    "name": "CIMB"
+  },
+  {
+    "code": "CBB",
+    "bin": "970444",
+    "name": "CBBank"
+  },
+  {
+    "code": "WVN",
+    "bin": "970457",
+    "name": "Woori"
+  },
+  {
+    "code": "KBHN",
+    "bin": "970462",
+    "name": "KookminHN"
+  },
+  {
+    "code": "KBHCM",
+    "bin": "970463",
+    "name": "KookminHCM"
+  }
+]

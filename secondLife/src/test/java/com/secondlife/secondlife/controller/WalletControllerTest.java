@@ -143,28 +143,31 @@ class WalletControllerTest {
                 .bankCode("VCB")
                 .accountNumber("0123456789")
                 .accountHolderName("NGUYEN VAN A")
-                .status("PENDING_REVIEW")
+                .status("PENDING")
                 .createdAt(Instant.now())
                 .build();
 
         when(currentUserProvider.resolveUserId(any())).thenReturn(userId);
-        when(walletService.requestWithdrawal(eq(userId), any(WalletWithdrawalRequest.class))).thenReturn(response);
+        when(walletService.requestWithdrawal(eq(userId), any(WalletWithdrawalRequest.class), eq("wd-controller-test"), eq(true), any())).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/wallets/withdrawals")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", "wd-controller-test")
+                        .header("X-Bank-Info-Confirmed", "true")
+                        .header("X-Bank-Info-Warning-Version", "withdrawal-bank-warning-v1")
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(withdrawalId.toString()))
                 .andExpect(jsonPath("$.amount").value(150000))
                 .andExpect(jsonPath("$.bankCode").value("VCB"))
-                .andExpect(jsonPath("$.status").value("PENDING_REVIEW"));
+                .andExpect(jsonPath("$.status").value("PENDING"));
     }
 
     @Test
-    @DisplayName("POST /api/v1/wallets/withdrawals - Validate số tiền nhỏ hơn 50,000 VND")
+    @DisplayName("POST /api/v1/wallets/withdrawals - Validation tối thiểu 10,000 VND")
     void requestWithdrawal_AmountTooLow_ThrowsValidationError() throws Exception {
         WalletWithdrawalRequest request = new WalletWithdrawalRequest(
-                new BigDecimal("20000"), // Under 50,000
+                new BigDecimal("9999"), // Under 10,000
                 "VCB",
                 "0123456789",
                 "NGUYEN VAN A"
@@ -185,7 +188,7 @@ class WalletControllerTest {
                 .userId(userId)
                 .amount(new BigDecimal("200000"))
                 .bankCode("MB")
-                .status("APPROVED")
+                .status("COMPLETED")
                 .createdAt(Instant.now())
                 .build();
 
@@ -197,7 +200,7 @@ class WalletControllerTest {
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0].id").value(withdrawalId.toString()))
-                .andExpect(jsonPath("$.items[0].status").value("APPROVED"));
+                .andExpect(jsonPath("$.items[0].status").value("COMPLETED"));
     }
 
     @Test
@@ -209,19 +212,19 @@ class WalletControllerTest {
                 .userId(userId)
                 .amount(new BigDecimal("500000"))
                 .bankCode("TCB")
-                .status("PENDING_REVIEW")
+                .status("PENDING")
                 .createdAt(Instant.now())
                 .build();
 
-        when(walletService.getAllWithdrawals(eq("PENDING_REVIEW"), any(Pageable.class)))
+        when(walletService.getAllWithdrawals(eq("PENDING"), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(item), PageRequest.of(0, 10), 1));
 
         mockMvc.perform(get("/api/v1/wallets/admin/withdrawals")
-                        .param("status", "PENDING_REVIEW")
+                        .param("status", "PENDING")
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0].id").value(withdrawalId.toString()))
-                .andExpect(jsonPath("$.items[0].status").value("PENDING_REVIEW"));
+                .andExpect(jsonPath("$.items[0].status").value("PENDING"));
     }
 
     @Test
@@ -234,7 +237,7 @@ class WalletControllerTest {
                 .id(withdrawalId)
                 .userId(userId)
                 .amount(new BigDecimal("500000"))
-                .status("APPROVED")
+                .status("TRANSFERRED_AWAITING_REVIEW")
                 .adminNote("Duyệt thành công")
                 .build();
 
@@ -247,7 +250,7 @@ class WalletControllerTest {
                         .content(objectMapper.writeValueAsString(reviewRequest)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(withdrawalId.toString()))
-                .andExpect(jsonPath("$.status").value("APPROVED"))
+                .andExpect(jsonPath("$.status").value("TRANSFERRED_AWAITING_REVIEW"))
                 .andExpect(jsonPath("$.adminNote").value("Duyệt thành công"));
     }
 }
