@@ -442,6 +442,54 @@ class InspectionGovernanceIntegrationTest {
     }
 
     @Test
+    void adminCanFindAndReviewTravelProposalsIndependentlyOfLevelFees() throws Exception {
+        String travelPath = "/api/v1/inspector-center/travel-tiers/propose";
+        String reviewQueue = "/api/v1/admin/inspection/fee-proposals";
+        String travelRequest = """
+                {"baseInspectionFee":0,"tiers":[
+                    {"tierNumber":1,"name":"0-5 km","fromKm":0,"toKm":5,"pricePerKm":3200,"status":"ACTIVE"}
+                ]}
+                """;
+        String firstTravel = mvc.perform(post(travelPath).header("Authorization", auth(center))
+                        .contentType(MediaType.APPLICATION_JSON).content(travelRequest))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String firstTravelId = json.readTree(firstTravel).path("id").asString();
+        mvc.perform(post(travelPath).header("Authorization", auth(otherCenter))
+                        .contentType(MediaType.APPLICATION_JSON).content(travelRequest))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/v1/inspector-center/level-fees/propose").header("Authorization", auth(center))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"complexityLevel\":\"L2\",\"baseInspectionFee\":100000}"))
+                .andExpect(status().isOk());
+        mvc.perform(get(reviewQueue).header("Authorization", auth(admin)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(3));
+
+        mvc.perform(get(reviewQueue).header("Authorization", auth(admin))
+                        .param("travelOnly", "true").param("status", "PENDING_APPROVAL")
+                        .param("sort", "createdAt,desc").param("size", "1").param("page", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(2))
+                .andExpect(jsonPath("$.data.totalPages").value(2))
+                .andExpect(jsonPath("$.data.items[0].id").value(firstTravelId))
+                .andExpect(jsonPath("$.data.items[0].tiers[0].pricePerKm").value(3200));
+
+        mvc.perform(post(reviewQueue + "/" + firstTravelId + "/review").header("Authorization", auth(admin))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"approved\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("APPROVED"));
+        mvc.perform(get(reviewQueue).header("Authorization", auth(admin))
+                        .param("travelOnly", "true").param("status", "PENDING_APPROVAL"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(1));
+        mvc.perform(get(reviewQueue).header("Authorization", auth(admin))
+                        .param("travelOnly", "true").param("status", "APPROVED"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.items[0].id").value(firstTravelId));
+        mvc.perform(get(reviewQueue).header("Authorization", auth(admin)).param("travelOnly", "true"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(2));
+        mvc.perform(get("/api/v1/admin/inspection/travel-tiers").header("Authorization", auth(admin)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].pricePerKm").value(3200));
+    }
+
+    @Test
     void invalidChecklistAndNegativeFeesAreRejected() throws Exception {
         mvc.perform(post("/api/v1/inspector-center/checklists").header("Authorization", auth(center))
                         .contentType(MediaType.APPLICATION_JSON)

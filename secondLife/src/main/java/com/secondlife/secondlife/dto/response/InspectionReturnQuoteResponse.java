@@ -10,5 +10,7 @@ public record InspectionReturnQuoteResponse(
         BigDecimal reserveFee,
         String carrier,
         String serviceType,
-        String expiresAt
+        String expiresAt,
+        InspectionReturnFeeResponse adjustment,
+        boolean canBookOverReserve
 ) {}

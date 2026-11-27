@@ -80,6 +80,7 @@ public class OrderFeedServiceImpl implements OrderFeedService {
                 actor, perspective, search, filter, size, (long) currentPage * size, detail);
         Map<UUID, OrderResponseDTO> orders = loadOrders(rows);
         Map<UUID, OrderReturnResponse> approvedReturns = loadApprovedReturns(orders);
+        Set<UUID> activeDisputeOrderIds = loadActiveDisputeOrderIds(orders, approvedReturns);
         Map<UUID, InspectionOrderResponse> inspections = loadInspections(rows);
         CommissionRuleResponse previewRule = inspections.values().stream()
                 .anyMatch(inspection -> canPreviewCommission(actor, inspection))
@@ -94,7 +95,13 @@ public class OrderFeedServiceImpl implements OrderFeedService {
             OrderResponseDTO order = orders.get(row.getId());
             SellerCommissionPreviewResponse preview = order == null && previewRule != null
                     && canPreviewCommission(actor, inspection) ? previewCommission(inspection, previewRule) : null;
-            OrderFeedItemResponse item = orderMapper.toFeedItem(row, order, inspection, preview, approvedReturns.get(row.getId()));
+            OrderFeedItemResponse item = orderMapper.toFeedItem(
+                    row,
+                    order,
+                    inspection,
+                    preview,
+                    approvedReturns.get(row.getId()),
+                    order != null && activeDisputeOrderIds.contains(order.id()));
             if (row.isDetail()) {
                 detailItem = item;
             } else {
@@ -141,6 +148,20 @@ public class OrderFeedServiceImpl implements OrderFeedService {
 
         return userReports.findApprovedReturnsForOrders(orderIds, Status.CONFIRMED, ResolutionAction.RETURN_AND_REFUND)
                 .stream().collect(Collectors.toMap(OrderReturnResponse::orderId, Function.identity(), (first, next) -> first));
+    }
+
+    private Set<UUID> loadActiveDisputeOrderIds(Map<UUID, OrderResponseDTO> orders,
+                                                Map<UUID, OrderReturnResponse> approvedReturns) {
+        List<UUID> frozenOrderIds = orders.values().stream()
+                .filter(order -> order.escrowStatus() == EscrowStatus.FROZEN
+                        && order.shippingDeliveredAt() != null
+                        && !approvedReturns.containsKey(order.id()))
+                .map(OrderResponseDTO::id)
+                .toList();
+        if (frozenOrderIds.isEmpty()) {
+            return Set.of();
+        }
+        return Set.copyOf(userReports.findOrderIdsWithStatuses(frozenOrderIds, List.of(Status.OPEN, Status.IN_REVIEW)));
     }
 
     private Map<UUID, InspectionOrderResponse> loadInspections(List<FeedRow> rows) {

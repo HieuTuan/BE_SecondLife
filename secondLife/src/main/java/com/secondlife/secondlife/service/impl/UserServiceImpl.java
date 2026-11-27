@@ -112,15 +112,7 @@ public class UserServiceImpl implements UserService {
             if (request.longitude() != null) profile.setLongitude(request.longitude());
         }
 
-        // CẬP NHẬT ĐỊA CHỈ KHO LẤY HÀNG (shipping_pickup_addresses):
-        // Khi gọi update profile với thông tin địa chỉ, luôn cập nhật vào Địa chỉ Kho lấy hàng của người dùng.
-        boolean hasAddressInput = (request.streetAddress() != null && !request.streetAddress().isBlank()) ||
-                (request.ward() != null && !request.ward().isBlank()) ||
-                (request.district() != null && !request.district().isBlank()) ||
-                (request.province() != null && !request.province().isBlank()) ||
-                request.latitude() != null || request.longitude() != null;
-
-        if (hasAddressInput) {
+        if (user.hasRole(RoleCode.SELLER.name()) && request.latitude() != null && request.longitude() != null) {
             List<String> parts = new ArrayList<>();
             if (request.streetAddress() != null && !request.streetAddress().isBlank()) parts.add(request.streetAddress().trim());
             if (request.ward() != null && !request.ward().isBlank()) parts.add(request.ward().trim());
@@ -133,10 +125,8 @@ public class UserServiceImpl implements UserService {
                         ? request.fullName().trim() : (profile.getFullName() != null && !profile.getFullName().isBlank() ? profile.getFullName() : "Gian Hàng");
                 String contactPhone = (request.phone() != null && !request.phone().isBlank())
                         ? request.phone().trim() : (profile.getPhone() != null && !profile.getPhone().isBlank() ? profile.getPhone() : "0900000000");
-                BigDecimal lat = request.latitude() != null
-                        ? BigDecimal.valueOf(request.latitude()) : BigDecimal.valueOf(21.0333);
-                BigDecimal lng = request.longitude() != null
-                        ? BigDecimal.valueOf(request.longitude()) : BigDecimal.valueOf(105.7937);
+                BigDecimal lat = BigDecimal.valueOf(request.latitude());
+                BigDecimal lng = BigDecimal.valueOf(request.longitude());
 
                 try {
                     ShippingAddress shippingAddr = new ShippingAddress(contactName, contactPhone, fullAddr, lat, lng);

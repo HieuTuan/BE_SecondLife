@@ -47,6 +47,14 @@ public interface SystemWalletTransactionRepository extends JpaRepository<SystemW
             """)
     InspectionBalances getInspectionBalances(@Param("inspectionOrderId") UUID inspectionOrderId);
 
+    @Query("""
+            SELECT COALESCE(SUM(t.carrierFee - t.unfundedExpense + t.shippingDelta), 0)
+            FROM SystemWalletTransaction t
+            WHERE t.inspectionOrderId = :inspectionOrderId
+              AND t.inspectionEntry = 'FEE_SETTLEMENT'
+            """)
+    BigDecimal getSettledInspectionOutboundShipping(@Param("inspectionOrderId") UUID inspectionOrderId);
+
     interface InspectionBalances {
         BigDecimal getHeld();
         BigDecimal getShipping();

@@ -153,6 +153,30 @@ class OrderDisputeServiceImplTest {
         assertTrue(order.isShippingHold());
     }
 
+    @Test void dismissalReleasesDisputeHoldForDeliveredHubOrderEvenWithPriorRejectedBooking() {
+        order.setEscrowStatus(EscrowStatus.FROZEN);
+        var failedFirstBooking = new Shipment();
+        failedFirstBooking.setLeg("CENTER_TO_BUYER");
+        failedFirstBooking.setProvider("LALAMOVE");
+        failedFirstBooking.setStatus("FAILED");
+        failedFirstBooking.setProviderStatus("REJECTED");
+
+        var deliveredReplacement = new Shipment();
+        deliveredReplacement.setLeg("CENTER_TO_BUYER");
+        deliveredReplacement.setProvider("LALAMOVE");
+        deliveredReplacement.setStatus("DELIVERED");
+        deliveredReplacement.setProviderStatus("COMPLETED");
+
+        when(shipments.findByOrderIdOrderByCreatedAtAsc(order.getId()))
+                .thenReturn(List.of(failedFirstBooking, deliveredReplacement));
+
+        service.resolve(mapper.toResponse(report, json),
+                new Resolve(Decision.DISMISSED, ResponsibleParty.NONE, "Bác bỏ"),
+                ResponsibleParty.NONE);
+
+        assertEquals(EscrowStatus.HELD, order.getEscrowStatus());
+    }
+
     @Test void shipmentMustUseAnApprovedReportForItsOwnOrder() {
         assertThrows(BadRequestException.class, () -> service.approvedReturn(order, null));
         assertThrows(ConflictException.class, () -> service.approvedReturn(order, report.getId()));

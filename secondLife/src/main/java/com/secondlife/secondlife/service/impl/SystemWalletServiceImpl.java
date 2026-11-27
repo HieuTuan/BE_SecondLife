@@ -184,8 +184,17 @@ public class SystemWalletServiceImpl implements SystemWalletService {
         recordInspection(wallet, inspectionId, InspectionEntry.FEE_REFUND, heldRefund.negate(),
                 shippingRefund.negate(), BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
         recordInspection(wallet, inspectionId, InspectionEntry.FEE_SETTLEMENT, fundedPayout.add(fundedCommission).negate(),
-                fundedShipping.negate(), fundedCommission, outbound,
+                BigDecimal.ZERO, fundedCommission, outbound,
                 payout.subtract(fundedPayout).add(outbound.subtract(fundedShipping)));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordInspectionReturnCollection(UUID inspectionId, BigDecimal amount, boolean debtPayment) {
+        if (amount.signum() == 0) return;
+        var wallet = lock();
+        recordInspection(wallet, inspectionId, debtPayment ? InspectionEntry.RETURN_DEBT_PAYMENT : InspectionEntry.RETURN_TOP_UP,
+                BigDecimal.ZERO, amount, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
     }
 
     @Override
@@ -194,15 +203,18 @@ public class SystemWalletServiceImpl implements SystemWalletService {
                                        BigDecimal reserveRefund) {
         var wallet = lock();
         var balances = transactions.getInspectionBalances(inspectionId);
-        BigDecimal availableShipping = balances.getShipping().add(sellerCollected);
-        BigDecimal fundedShipping = carrierFee.min(availableShipping);
+        BigDecimal retainedOutbound = transactions.getSettledInspectionOutboundShipping(inspectionId);
+        BigDecimal availableShipping = balances.getShipping()
+                .subtract(retainedOutbound == null ? BigDecimal.ZERO : retainedOutbound)
+                .add(sellerCollected);
+        BigDecimal fundedShipping = carrierFee.min(availableShipping.subtract(reserveRefund).max(BigDecimal.ZERO));
         if (balances.getHeld().signum() != 0 || availableShipping.subtract(fundedShipping).compareTo(reserveRefund) != 0) {
             throw new ConflictException("Inspection return does not reconcile with its funded reserve");
         }
 
         recordInspection(wallet, inspectionId, InspectionEntry.SELLER_RETURN_PAYMENT, BigDecimal.ZERO, sellerCollected,
                 BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
-        recordInspection(wallet, inspectionId, InspectionEntry.RETURN_SHIPPING, BigDecimal.ZERO, fundedShipping.negate(),
+        recordInspection(wallet, inspectionId, InspectionEntry.RETURN_SHIPPING, BigDecimal.ZERO, BigDecimal.ZERO,
                 BigDecimal.ZERO, carrierFee, carrierFee.subtract(fundedShipping));
         recordInspection(wallet, inspectionId, InspectionEntry.RETURN_REFUND, BigDecimal.ZERO, reserveRefund.negate(),
                 BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
@@ -237,6 +249,9 @@ public class SystemWalletServiceImpl implements SystemWalletService {
         SELLER_PAYMENT(SystemWalletTransactionType.INSPECTION_HOLD),
         SELLER_SETTLEMENT_PAYMENT(SystemWalletTransactionType.INSPECTION_HOLD),
         SELLER_RETURN_PAYMENT(SystemWalletTransactionType.INSPECTION_HOLD),
+        RETURN_TOP_UP(SystemWalletTransactionType.INSPECTION_HOLD),
+        RETURN_DEBT_PAYMENT(SystemWalletTransactionType.INSPECTION_HOLD),
+        RETURN_DEBT_RECOVERY(SystemWalletTransactionType.INSPECTION_RETURN_SHIPPING),
         FEE_SETTLEMENT(SystemWalletTransactionType.INSPECTION_SETTLEMENT),
         FEE_REFUND(SystemWalletTransactionType.INSPECTION_REFUND),
         RETURN_SHIPPING(SystemWalletTransactionType.INSPECTION_RETURN_SHIPPING),

@@ -6,6 +6,7 @@ import com.secondlife.secondlife.dto.response.InspectionSealLogResponse;
 import com.secondlife.secondlife.dto.response.InspectionSealVerificationResponse;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.service.InspectionEscrowService;
+import com.secondlife.secondlife.service.InspectionFeeSettlementService;
 import com.secondlife.secondlife.service.InspectionPricingService;
 import com.secondlife.secondlife.service.InspectionService;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,6 +45,9 @@ class InspectionSealControllerTest {
     private InspectionEscrowService escrowService;
 
     @Mock
+    private InspectionFeeSettlementService settlementService;
+
+    @Mock
     private CurrentUserProvider currentUserProvider;
 
     private MockMvc mockMvc;
@@ -55,6 +59,7 @@ class InspectionSealControllerTest {
                 inspectionService,
                 pricingService,
                 escrowService,
+                settlementService,
                 currentUserProvider
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller)

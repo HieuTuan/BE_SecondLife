@@ -16,4 +16,6 @@ public interface SellerOnboardingService {
 
     void requireCompleted(UUID userId);
 
+    void savePickupAfterApproval(UUID userId);
+
 }

@@ -248,12 +248,12 @@ public class InspectionPricingServiceImpl implements InspectionPricingService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<InspectionFeeProposalResponse> getProposals(InspectionFeeProposalStatus status, Pageable pageable) {
+    public Page<InspectionFeeProposalResponse> getProposals(InspectionFeeProposalStatus status, boolean travelOnly, Pageable pageable) {
         pageable = InspectionPageables.validate(pageable, Set.of("id", "createdAt", "reviewedAt", "status", "complexityLevel"));
-        if (status != null) {
-            return proposalRepository.findByStatusOrderByCreatedAtDesc(status, pageable).map(this::toProposalResponse);
+        if (travelOnly) {
+            return proposalRepository.findTravelProposals(status, pageable).map(this::toProposalResponse);
         }
-        return proposalRepository.findAll(pageable).map(this::toProposalResponse);
+        return proposalRepository.findLevelFeeProposals(status, pageable).map(this::toProposalResponse);
     }
 
     @Override

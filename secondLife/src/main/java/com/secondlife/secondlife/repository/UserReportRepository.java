@@ -64,6 +64,15 @@ public interface UserReportRepository extends JpaRepository<UserReport, UUID>, R
     Optional<UserReport> findByReturnShipmentId(UUID shipmentId);
 
     @Query("""
+            SELECT DISTINCT r.orderId
+            FROM UserReport r
+            WHERE r.orderId IN :orderIds
+              AND r.status IN :statuses
+            """)
+    List<UUID> findOrderIdsWithStatuses(@Param("orderIds") List<UUID> orderIds,
+            @Param("statuses") List<Status> statuses);
+
+    @Query("""
             SELECT new com.secondlife.secondlife.dto.response.OrderReturnResponse(
                 r.orderId, r.id, r.returnShipmentId, s.status, s.orderCode, r.refundedAt)
             FROM UserReport r LEFT JOIN Shipment s ON s.id = r.returnShipmentId

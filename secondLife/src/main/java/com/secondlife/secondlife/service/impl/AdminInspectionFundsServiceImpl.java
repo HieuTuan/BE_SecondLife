@@ -5,6 +5,7 @@ import com.secondlife.secondlife.dto.response.AdminInspectionFundsResponse.Colle
 import com.secondlife.secondlife.dto.response.AdminInspectionFundsResponse.Payment;
 import com.secondlife.secondlife.dto.response.AdminInspectionFundsResponse.ReturnReserve;
 import com.secondlife.secondlife.dto.response.AdminInspectionFundsResponse.ReturnReserveStatus;
+import com.secondlife.secondlife.dto.response.InspectionReturnFeeResponse;
 import com.secondlife.secondlife.entity.InspectionFeeSettlement;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Shipment;
@@ -15,6 +16,7 @@ import com.secondlife.secondlife.repository.InspectionFeeSettlementRepository;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.ShipmentRepository;
 import com.secondlife.secondlife.service.AdminInspectionFundsService;
+import com.secondlife.secondlife.service.InspectionFeeSettlementService;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -33,6 +35,7 @@ public class AdminInspectionFundsServiceImpl implements AdminInspectionFundsServ
     private final InspectionFeeSettlementRepository settlements;
     private final ShipmentRepository shipments;
     private final AdminInspectionFundsMapper mapper;
+    private final InspectionFeeSettlementService settlementService;
 
     @Override
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -41,17 +44,21 @@ public class AdminInspectionFundsServiceImpl implements AdminInspectionFundsServ
                 .orElseThrow(() -> new NotFoundException("Đơn kiểm định không tồn tại"));
         InspectionFeeSettlement settlement = settlements.findByInspectionOrderId(inspectionOrderId).orElse(null);
         List<Shipment> route = shipments.findByInspectionOrderIdOrderByCreatedAtAsc(inspectionOrderId);
+        InspectionReturnFeeResponse returnFee = settlementService.getReturnFee(null, true, inspectionOrderId);
 
         BigDecimal deposit = amount(order.getBuyerCommitmentDeposit());
         Payment buyer = payment(amount(order.getBuyerFeeShare()).add(deposit), order.getBuyerPaidAt());
         Payment seller = payment(amount(order.getSellerFeeShare()), order.getSellerPaidAt());
         BigDecimal totalCollected = settlement == null
                 ? buyer.amountCollected().add(seller.amountCollected())
-                : settlement.getTotalCollected().add(settlement.getSellerAdditionalCollected());
+                : settlement.getTotalCollected()
+                        .add(settlement.getSellerAdditionalCollected())
+                        .add(amount(settlement.getReturnBuyerCollected()))
+                        .add(amount(settlement.getReturnSellerCollected()));
         InspectionFeePayer feePayer = order.getFeePayer() == null ? InspectionFeePayer.BUYER_PAYS : order.getFeePayer();
         BigDecimal shippingFee = amount(order.getShippingFee());
         BigDecimal outboundCashPending = outboundCashPending(order, settlement, route, shippingFee);
-        ReturnReserve reserve = returnReserve(order, settlement, route);
+        ReturnReserve reserve = returnReserve(order, settlement, route, returnFee);
         BigDecimal unsettled = settlement == null
                 ? totalCollected.subtract(releasedOutboundCash(order, route, shippingFee)).max(BigDecimal.ZERO)
                 : reserve.heldAmount().add(outboundCashPending);
@@ -60,7 +67,7 @@ public class AdminInspectionFundsServiceImpl implements AdminInspectionFundsServ
                 order.getOrderType(), feePayer, order.resolveBuyerFeePercent(), order.isCashShippingSimulation(), "VND", amount(order.getInspectionFee()),
                 amount(order.getTravelFee()), shippingFee, deposit, buyer, seller, collectionStatus(order, buyer, seller),
                 totalCollected, unsettled, outboundCashPending, reserve, mapper.toSettlement(settlement),
-                route.stream().map(mapper::toShipping).toList());
+                route.stream().map(mapper::toShipping).toList(), returnFee);
     }
 
     private Payment payment(BigDecimal due, Instant paidAt) {
@@ -102,7 +109,7 @@ public class AdminInspectionFundsServiceImpl implements AdminInspectionFundsServ
     }
 
     private ReturnReserve returnReserve(InspectionOrder order, InspectionFeeSettlement settlement,
-                                        List<Shipment> route) {
+                                        List<Shipment> route, InspectionReturnFeeResponse returnFee) {
         BigDecimal planned = amount(order.getReturnShippingReserveFee());
         if (planned.signum() == 0) {
             return new ReturnReserve(planned, BigDecimal.ZERO, ReturnReserveStatus.NOT_REQUIRED);
@@ -113,7 +120,10 @@ public class AdminInspectionFundsServiceImpl implements AdminInspectionFundsServ
                     ? ReturnReserveStatus.NOT_COLLECTED : ReturnReserveStatus.HELD_PENDING_INSPECTION);
         }
         if (settlement.getReturnShippingSettledAt() != null) {
-            return new ReturnReserve(planned, BigDecimal.ZERO, ReturnReserveStatus.SETTLED);
+            boolean hasOutstanding = returnFee != null
+                    && (returnFee.buyer().outstanding().signum() > 0 || returnFee.seller().outstanding().signum() > 0);
+            return new ReturnReserve(planned, BigDecimal.ZERO,
+                    hasOutstanding ? ReturnReserveStatus.SETTLED_OUTSTANDING : ReturnReserveStatus.SETTLED);
         }
         return switch (settlement.getOutcome()) {
             case PAYMENT_EXPIRED, CANCELLED_BEFORE_INSPECTION, PASSED_PURCHASED ->
@@ -121,7 +131,10 @@ public class AdminInspectionFundsServiceImpl implements AdminInspectionFundsServ
                             ? ReturnReserveStatus.NOT_COLLECTED : ReturnReserveStatus.REFUNDED_UNUSED);
             case FAILED_INSPECTION, PASSED_BUYER_DEFAULTED, PRE_LISTING_PASSED -> {
                 BigDecimal allocated = settlement.getReturnReserveAllocated();
-                BigDecimal held = allocated.subtract(settlement.getSellerOutstandingAmount()).max(BigDecimal.ZERO);
+                BigDecimal topUpCollected = amount(settlement.getReturnBuyerCollected())
+                        .add(amount(settlement.getReturnSellerCollected()));
+                BigDecimal held = allocated.add(topUpCollected)
+                        .subtract(settlement.getSellerOutstandingAmount()).max(BigDecimal.ZERO);
                 Shipment returning = route.reversed().stream()
                         .filter(shipment -> "CENTER_TO_SELLER".equals(shipment.getLeg())
                                 && !"CANCELLED".equals(shipment.getStatus()) && !"FAILED".equals(shipment.getStatus()))

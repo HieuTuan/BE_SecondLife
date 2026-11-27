@@ -36,7 +36,8 @@ public record AdminInspectionFundsResponse(
         BigDecimal outboundCashPendingAmount,
         ReturnReserve returnReserve,
         Settlement settlement,
-        List<Shipping> shipments
+        List<Shipping> shipments,
+        InspectionReturnFeeResponse returnFee
 ) {
     public record Payment(BigDecimal amountDue, BigDecimal amountCollected, Instant paidAt) {}
 
@@ -80,6 +81,7 @@ public record AdminInspectionFundsResponse(
     public enum ReturnReserveStatus {
         NOT_REQUIRED, NOT_COLLECTED, HELD_PENDING_INSPECTION, REFUNDED_UNUSED,
         AWAITING_RETURN_SHIPMENT, RETURN_IN_PROGRESS, AWAITING_ACTUAL_FEE,
-        AWAITING_CASH_CONFIRMATION, AWAITING_RECONCILIATION, EXCEEDS_RESERVE, SETTLED
+        AWAITING_CASH_CONFIRMATION, AWAITING_RECONCILIATION, EXCEEDS_RESERVE,
+        SETTLED_OUTSTANDING, SETTLED
     }
 }

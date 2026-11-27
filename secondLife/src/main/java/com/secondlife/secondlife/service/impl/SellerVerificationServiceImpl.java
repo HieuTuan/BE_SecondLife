@@ -371,6 +371,7 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
         verification.setRejectionReason(null);
 
         roleAssignmentService.grantRole(targetUser.getId(), RoleCode.SELLER);
+        onboarding.savePickupAfterApproval(targetUser.getId());
 
         SellerVerification saved = sellerVerificationRepository.save(verification);
         recordEvent(saved, VerificationEventType.ADMIN_APPROVED, fromStatus, SellerVerificationStatus.APPROVED,
@@ -585,6 +586,7 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
                         verification.setReviewedAt(Instant.now());
                         verification.setRejectionReason(null);
                         roleAssignmentService.grantRole(user.getId(), RoleCode.SELLER);
+                        onboarding.savePickupAfterApproval(user.getId());
                         recordEvent(verification, VerificationEventType.SYSTEM_APPROVED,
                                 SellerVerificationStatus.EKYC_PENDING, SellerVerificationStatus.APPROVED,
                                 ReasonCode.NONE, "SYSTEM", null, "Hệ thống tự động phê duyệt hồ sơ người bán");

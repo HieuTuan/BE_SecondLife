@@ -121,7 +121,7 @@ class SellerOnboardingServiceTest {
         verify(onboarding, never()).save(any());
     }
 
-    @Test void changingPickupCoordinatesInvalidatesEmailConfirmation() {
+    @Test void changingDraftPickupCoordinatesKeepsEmailConfirmation() {
         var original = new ShippingAddress("Seller", "0901234567", "123 Street, HCMC", new BigDecimal("10.7756"), new BigDecimal("106.7019"));
         row.setPickupAddressJson(mapper.writeValueAsString(original));
         row.setPickupProvinceId(null);
@@ -134,7 +134,8 @@ class SellerOnboardingServiceTest {
 
         assertEquals(new BigDecimal("10.78"), result.pickupAddress().latitude());
         assertEquals(new BigDecimal("106.7019"), result.pickupAddress().longitude());
-        assertFalse(result.emailVerified());
+        assertTrue(result.emailVerified());
+        verifyNoInteractions(shipping);
         assertNull(row.getPickupProvinceId());
         assertNull(row.getPickupWardId());
         verify(onboarding).save(row);
@@ -180,15 +181,43 @@ class SellerOnboardingServiceTest {
         verifyNoInteractions(mailer);
     }
 
-    @Test void correctCodeEnablesEkycAndSavesPickupAddress() {
+    @Test void correctCodeEnablesEkycWithoutPublishingPickupAddress() {
         pendingCode();
         var result = service.verifyEmailCode(userId, "123456");
         assertTrue(result.emailVerified());
         assertTrue(result.canStartEkyc());
         assertEquals("EKYC", result.nextStep());
         assertNull(row.getEmailOtpHash());
-        verify(shipping).savePickup(userId, address);
+        verifyNoInteractions(shipping);
         assertThrows(ConflictException.class, () -> service.verifyEmailCode(userId, "123456"));
+    }
+
+    @Test void otpCanBeVerifiedWithoutPickupAndAddingMapLocationKeepsVerification() {
+        row.setPickupAddressJson(null);
+        pendingCode();
+        var verified = service.verifyEmailCode(userId, "123456");
+        assertTrue(verified.emailVerified());
+        assertFalse(verified.canStartEkyc());
+        assertNull(verified.pickupAddress());
+        assertThrows(BadRequestException.class, () -> service.requireCompleted(userId));
+        verifyNoInteractions(shipping);
+
+        var completed = service.save(userId, new SellerOnboardingRequest("Shop A", pickupRequest, row.getEmail(), row.getPhone()));
+        assertTrue(completed.canStartEkyc());
+        assertEquals(address, completed.pickupAddress());
+        verifyNoInteractions(shipping);
+
+        service.savePickupAfterApproval(userId);
+        verify(shipping).savePickup(userId, address);
+    }
+
+    @Test void aShopDraftCanBeCreatedWithoutGeocoding() {
+        when(onboarding.findById(userId)).thenReturn(Optional.empty());
+        var result = service.save(userId, new SellerOnboardingRequest("Shop A", null, "shop@example.test", "+84976404178"));
+        assertNull(result.pickupAddress());
+        assertFalse(result.canStartEkyc());
+        assertEquals("EMAIL_VERIFICATION", result.nextStep());
+        verifyNoInteractions(pickupAddresses, shipping);
     }
 
     @Test void incorrectCodesPersistAttemptsAndLockOutCorrectCodeAtLimit() {

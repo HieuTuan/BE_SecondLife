@@ -62,6 +62,22 @@ public interface InspectionFeeProposalRepository extends JpaRepository<Inspectio
     @EntityGraph(attributePaths = {"category", "proposedBy", "reviewedBy"})
     Page<InspectionFeeProposal> findByStatusOrderByCreatedAtDesc(InspectionFeeProposalStatus status, Pageable pageable);
 
+    @EntityGraph(attributePaths = {"category", "proposedBy", "reviewedBy"})
+    @Query("""
+            select p from InspectionFeeProposal p
+            where (:status is null or p.status = :status)
+              and p.complexityLevel is null and trim(p.tiersJson) not in ('', '[]')
+            """)
+    Page<InspectionFeeProposal> findTravelProposals(@Param("status") InspectionFeeProposalStatus status, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"category", "proposedBy", "reviewedBy"})
+    @Query("""
+            select p from InspectionFeeProposal p
+            where (:status is null or p.status = :status)
+              and (p.complexityLevel is not null or trim(p.tiersJson) in ('', '[]') or p.tiersJson is null)
+            """)
+    Page<InspectionFeeProposal> findLevelFeeProposals(@Param("status") InspectionFeeProposalStatus status, Pageable pageable);
+
     @Override
     @EntityGraph(attributePaths = {"category", "proposedBy", "reviewedBy"})
     Page<InspectionFeeProposal> findAll(Pageable pageable);

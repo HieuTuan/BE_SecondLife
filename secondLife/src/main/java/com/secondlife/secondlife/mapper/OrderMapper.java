@@ -31,8 +31,9 @@ public class OrderMapper {
     }
 
     public OrderFeedItemResponse toFeedItem(FeedRow row, OrderResponseDTO order, InspectionOrderResponse inspection,
-                                            SellerCommissionPreviewResponse sellerCommissionPreview, OrderReturnResponse orderReturn) {
-        return delegate.toFeedItem(row, order, inspection, sellerCommissionPreview, orderReturn);
+                                            SellerCommissionPreviewResponse sellerCommissionPreview, OrderReturnResponse orderReturn,
+                                            boolean hasActiveDispute) {
+        return delegate.toFeedItem(row, order, inspection, sellerCommissionPreview, orderReturn, hasActiveDispute);
     }
 
     public OrderFulfillmentResponse toFulfillmentResponse(Order order) {
@@ -84,8 +85,10 @@ public class OrderMapper {
         @Mapping(target = "itemCondition", source = "row.itemCondition")
         @Mapping(target = "sellerCommissionPreview", source = "sellerCommissionPreview")
         @Mapping(target = "orderReturn", source = "orderReturn")
+        @Mapping(target = "hasActiveDispute", source = "hasActiveDispute")
         OrderFeedItemResponse toFeedItem(FeedRow row, OrderResponseDTO order, InspectionOrderResponse inspection,
-                                         SellerCommissionPreviewResponse sellerCommissionPreview, OrderReturnResponse orderReturn);
+                                         SellerCommissionPreviewResponse sellerCommissionPreview, OrderReturnResponse orderReturn,
+                                         boolean hasActiveDispute);
 
         @Mapping(target = "orderId", source = "id")
         @Mapping(target = "lateHandoverCandidate", expression = "java(order.getHandoverDeadline() != null && order.getCarrierPickedUpAt() != null && order.getCarrierPickedUpAt().isAfter(order.getHandoverDeadline()))")

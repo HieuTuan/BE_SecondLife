@@ -6,12 +6,15 @@ import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.Shipment;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
+import com.secondlife.secondlife.enums.InspectionScope;
 import com.secondlife.secondlife.enums.InspectionSettlementOutcome;
+import com.secondlife.secondlife.enums.NotificationType;
 import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.repository.InspectionFeeSettlementRepository;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.UserRepository;
+import com.secondlife.secondlife.service.NotificationService;
 import com.secondlife.secondlife.service.SystemWalletService;
 import com.secondlife.secondlife.service.WalletService;
 
@@ -53,6 +56,9 @@ class InspectionFeeSettlementServiceImplTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private NotificationService notifications;
+
     private InspectionFeeSettlementServiceImpl settlementService;
 
     private User buyer;
@@ -70,6 +76,7 @@ class InspectionFeeSettlementServiceImplTest {
                 walletService,
                 systemWallet,
                 userRepository,
+                notifications,
                 new BigDecimal("0.10") // 10% platform fee rate
         );
 
@@ -220,10 +227,12 @@ class InspectionFeeSettlementServiceImplTest {
     }
 
     @Test
-    void newCorporateReturnAboveReserveRemainsUnsettledWithoutChargingSeller() {
+    void preListingCorporateReturnAboveReserveRemainsUnsettledWithoutChargingSeller() {
         order.setCorporateShipping(true);
+        order.setInspectionScope(InspectionScope.PRE_LISTING);
+        order.setBuyer(null);
         var settlement = new InspectionFeeSettlement();
-        settlement.setOutcome(InspectionSettlementOutcome.FAILED_INSPECTION);
+        settlement.setOutcome(InspectionSettlementOutcome.PRE_LISTING_PASSED);
         settlement.setReturnReserveAllocated(new BigDecimal("30000"));
         when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.of(settlement));
 
@@ -358,7 +367,8 @@ class InspectionFeeSettlementServiceImplTest {
     }
 
     @Test
-    void returnAboveReserveRemainsUnsettled() {
+    void cashReturnAboveReserveRemainsUnsettled() {
+        order.setCashShippingSimulation(true);
         var settlement = new InspectionFeeSettlement();
         settlement.setOutcome(InspectionSettlementOutcome.PASSED_BUYER_DEFAULTED);
         settlement.setReturnReserveAllocated(new BigDecimal("36000"));
@@ -482,5 +492,134 @@ class InspectionFeeSettlementServiceImplTest {
 
         verify(walletService, times(1)).processRefund(eq(buyer.getId()), eq(new BigDecimal("50000")), eq(order.getId()),
                 eq(WalletTransactionReferenceType.INSPECTION_ORDER));
+    }
+
+    @Test
+    void chargeReturnQuoteCollectsSplitAndHandlesPartialWalletAndNotification() {
+        order.setBuyerFeePercent(65);
+        var settlement = new InspectionFeeSettlement();
+        settlement.setOutcome(InspectionSettlementOutcome.FAILED_INSPECTION);
+        settlement.setReturnReserveAllocated(new BigDecimal("36000"));
+        var shipment = new Shipment();
+        shipment.setId(UUID.randomUUID());
+        shipment.setQuotedFee(new BigDecimal("45000"));
+        when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.of(settlement));
+        when(systemWallet.lockInspectionFunds(order.getId())).thenReturn(true);
+        when(walletService.collectInspectionReturnFee(buyer.getId(), new BigDecimal("5850.00"), order.getId()))
+                .thenReturn(new BigDecimal("5850.00"));
+        when(walletService.collectInspectionReturnFee(seller.getId(), new BigDecimal("3150.00"), order.getId()))
+                .thenReturn(new BigDecimal("1000.00"));
+
+        settlementService.chargeReturnQuote(order, shipment);
+        // Calling twice for the same shipment does not double charge
+        settlementService.chargeReturnQuote(order, shipment);
+
+        assertEquals(0, new BigDecimal("5850.00").compareTo(settlement.getReturnBuyerCollected()));
+        assertEquals(0, new BigDecimal("1000.00").compareTo(settlement.getReturnSellerCollected()));
+        verify(systemWallet, times(1)).recordInspectionReturnCollection(order.getId(), new BigDecimal("6850.00"), false);
+        verify(notifications).notifyInApp(eq(buyer.getId()), any(), contains("65%"), eq(NotificationType.SHIPPING),
+                eq(order.getId()), eq("INSPECTION_ORDER"), eq("/buyer/inspections/" + order.getId() + "/decision"));
+        verify(notifications).notifyInApp(eq(seller.getId()), any(), contains("35%"), eq(NotificationType.SHIPPING),
+                eq(order.getId()), eq("INSPECTION_ORDER"), eq("/seller/inspections/" + order.getId() + "/decision"));
+    }
+
+    @Test
+    void cancelledQuoteClearsDebtAndCreditsCollectedFundsToRebookedShipment() {
+        order.setBuyerFeePercent(65);
+        var settlement = new InspectionFeeSettlement();
+        settlement.setOutcome(InspectionSettlementOutcome.FAILED_INSPECTION);
+        settlement.setReturnReserveAllocated(new BigDecimal("36000"));
+        var first = new Shipment();
+        first.setId(UUID.randomUUID());
+        first.setQuotedFee(new BigDecimal("45000"));
+        var second = new Shipment();
+        second.setId(UUID.randomUUID());
+        second.setQuotedFee(new BigDecimal("50000"));
+        when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.of(settlement));
+        when(systemWallet.lockInspectionFunds(order.getId())).thenReturn(true);
+        when(walletService.collectInspectionReturnFee(buyer.getId(), new BigDecimal("5850.00"), order.getId()))
+                .thenReturn(new BigDecimal("5850.00"));
+        when(walletService.collectInspectionReturnFee(seller.getId(), new BigDecimal("3150.00"), order.getId()))
+                .thenReturn(BigDecimal.ZERO);
+
+        settlementService.chargeReturnQuote(order, first);
+        settlementService.clearCancelledReturnQuote(order, first);
+        when(inspectionOrders.findById(order.getId())).thenReturn(Optional.of(order));
+        var cancelledView = settlementService.getReturnFee(buyer.getId(), false, order.getId());
+        assertNull(cancelledView.quotedFee());
+        assertEquals(0, cancelledView.buyer().outstanding().signum());
+        assertEquals(0, cancelledView.seller().outstanding().signum());
+
+        // Rebooked at 50,000 -> total shortfall 14,000 -> buyer target 9,100 (already paid 5,850 -> owes 3,250)
+        when(walletService.collectInspectionReturnFee(buyer.getId(), new BigDecimal("3250.00"), order.getId()))
+                .thenReturn(new BigDecimal("3250.00"));
+        when(walletService.collectInspectionReturnFee(seller.getId(), new BigDecimal("4900.00"), order.getId()))
+                .thenReturn(new BigDecimal("4900.00"));
+        settlementService.chargeReturnQuote(order, second);
+
+        assertEquals(0, new BigDecimal("9100.00").compareTo(settlement.getReturnBuyerCollected()));
+        assertEquals(0, new BigDecimal("4900.00").compareTo(settlement.getReturnSellerCollected()));
+    }
+
+    @Test
+    void deliveryReconcilesIncreasedFeeAndExcessReserveAndSupportsManualDebtPayment() {
+        order.setBuyerFeePercent(65);
+        var settlement = new InspectionFeeSettlement();
+        settlement.setOutcome(InspectionSettlementOutcome.FAILED_INSPECTION);
+        settlement.setReturnOriginalReserve(new BigDecimal("36000"));
+        settlement.setReturnReserveAllocated(new BigDecimal("36000"));
+        settlement.setReturnQuoteFee(new BigDecimal("45000"));
+        settlement.setReturnBuyerCollected(new BigDecimal("5850.00"));
+        settlement.setReturnSellerCollected(BigDecimal.ZERO);
+        when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.of(settlement));
+        when(inspectionOrders.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+        when(systemWallet.lockInspectionFunds(order.getId())).thenReturn(true);
+
+        // Actual fee increases to 48,000 (shortfall 12,000 -> buyer 7,800, seller 4,200). Seller still lacks balance.
+        when(walletService.collectInspectionReturnFee(buyer.getId(), new BigDecimal("1950.00"), order.getId()))
+                .thenReturn(new BigDecimal("1950.00"));
+        when(walletService.collectInspectionReturnFee(seller.getId(), new BigDecimal("4200.00"), order.getId()))
+                .thenReturn(BigDecimal.ZERO);
+
+        settlementService.settleReturnShipping(order, new BigDecimal("48000"));
+        // Duplicate settlement call is a no-op
+        settlementService.settleReturnShipping(order, new BigDecimal("48000"));
+
+        assertNotNull(settlement.getReturnShippingSettledAt());
+        verify(systemWallet, times(1)).settleInspectionReturn(
+                eq(order.getId()),
+                eq(new BigDecimal("48000")),
+                argThat(amount -> amount.signum() == 0),
+                argThat(amount -> amount.signum() == 0));
+
+        // Seller pays debt manually; stale maxAmount is rejected
+        assertThrows(ConflictException.class, () -> settlementService.payReturnFee(seller.getId(), order.getId(), new BigDecimal("4000")));
+        when(walletService.collectInspectionReturnFee(seller.getId(), new BigDecimal("4200.00"), order.getId()))
+                .thenReturn(new BigDecimal("4200.00"));
+        var afterDebt = settlementService.payReturnFee(seller.getId(), order.getId(), new BigDecimal("4200.00"));
+        assertEquals(0, afterDebt.seller().outstanding().signum());
+        verify(systemWallet).recordInspectionReturnCollection(order.getId(), new BigDecimal("4200.00"), true);
+    }
+
+    @Test
+    void actualFeeBelowReserveRefundsBothOverpaidTopUpAndUnusedReserve() {
+        order.setBuyerFeePercent(65);
+        var settlement = new InspectionFeeSettlement();
+        settlement.setOutcome(InspectionSettlementOutcome.FAILED_INSPECTION);
+        settlement.setReturnOriginalReserve(new BigDecimal("36000"));
+        settlement.setReturnReserveAllocated(new BigDecimal("36000"));
+        settlement.setReturnQuoteFee(new BigDecimal("45000"));
+        settlement.setReturnBuyerCollected(new BigDecimal("5850.00"));
+        settlement.setReturnSellerCollected(new BigDecimal("3150.00"));
+        when(settlements.findByInspectionOrderId(order.getId())).thenReturn(Optional.of(settlement));
+        when(systemWallet.lockInspectionFunds(order.getId())).thenReturn(true);
+
+        // Actual fee is 30,000 (< 36,000 reserve): refund 6,000 reserve + 9,000 top-up = 15,000 total (65% = 9,750, 35% = 5,250)
+        settlementService.settleReturnShipping(order, new BigDecimal("30000"));
+
+        assertEquals(0, new BigDecimal("9750.00").compareTo(settlement.getBuyerRefundAmount()));
+        assertEquals(0, new BigDecimal("5250.00").compareTo(settlement.getSellerRefundAmount()));
+        verify(walletService).processRefund(buyer.getId(), new BigDecimal("9750.00"), order.getId(), WalletTransactionReferenceType.INSPECTION_ORDER);
+        verify(walletService).processRefund(seller.getId(), new BigDecimal("5250.00"), order.getId(), WalletTransactionReferenceType.INSPECTION_ORDER);
     }
 }
