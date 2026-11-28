@@ -21,6 +21,10 @@ public class CreditPurchase {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", insertable = false, updatable = false)
+    private User user;
+
     @Column(name = "listing_quantity", nullable = false)
     private int listingQuantity;
 
@@ -40,9 +44,6 @@ public class CreditPurchase {
     private BigDecimal aiChatUnitPrice = BigDecimal.ZERO;
 
     // Legacy snapshot columns are retained for old purchases; new purchases have no discount.
-    @Column(name = "discount_tier_id")
-    private UUID discountTierId;
-
     @Column(name = "discount_min_quantity", nullable = false)
     private int discountMinQuantity;
 

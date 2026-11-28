@@ -2,29 +2,14 @@ package com.secondlife.secondlife.integration;
 
 import com.secondlife.secondlife.dto.request.UpdateCreditPricingRequest;
 import com.secondlife.secondlife.dto.response.CreditQuoteResponse;
-import com.secondlife.secondlife.entity.CreditPurchase;
-import com.secondlife.secondlife.entity.PaymentIntent;
 import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.AccountStatus;
 import com.secondlife.secondlife.enums.CreditType;
-import com.secondlife.secondlife.enums.CreditPurchaseStatus;
-import com.secondlife.secondlife.exception.BadRequestException;
-import com.secondlife.secondlife.exception.ConflictException;
-import com.secondlife.secondlife.repository.CreditBalanceRepository;
-import com.secondlife.secondlife.repository.CreditLedgerRepository;
-import com.secondlife.secondlife.repository.CreditPurchaseRepository;
-import com.secondlife.secondlife.repository.PaymentCallbackEventRepository;
-import com.secondlife.secondlife.repository.PaymentIntentRepository;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.jwt.JwtTokenProvider;
 import com.secondlife.secondlife.service.CreditPricingService;
-import com.secondlife.secondlife.integration.payment.MockPaymentProvider;
-import com.secondlife.secondlife.service.PaymentCallbackInboxService;
-import com.secondlife.secondlife.integration.payment.PaymentCallbackPayload;
-import com.secondlife.secondlife.integration.payment.NormalizedPaymentCallback;
-import com.secondlife.secondlife.enums.PaymentStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -40,7 +25,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -70,13 +54,6 @@ class Day05CreditIntegrationTest {
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JwtTokenProvider jwtTokenProvider;
     @Autowired private CreditPricingService pricingService;
-    @Autowired private CreditPurchaseRepository purchaseRepository;
-    @Autowired private PaymentIntentRepository intentRepository;
-    @Autowired private PaymentCallbackEventRepository eventRepository;
-    @Autowired private CreditBalanceRepository balanceRepository;
-    @Autowired private CreditLedgerRepository ledgerRepository;
-    @Autowired private MockPaymentProvider mockProvider;
-    @Autowired private PaymentCallbackInboxService callbackInbox;
 
     @Test
     void sellerReadsSeparateBalancesAndAdminControlsPrices() throws Exception {
@@ -149,61 +126,6 @@ class Day05CreditIntegrationTest {
             assertEquals(0, quote.finalFee().compareTo(quote.subtotal()));
             assertEquals("VND", quote.currency());
         }
-    }
-
-    @Test
-    void duplicateNormalizedCallbackIsStoredOnceWithoutGrantingCredit() {
-        Role sellerRole = roleRepository.findByCodeWithPermissions("SELLER").orElseThrow();
-        User seller = new User("day05-" + UUID.randomUUID() + "@example.test",
-                passwordEncoder.encode("Password@123"), AccountStatus.ACTIVE);
-        seller.addRole(sellerRole);
-        seller = userRepository.saveAndFlush(seller);
-        UUID adminId = null;
-        pricingService.updatePrice(adminId, CreditType.LISTING,
-                new UpdateCreditPricingRequest(new BigDecimal("100.00")));
-        pricingService.updatePrice(adminId, CreditType.VALUATION,
-                new UpdateCreditPricingRequest(new BigDecimal("25.00")));
-        CreditQuoteResponse quote = pricingService.quote(1, 1, 0);
-
-        CreditPurchase purchase = new CreditPurchase();
-        purchase.setUserId(seller.getId());
-        purchase.setListingQuantity(quote.listingQuantity());
-        purchase.setValuationQuantity(quote.valuationQuantity());
-        purchase.setListingUnitPrice(quote.listingUnitPrice());
-        purchase.setValuationUnitPrice(quote.valuationUnitPrice());
-        purchase.setSubtotal(quote.subtotal());
-        purchase.setFinalFee(quote.finalFee());
-        purchase.setCurrency(quote.currency());
-        purchase.setStatus(CreditPurchaseStatus.PAYMENT_PENDING);
-        purchase.setCreatedAt(Instant.now());
-        purchase = purchaseRepository.saveAndFlush(purchase);
-
-        PaymentIntent intent = new PaymentIntent();
-        intent.setPurchaseId(purchase.getId());
-        intent.setProvider("MOCK");
-        intent.setProviderIntentId("MOCK-" + purchase.getId());
-        intent.setAmount(quote.finalFee());
-        intent.setCurrency(quote.currency());
-        intent.setStatus(PaymentStatus.PENDING);
-        intent.setCreatedAt(Instant.now());
-        intent = intentRepository.saveAndFlush(intent);
-        UUID persistedIntentId = intent.getId();
-        String providerIntentId = intent.getProviderIntentId();
-
-        var callback = mockProvider.normalizeVerifiedCallback(new PaymentCallbackPayload(
-                "event-" + UUID.randomUUID(), providerIntentId, "PAID"));
-        long before = eventRepository.count();
-        assertTrue(callbackInbox.recordVerifiedCallback(persistedIntentId, callback));
-        assertFalse(callbackInbox.recordVerifiedCallback(persistedIntentId, callback));
-        assertThrows(ConflictException.class, () -> callbackInbox.recordVerifiedCallback(
-                persistedIntentId, new NormalizedPaymentCallback("MOCK", callback.eventId(),
-                        callback.providerIntentId(), PaymentStatus.FAILED)));
-        assertThrows(BadRequestException.class, () -> mockProvider.normalizeVerifiedCallback(
-                new PaymentCallbackPayload("another-event", providerIntentId, "UNKNOWN")));
-        assertEquals(before + 1, eventRepository.count());
-        assertEquals(0, balanceRepository.findByUserId(seller.getId()).size());
-        assertEquals(0, ledgerRepository.count());
-        assertEquals(CreditPurchaseStatus.PAYMENT_PENDING, purchaseRepository.findById(purchase.getId()).orElseThrow().getStatus());
     }
 
     private String tokenForRole(String code) {

@@ -9,6 +9,7 @@ import com.secondlife.secondlife.entity.DepositRequest;
 import com.secondlife.secondlife.entity.UserWallet;
 import com.secondlife.secondlife.entity.WalletTransaction;
 import com.secondlife.secondlife.entity.WalletWithdrawal;
+import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.WalletTransactionDirection;
 import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
 import org.mapstruct.Mapper;
@@ -27,7 +28,10 @@ public class WalletMapper {
     }
 
     public WalletResponseDTO toWalletResponse(UserWallet wallet) {
-        return delegate.toWalletResponse(wallet);
+        BigDecimal available = wallet.getBalance() == null ? BigDecimal.ZERO : wallet.getBalance();
+        BigDecimal reserved = wallet.getReservedBalance() == null ? BigDecimal.ZERO : wallet.getReservedBalance();
+        return new WalletResponseDTO(wallet.getId(), wallet.getUser().getId(), available, wallet.getUpdatedAt(),
+                available, reserved, available.add(reserved));
     }
 
     public WalletTransactionResponseDTO toTransactionResponse(WalletTransaction transaction) {
@@ -44,9 +48,6 @@ public class WalletMapper {
 
     @Mapper(config = MapStructConfiguration.class)
     public interface Delegate {
-        @Mapping(target = "userId", source = "user.id")
-        WalletResponseDTO toWalletResponse(UserWallet wallet);
-
         @Mapping(target = "walletId", source = "wallet.id")
         @Mapping(target = "currency", constant = "VND")
         @Mapping(target = "direction", source = "amount", qualifiedByName = "walletDirection")
@@ -94,7 +95,24 @@ public class WalletMapper {
         @Mapping(target = "userId", source = "user.id")
         @Mapping(target = "userEmail", source = "user.email")
         @Mapping(target = "reviewedBy", source = "reviewedBy.id")
+        @Mapping(target = "requestCode", source = "requestCode")
+        @Mapping(target = "bankName", source = "bankName")
+        @Mapping(target = "acceptedBy", source = "acceptedBy.id")
+        @Mapping(target = "transferredBy", source = "transferredBy.id")
+        @Mapping(target = "availableBalance", ignore = true)
+        @Mapping(target = "reservedBalance", ignore = true)
+        @Mapping(target = "ownerRole", source = "user", qualifiedByName = "withdrawalOwnerRole")
         WalletWithdrawalResponse toWithdrawalResponse(WalletWithdrawal withdrawal);
+
+        @Named("withdrawalOwnerRole")
+        default String withdrawalOwnerRole(User user) {
+            if (user == null) return "UNKNOWN";
+            if (user.hasRole("INSPECTION_CENTER")) return "INSPECTION_CENTER";
+            if (user.hasRole("INSPECTOR")) return "INSPECTOR";
+            if (user.hasRole("SELLER")) return "SELLER";
+            if (user.hasRole("BUYER")) return "BUYER";
+            return "UNKNOWN";
+        }
 
         @Mapping(target = "id", source = "deposit.id")
         @Mapping(target = "amount", source = "deposit.amount")

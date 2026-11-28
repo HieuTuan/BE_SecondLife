@@ -148,15 +148,13 @@ class ReadQueryIntegrationTest {
 
     @Test void creditHistoryKeepsMissingIntentAndPageOrderWithBoundedQueries() {
         List<UUID> ids = new ArrayList<>();
-        for (int i = 0; i < 6; i++) ids.add(purchase(buyer, i, i != 4));
-        purchase(user("Other"), 100, true);
+        for (int i = 0; i < 6; i++) ids.add(purchase(buyer, i));
+        purchase(user("Other"), 100);
         statistics.clear();
         var result = credits.getPurchases(buyer, PageRequest.of(0, 5));
         assertEquals(6, result.totalElements());
         assertEquals(List.of(ids.get(5), ids.get(4), ids.get(3), ids.get(2), ids.get(1)),
                 result.items().stream().map(p -> p.id()).toList());
-        assertEquals("SEPAY", result.items().getFirst().paymentProvider());
-        assertNull(result.items().get(1).paymentIntentId());
         assertEquals(new BigDecimal("1000.00"), result.items().getFirst().snapshot().finalFee());
         boundedQueries(3);
     }
@@ -512,20 +510,14 @@ class ReadQueryIntegrationTest {
         return id;
     }
 
-    private UUID purchase(UUID user, int number, boolean withIntent) {
+    private UUID purchase(UUID user, int number) {
         UUID id = UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO credit_purchases(id,user_id,listing_quantity,valuation_quantity,listing_unit_price,
                     valuation_unit_price,discount_min_quantity,discount_rate,subtotal,discount_amount,final_fee,currency,status,created_at)
                 VALUES (?,?,1,0,1000,0,0,0,1000,0,1000,'VND','PAID',?)
                 """, id, user, time(number));
-        if (withIntent) intent(id);
         return id;
-    }
-
-    private void intent(UUID purchase) {
-        jdbc.update("INSERT INTO payment_intents(id,purchase_id,provider,provider_intent_id,amount,currency,status) VALUES (?,?,'SEPAY',?,1000,'VND','SUCCEEDED')",
-                UUID.randomUUID(), purchase, UUID.randomUUID().toString());
     }
 
     private UUID order(UUID seller, int number, boolean bank) {

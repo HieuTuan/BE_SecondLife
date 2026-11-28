@@ -23,9 +23,78 @@ public interface ItemRepository extends JpaRepository<Item, UUID> {
     @Query("select i from Item i where i.id = :id")
     Optional<Item> findByIdForUpdate(@Param("id") UUID id);
 
+    record VariantSplitRule(String sourceName, String variantCode, String targetName) { }
+
+    List<VariantSplitRule> VARIANT_SPLIT_RULES = List.of(
+            new VariantSplitRule("Nồi cơm điện", "rice-mechanical", "Nồi cơm cơ"),
+            new VariantSplitRule("Nồi cơm điện", "rice-electronic", "Nồi cơm điện tử / Đa chức năng"),
+            new VariantSplitRule("Rice Cooker", "rice-mechanical", "Nồi cơm cơ"),
+            new VariantSplitRule("Rice Cooker", "rice-electronic", "Nồi cơm điện tử / Đa chức năng"),
+            new VariantSplitRule("Bếp / Nồi cơm điện", "induction", "Bếp từ"),
+            new VariantSplitRule("Bếp / Nồi cơm điện", "infrared", "Bếp hồng ngoại"),
+            new VariantSplitRule("Bếp / Nồi cơm điện", "rice-mechanical", "Nồi cơm cơ"),
+            new VariantSplitRule("Bếp / Nồi cơm điện", "rice-electronic", "Nồi cơm điện tử / Đa chức năng"),
+            new VariantSplitRule("Máy giặt", "washer", "Máy giặt thông thường"),
+            new VariantSplitRule("Máy giặt", "washer-dryer", "Máy giặt tích hợp sấy"),
+            new VariantSplitRule("Washing Machine", "washer", "Máy giặt thông thường"),
+            new VariantSplitRule("Washing Machine", "washer-dryer", "Máy giặt tích hợp sấy"),
+            new VariantSplitRule("Máy sấy", "dryer-resistance", "Máy sấy điện trở"),
+            new VariantSplitRule("Máy sấy", "dryer-heat-pump", "Máy sấy bơm nhiệt"),
+            new VariantSplitRule("Clothes Dryer", "dryer-resistance", "Máy sấy điện trở"),
+            new VariantSplitRule("Clothes Dryer", "dryer-heat-pump", "Máy sấy bơm nhiệt"),
+            new VariantSplitRule("Dryer", "dryer-resistance", "Máy sấy điện trở"),
+            new VariantSplitRule("Dryer", "dryer-heat-pump", "Máy sấy bơm nhiệt"),
+            new VariantSplitRule("Giàn phơi thông minh", "drying-manual", "Giàn phơi quay tay"),
+            new VariantSplitRule("Giàn phơi thông minh", "drying-electric", "Giàn phơi điều khiển điện"),
+            new VariantSplitRule("Máy lọc nước gia đình", "water-passive", "Bộ lọc nước không điện"),
+            new VariantSplitRule("Máy lọc nước gia đình", "water-ro", "Máy lọc nước RO"),
+            new VariantSplitRule("Máy lọc nước gia đình", "water-hot-cold", "Máy lọc nước nóng lạnh"),
+            new VariantSplitRule("Máy hút bụi", "vacuum", "Máy hút bụi thông thường"),
+            new VariantSplitRule("Máy hút bụi", "robot-vacuum", "Robot hút bụi / Lau nhà"),
+            new VariantSplitRule("Vacuum Cleaner", "vacuum", "Máy hút bụi thông thường"),
+            new VariantSplitRule("Vacuum Cleaner", "robot-vacuum", "Robot hút bụi / Lau nhà"),
+            new VariantSplitRule("Lò vi sóng / Lò nướng", "microwave", "Lò vi sóng"),
+            new VariantSplitRule("Lò vi sóng / Lò nướng", "oven", "Lò nướng"),
+            new VariantSplitRule("Microwave Oven", "microwave", "Lò vi sóng"),
+            new VariantSplitRule("Microwave Oven", "oven", "Lò nướng"),
+            new VariantSplitRule("Bếp từ / Bếp hồng ngoại", "induction", "Bếp từ"),
+            new VariantSplitRule("Bếp từ / Bếp hồng ngoại", "infrared", "Bếp hồng ngoại"),
+            new VariantSplitRule("Bình đun siêu tốc / Bình thủy điện", "kettle", "Bình đun siêu tốc"),
+            new VariantSplitRule("Bình đun siêu tốc / Bình thủy điện", "thermo-pot", "Bình thủy điện"),
+            new VariantSplitRule("Tủ / Kệ phòng tắm", "bath-cabinet", "Tủ phòng tắm"),
+            new VariantSplitRule("Tủ / Kệ phòng tắm", "bath-shelf", "Kệ phòng tắm")
+    );
+
     @Transactional(propagation = Propagation.MANDATORY)
-    @Query(value = "SELECT secondlife_split_inspection_catalog_items_v71()", nativeQuery = true)
-    int splitInspectionVariants();
+    default int splitInspectionVariants() {
+        List<Item> existingItems = findAll();
+        int totalInserted = 0;
+        for (VariantSplitRule rule : VARIANT_SPLIT_RULES) {
+            for (Item parentItem : existingItems) {
+                if (parentItem.getName() == null || parentItem.getCategory() == null
+                        || !parentItem.getName().trim().equalsIgnoreCase(rule.sourceName())) {
+                    continue;
+                }
+                UUID categoryId = parentItem.getCategory().getId();
+                if (!nameExists(categoryId, rule.targetName(), null)) {
+                    Item variant = new Item();
+                    variant.setCategory(parentItem.getCategory());
+                    variant.setName(rule.targetName());
+                    variant.setSeedKey("variant:" + parentItem.getId() + ":" + rule.variantCode());
+                    variant.setSelectable(true);
+                    variant.setReplacementForItemId(parentItem.getId());
+                    variant.setVariantCode(rule.variantCode());
+                    save(variant);
+                    totalInserted++;
+                }
+                if (parentItem.isSelectable()) {
+                    parentItem.setSelectable(false);
+                    save(parentItem);
+                }
+            }
+        }
+        return totalInserted;
+    }
     List<Item> findByCategoryId(UUID categoryId);
     boolean existsByCategory_Id(UUID categoryId);
     @Query("select (count(i) > 0) from Item i where i.category.id = :categoryId and lower(trim(i.name)) = lower(:name) and (:excludedId is null or i.id <> :excludedId)")

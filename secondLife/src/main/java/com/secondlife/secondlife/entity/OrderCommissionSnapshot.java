@@ -21,10 +21,16 @@ public class OrderCommissionSnapshot {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
-    @Column(nullable = false, unique = true)
+    @Column(name = "order_id", nullable = false, unique = true)
     private UUID orderId;
-    @Column(nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "order_id", insertable = false, updatable = false)
+    private Order order;
+    @Column(name = "rule_id", nullable = false)
     private UUID ruleId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "rule_id", insertable = false, updatable = false)
+    private CommissionRule rule;
     @Column(nullable = false)
     private long ruleRevision;
     @Column(nullable = false, length = 150)
@@ -32,7 +38,11 @@ public class OrderCommissionSnapshot {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private CommissionRuleType ruleType;
+    @Column(name = "category_id")
     private UUID categoryId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "category_id", insertable = false, updatable = false)
+    private Category category;
     @Column(precision = 18, scale = 2)
     private BigDecimal transactionValueFrom;
     @Column(precision = 18, scale = 2)
@@ -51,7 +61,11 @@ public class OrderCommissionSnapshot {
     private String currency;
     @Column(nullable = false)
     private Instant snapshottedAt;
+    @Column(name = "captured_by")
     private UUID capturedBy;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "captured_by", insertable = false, updatable = false)
+    private User capturedByUser;
     @Column(length = 1000)
     private String reason;
 }

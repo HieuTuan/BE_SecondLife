@@ -20,6 +20,21 @@ public record WalletWithdrawalResponse(
     Instant reviewedAt,
     String adminNote,
     Instant createdAt,
-    Instant updatedAt
+    Instant updatedAt,
+    String requestCode,
+    String bankName,
+    BigDecimal availableBalance,
+    BigDecimal reservedBalance,
+    UUID acceptedBy,
+    Instant acceptedAt,
+    UUID transferredBy,
+    Instant transferredAt,
+    Instant disputeDeadline,
+    Instant completedAt,
+    String evidenceUrl,
+    String disputeType,
+    String disputeDescription,
+    String disputeResolution,
+    String ownerRole
 ) {
 }

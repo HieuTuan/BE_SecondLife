@@ -16,7 +16,11 @@ import java.util.UUID;
 @NoArgsConstructor
 public class SellerOnboarding {
     @Id
+    @Column(name = "user_id", nullable = false)
     private UUID userId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", insertable = false, updatable = false)
+    private User user;
     @Column(nullable = false, length = 30)
     private String shopName;
     @Column(nullable = false, length = 255)

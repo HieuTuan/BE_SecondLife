@@ -24,7 +24,11 @@ public class CommissionRule {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private CommissionRuleType type;
+    @Column(name = "category_id")
     private UUID categoryId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "category_id", insertable = false, updatable = false)
+    private Category category;
     @Column(precision = 18, scale = 2)
     private BigDecimal transactionValueFrom;
     @Column(precision = 18, scale = 2)
@@ -39,8 +43,11 @@ public class CommissionRule {
     private boolean active;
     @Column(nullable = false)
     private long revision;
-    @Column(nullable = false)
+    @Column(name = "updated_by", nullable = false)
     private UUID updatedBy;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "updated_by", insertable = false, updatable = false)
+    private User updatedByUser;
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
     @Column(nullable = false)

@@ -20,12 +20,20 @@ public class CreditLedgerEntry {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", insertable = false, updatable = false)
+    private User user;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "credit_type", nullable = false, length = 20)
     private CreditType creditType;
 
     @Column(name = "purchase_id")
     private UUID purchaseId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "purchase_id", insertable = false, updatable = false)
+    private CreditPurchase purchase;
 
     @Column(name = "entry_type", nullable = false, length = 20)
     private String entryType;

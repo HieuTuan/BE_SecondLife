@@ -22,5 +22,20 @@ public interface WalletWithdrawalRepository extends JpaRepository<WalletWithdraw
 
     Page<WalletWithdrawal> findByStatusOrderByCreatedAtDesc(String status, Pageable pageable);
 
+    Optional<WalletWithdrawal> findByUserIdAndIdempotencyKey(UUID userId, String idempotencyKey);
+
+    Page<WalletWithdrawal> findByDisputeDeadlineBeforeAndStatus( java.time.Instant deadline, String status, Pageable pageable);
+
+    @Query(value = """
+        SELECT id FROM wallet_withdrawals WHERE status = 'TRANSFERRED_AWAITING_REVIEW'
+        AND dispute_deadline > now() AND dispute_deadline <= now() + interval '24 hours'
+        AND coalesce(reminder_hours, 48) > CASE
+          WHEN dispute_deadline <= now() + interval '1 hour' THEN 1
+          WHEN dispute_deadline <= now() + interval '6 hours' THEN 6
+          WHEN dispute_deadline <= now() + interval '12 hours' THEN 12 ELSE 24 END
+        ORDER BY dispute_deadline LIMIT 200 FOR UPDATE SKIP LOCKED
+        """, nativeQuery = true)
+    java.util.List<UUID> lockDueReminderIds();
+
     Page<WalletWithdrawal> findAllByOrderByCreatedAtDesc(Pageable pageable);
 }

@@ -26,6 +26,10 @@ public class UserWallet {
     @Column(name = "balance", nullable = false, precision = 18, scale = 2)
     private BigDecimal balance = BigDecimal.ZERO;
 
+    /** Funds reserved for open withdrawal requests. balance remains the spendable amount. */
+    @Column(name = "reserved_balance", nullable = false, precision = 18, scale = 2)
+    private BigDecimal reservedBalance = BigDecimal.ZERO;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

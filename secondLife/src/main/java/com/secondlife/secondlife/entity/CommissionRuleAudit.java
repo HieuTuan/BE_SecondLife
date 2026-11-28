@@ -19,10 +19,16 @@ public class CommissionRuleAudit {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
-    @Column(nullable = false)
+    @Column(name = "rule_id", nullable = false)
     private UUID ruleId;
-    @Column(nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "rule_id", insertable = false, updatable = false)
+    private CommissionRule rule;
+    @Column(name = "actor_id", nullable = false)
     private UUID actorId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "actor_id", insertable = false, updatable = false)
+    private User actor;
     @Column(nullable = false, length = 20)
     private String action;
     @Column(columnDefinition = "TEXT")
