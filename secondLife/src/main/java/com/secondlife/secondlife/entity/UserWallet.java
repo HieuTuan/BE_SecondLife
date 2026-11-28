@@ -30,6 +30,13 @@ public class UserWallet {
     @Column(name = "reserved_balance", nullable = false, precision = 18, scale = 2)
     private BigDecimal reservedBalance = BigDecimal.ZERO;
 
+    @Column(name = "status", nullable = false, length = 20)
+    private String status = "ACTIVE";
+
+    public boolean isActive() {
+        return status == null || "ACTIVE".equalsIgnoreCase(status);
+    }
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

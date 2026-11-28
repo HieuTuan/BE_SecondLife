@@ -11,9 +11,15 @@ public record WalletResponseDTO(
     Instant updatedAt,
     BigDecimal availableBalance,
     BigDecimal reservedBalance,
-    BigDecimal totalBalance
+    BigDecimal totalBalance,
+    String status
 ) {
     public WalletResponseDTO(UUID id, UUID userId, BigDecimal balance, Instant updatedAt) {
-        this(id, userId, balance, updatedAt, balance, BigDecimal.ZERO, balance);
+        this(id, userId, balance, updatedAt, balance, BigDecimal.ZERO, balance, "ACTIVE");
+    }
+
+    public WalletResponseDTO(UUID id, UUID userId, BigDecimal balance, Instant updatedAt,
+                             BigDecimal availableBalance, BigDecimal reservedBalance, BigDecimal totalBalance) {
+        this(id, userId, balance, updatedAt, availableBalance, reservedBalance, totalBalance, "ACTIVE");
     }
 }

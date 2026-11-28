@@ -104,4 +104,9 @@ public class Order {
     protected void onUpdate() {
         this.updatedAt = Instant.now();
     }
+
+    @org.springframework.data.domain.DomainEvents
+    ResourceChanged realtimeChange() {
+        return ResourceChanged.owned("ORDER", id, buyer, seller);
+    }
 }

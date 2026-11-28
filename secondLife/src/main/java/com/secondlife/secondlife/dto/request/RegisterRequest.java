@@ -7,6 +7,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
+import java.util.UUID;
+
 public record RegisterRequest(
     @NotBlank(message = "Email is required")
     @Email(message = "Email format is invalid")
@@ -25,9 +27,23 @@ public record RegisterRequest(
     String phone,
 
     @Schema(description="Optional gender: MALE (Nam), FEMALE (Nữ), OTHER (Khác)", example="MALE", allowableValues={"MALE","FEMALE","OTHER"})
-    com.secondlife.secondlife.enums.Gender gender
+    com.secondlife.secondlife.enums.Gender gender,
+
+    @Schema(description = "Explicit user confirmation of Terms of Service & Operating Policy", example = "true")
+    Boolean acceptTerms,
+
+    @Schema(description = "ID of the active Terms of Service policy version accepted by the user")
+    UUID acceptedPolicyVersionId,
+
+    @Schema(description = "Client source: WEB, MOBILE_BUYER, MOBILE_SELLER, MOBILE_INSPECTOR, MOBILE, API", example = "WEB")
+    String acceptanceSource
 ) {
-    public RegisterRequest(String email,String password,String fullName,String phone) {
-        this(email,password,fullName,phone,null);
+    public RegisterRequest(String email, String password, String fullName, String phone) {
+        this(email, password, fullName, phone, null, null, null, null);
+    }
+
+    public RegisterRequest(String email, String password, String fullName, String phone,
+                           com.secondlife.secondlife.enums.Gender gender) {
+        this(email, password, fullName, phone, gender, null, null, null);
     }
 }

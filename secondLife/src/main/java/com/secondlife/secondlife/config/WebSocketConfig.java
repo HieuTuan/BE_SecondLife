@@ -2,6 +2,7 @@ package com.secondlife.secondlife.config;
 
 import com.secondlife.secondlife.security.websocket.WebSocketAuthChannelInterceptor;
 
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
@@ -11,11 +12,17 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 
 @Configuration
 @EnableWebSocketMessageBroker
+@EnableConfigurationProperties(CorsProperties.class)
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final WebSocketAuthChannelInterceptor authInterceptor;
 
-    public WebSocketConfig(WebSocketAuthChannelInterceptor authInterceptor) {
+    private final CorsProperties cors;
+    private final com.secondlife.secondlife.security.websocket.SocketExpiry expiry;
+
+    public WebSocketConfig(WebSocketAuthChannelInterceptor authInterceptor, CorsProperties cors, com.secondlife.secondlife.security.websocket.SocketExpiry expiry) {
+        this.expiry = expiry;
+        this.cors = cors;
         this.authInterceptor = authInterceptor;
     }
 
@@ -29,8 +36,14 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns("*")
+                .setAllowedOriginPatterns(java.util.Arrays.stream(cors.allowedOrigins().split(","))
+                        .map(String::trim).filter(origin -> !origin.isEmpty()).toArray(String[]::new))
                 .withSockJS();
+    }
+
+    @Override
+    public void configureWebSocketTransport(org.springframework.web.socket.config.annotation.WebSocketTransportRegistration registration) {
+        registration.addDecoratorFactory(expiry::decorate);
     }
 
     @Override

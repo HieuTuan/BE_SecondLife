@@ -18,6 +18,10 @@ import org.mapstruct.Named;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.List;
 
 @Component
 public class WalletMapper {
@@ -30,8 +34,9 @@ public class WalletMapper {
     public WalletResponseDTO toWalletResponse(UserWallet wallet) {
         BigDecimal available = wallet.getBalance() == null ? BigDecimal.ZERO : wallet.getBalance();
         BigDecimal reserved = wallet.getReservedBalance() == null ? BigDecimal.ZERO : wallet.getReservedBalance();
+        String status = wallet.getStatus() == null || wallet.getStatus().isBlank() ? "ACTIVE" : wallet.getStatus();
         return new WalletResponseDTO(wallet.getId(), wallet.getUser().getId(), available, wallet.getUpdatedAt(),
-                available, reserved, available.add(reserved));
+                available, reserved, available.add(reserved), status);
     }
 
     public WalletTransactionResponseDTO toTransactionResponse(WalletTransaction transaction) {
@@ -39,7 +44,29 @@ public class WalletMapper {
     }
 
     public WalletWithdrawalResponse toWithdrawalResponse(WalletWithdrawal withdrawal) {
-        return delegate.toWithdrawalResponse(withdrawal);
+        return toWithdrawalResponse(withdrawal, null);
+    }
+
+    public WalletWithdrawalResponse toWithdrawalResponse(WalletWithdrawal withdrawal, UserWallet wallet) {
+        WalletWithdrawalResponse base = delegate.toWithdrawalResponse(withdrawal);
+        if (base == null) {
+            return null;
+        }
+        Instant now = Instant.now();
+        Long remainingSeconds = null;
+        if ("TRANSFERRED_AWAITING_REVIEW".equals(withdrawal.getStatus()) && withdrawal.getDisputeDeadline() != null) {
+            long seconds = Duration.between(now, withdrawal.getDisputeDeadline()).getSeconds();
+            remainingSeconds = Math.max(0L, seconds);
+        }
+        WalletWithdrawalResponse.WalletWithdrawalResponseBuilder builder = base.toBuilder()
+                .serverTime(now)
+                .remainingDisputeSeconds(remainingSeconds);
+        if (wallet != null) {
+            builder.availableBalance(wallet.getBalance() == null ? BigDecimal.ZERO : wallet.getBalance())
+                    .reservedBalance(wallet.getReservedBalance() == null ? BigDecimal.ZERO : wallet.getReservedBalance())
+                    .walletStatus(wallet.getStatus() == null || wallet.getStatus().isBlank() ? "ACTIVE" : wallet.getStatus());
+        }
+        return builder.build();
     }
 
     public DepositResponseDTO toDepositResponse(DepositRequest deposit, String bankAccountName, String bankAccountNumber, String bankName) {
@@ -84,7 +111,7 @@ public class WalletMapper {
                     default -> "Nhận tiền vào ví";
                 };
                 case REFUND -> switch (referenceType) {
-                    case WITHDRAWAL -> "Hoàn tiền do yêu cầu rút tiền bị từ chối";
+                    case WITHDRAWAL -> "Giải phóng số dư phong tỏa do yêu cầu rút tiền bị hủy/từ chối";
                     case INSPECTION_ORDER -> "Hoàn tiền cho giao dịch kiểm định";
                     case ORDER -> "Hoàn tiền đơn hàng vào ví";
                     default -> "Hoàn tiền vào ví";
@@ -101,8 +128,24 @@ public class WalletMapper {
         @Mapping(target = "transferredBy", source = "transferredBy.id")
         @Mapping(target = "availableBalance", ignore = true)
         @Mapping(target = "reservedBalance", ignore = true)
+        @Mapping(target = "serverTime", ignore = true)
+        @Mapping(target = "remainingDisputeSeconds", ignore = true)
+        @Mapping(target = "walletStatus", ignore = true)
+        @Mapping(target = "disputeEvidenceUrls", source = "disputeEvidenceUrls", qualifiedByName = "splitEvidenceUrls")
+        @Mapping(target = "exceptionEvidenceUrls", source = "exceptionEvidenceUrls", qualifiedByName = "splitEvidenceUrls")
         @Mapping(target = "ownerRole", source = "user", qualifiedByName = "withdrawalOwnerRole")
         WalletWithdrawalResponse toWithdrawalResponse(WalletWithdrawal withdrawal);
+
+        @Named("splitEvidenceUrls")
+        default List<String> splitEvidenceUrls(String raw) {
+            if (raw == null || raw.isBlank()) {
+                return List.of();
+            }
+            return Arrays.stream(raw.split("\\r?\\n"))
+                    .map(String::trim)
+                    .filter(s -> !s.isBlank())
+                    .toList();
+        }
 
         @Named("withdrawalOwnerRole")
         default String withdrawalOwnerRole(User user) {

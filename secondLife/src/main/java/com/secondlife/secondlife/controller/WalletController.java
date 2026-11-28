@@ -5,6 +5,7 @@ import com.secondlife.secondlife.dto.request.DepositCreateRequestDTO;
 import com.secondlife.secondlife.dto.request.WalletWithdrawalRequest;
 import com.secondlife.secondlife.dto.request.WalletWithdrawalReviewRequest;
 import com.secondlife.secondlife.dto.request.WalletWithdrawalDisputeRequest;
+import com.secondlife.secondlife.dto.request.WalletWithdrawalExceptionRequest;
 import com.secondlife.secondlife.dto.response.DepositResponseDTO;
 import com.secondlife.secondlife.dto.response.WalletResponseDTO;
 import com.secondlife.secondlife.dto.response.WalletTransactionResponseDTO;
@@ -44,19 +45,22 @@ import java.util.UUID;
 @RequestMapping("/api/v1/wallets")
 public class WalletController {
 
+    private static final String DEFAULT_BANK_WARNING_TEXT =
+            "Vui lòng kiểm tra kỹ tên ngân hàng, số tài khoản và tên chủ tài khoản trước khi xác nhận. SecondLife sẽ thực hiện chuyển khoản theo thông tin bạn cung cấp. Nếu thông tin không chính xác, tiền có thể được chuyển nhầm hoặc khó thu hồi. Bạn chịu trách nhiệm về tính chính xác của thông tin đã xác nhận theo các điều khoản và quy định áp dụng.";
+
     private final WalletService walletService;
     private final WalletQueryService walletQueryService;
     private final DepositService depositService;
     private final CurrentUserProvider currentUserProvider;
     @Value("${app.wallet.withdrawal.bank-warning.version:withdrawal-bank-warning-v1}")
     private String bankWarningVersion = "withdrawal-bank-warning-v1";
-    @Value("${app.wallet.withdrawal.bank-warning.text:Please verify your bank account details before confirming.}")
-    private String bankWarningText = "Please verify your bank account details before confirming.";
+    @Value("${app.wallet.withdrawal.bank-warning.text:}")
+    private String bankWarningText = "";
 
     public WalletController(WalletService walletService,
-                            DepositService depositService,
-                            WalletQueryService walletQueryService,
-                            CurrentUserProvider currentUserProvider) {
+            DepositService depositService,
+            WalletQueryService walletQueryService,
+            CurrentUserProvider currentUserProvider) {
         this.walletService = walletService;
         this.walletQueryService = walletQueryService;
         this.depositService = depositService;
@@ -80,10 +84,17 @@ public class WalletController {
         return ResponseEntity.ok(depositService.createDepositRequest(userId, requestDTO));
     }
 
+    @GetMapping("/deposit-request/{requestId}")
+    @PreAuthorize("isAuthenticated() and (!hasRole('INSPECTOR') or hasRole('INSPECTION_CENTER'))")
+    public ResponseEntity<DepositResponseDTO> getDepositRequest(
+            @AuthenticationPrincipal CustomUserDetails details, @PathVariable UUID requestId) {
+        return ResponseEntity
+                .ok(depositService.getDepositRequest(currentUserProvider.resolveUserId(details), requestId));
+    }
+
     @GetMapping("/me/transactions")
     @PreAuthorize("isAuthenticated() and (!hasRole('INSPECTOR') or hasRole('INSPECTION_CENTER'))")
-    @Operation(summary = "Get own wallet transaction history",
-            description = "Filter by type and UTC instants: from is inclusive, to is exclusive. Default sort: createdAt DESC, id DESC.")
+    @Operation(summary = "Get own wallet transaction history", description = "Filter by type and UTC instants: from is inclusive, to is exclusive. Default sort: createdAt DESC, id DESC.")
     public ResponseEntity<PageResponse<WalletTransactionResponseDTO>> getMyTransactions(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @RequestParam(required = false) WalletTransactionType type,
@@ -97,8 +108,7 @@ public class WalletController {
 
     @GetMapping("/me/transactions/{transactionId}")
     @PreAuthorize("isAuthenticated() and (!hasRole('INSPECTOR') or hasRole('INSPECTION_CENTER'))")
-    @Operation(summary = "Get details of one own wallet transaction",
-            description = "Unknown and foreign-owned transaction IDs both return 404. Legacy balances can be null.")
+    @Operation(summary = "Get details of one own wallet transaction", description = "Unknown and foreign-owned transaction IDs both return 404. Legacy balances can be null.")
     public ResponseEntity<WalletTransactionResponseDTO> getMyTransaction(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable UUID transactionId) {
@@ -116,13 +126,17 @@ public class WalletController {
             @RequestHeader(name = "X-Bank-Info-Confirmed", required = false, defaultValue = "false") boolean bankInfoConfirmed,
             @RequestHeader(name = "X-Bank-Info-Warning-Version", required = false) String warningVersion) {
         UUID userId = currentUserProvider.resolveUserId(userDetails);
-        return ResponseEntity.ok(walletService.requestWithdrawal(userId, request, idempotencyKey, bankInfoConfirmed, warningVersion));
+        return ResponseEntity.ok(
+                walletService.requestWithdrawal(userId, request, idempotencyKey, bankInfoConfirmed, warningVersion));
     }
 
     @GetMapping("/withdrawal-bank-confirmation")
     @PreAuthorize("isAuthenticated() and (!hasRole('INSPECTOR') or hasRole('INSPECTION_CENTER'))")
     public ResponseEntity<WithdrawalBankConfirmationResponse> getBankConfirmationWarning() {
-        return ResponseEntity.ok(new WithdrawalBankConfirmationResponse(bankWarningVersion, bankWarningText));
+        String effectiveText = (bankWarningText != null && !bankWarningText.isBlank())
+                ? bankWarningText.trim()
+                : DEFAULT_BANK_WARNING_TEXT;
+        return ResponseEntity.ok(new WithdrawalBankConfirmationResponse(bankWarningVersion, effectiveText));
     }
 
     @GetMapping("/withdrawals")
@@ -146,7 +160,8 @@ public class WalletController {
     @PreAuthorize("isAuthenticated() and (!hasRole('INSPECTOR') or hasRole('INSPECTION_CENTER'))")
     public ResponseEntity<java.util.List<com.secondlife.secondlife.dto.response.WalletWithdrawalStatusHistoryResponse>> getMyWithdrawalHistory(
             @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID id) {
-        return ResponseEntity.ok(walletService.getMyWithdrawalStatusHistory(currentUserProvider.resolveUserId(userDetails), id));
+        return ResponseEntity
+                .ok(walletService.getMyWithdrawalStatusHistory(currentUserProvider.resolveUserId(userDetails), id));
     }
 
     @PostMapping("/withdrawals/{id}/disputes")
@@ -154,8 +169,26 @@ public class WalletController {
     public ResponseEntity<WalletWithdrawalResponse> reportWithdrawalIssue(
             @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID id,
             @Valid @RequestBody WalletWithdrawalDisputeRequest request) {
-        return ResponseEntity.ok(walletService.reportWithdrawalIssue(currentUserProvider.resolveUserId(userDetails), id,
-                request.type(), request.description()));
+        return ResponseEntity.ok(walletService.reportWithdrawalIssue(
+                currentUserProvider.resolveUserId(userDetails),
+                id,
+                request.type(),
+                request.description(),
+                request.evidenceUrls()));
+    }
+
+    @PostMapping("/withdrawals/{id}/exception")
+    @PreAuthorize("isAuthenticated() and (!hasRole('INSPECTOR') or hasRole('INSPECTION_CENTER'))")
+    @Operation(summary = "Gửi yêu cầu hỗ trợ ngoại lệ sau khi giao dịch rút tiền đã hoàn tất")
+    public ResponseEntity<WalletWithdrawalResponse> requestWithdrawalException(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable UUID id,
+            @Valid @RequestBody WalletWithdrawalExceptionRequest request) {
+        return ResponseEntity.ok(walletService.requestWithdrawalException(
+                currentUserProvider.resolveUserId(userDetails),
+                id,
+                request.reason(),
+                request.evidenceUrls()));
     }
 
     @PostMapping("/withdrawals/{id}/received")
@@ -169,7 +202,8 @@ public class WalletController {
     @PreAuthorize("isAuthenticated() and (!hasRole('INSPECTOR') or hasRole('INSPECTION_CENTER'))")
     public ResponseEntity<WalletWithdrawalResponse> cancelWithdrawal(
             @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID id) {
-        return ResponseEntity.ok(walletService.cancelWithdrawal(currentUserProvider.resolveUserId(userDetails), id, null));
+        return ResponseEntity
+                .ok(walletService.cancelWithdrawal(currentUserProvider.resolveUserId(userDetails), id, null));
     }
 
     @PostMapping(value = "/admin/withdrawals/{id}/evidence", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -186,7 +220,9 @@ public class WalletController {
     public ResponseEntity<byte[]> getWithdrawalEvidence(
             @AuthenticationPrincipal CustomUserDetails userDetails, @PathVariable UUID id,
             org.springframework.security.core.Authentication authentication) {
-        var authorities = authentication.getAuthorities().stream().map(org.springframework.security.core.GrantedAuthority::getAuthority).collect(java.util.stream.Collectors.toSet());
+        var authorities = authentication.getAuthorities().stream()
+                .map(org.springframework.security.core.GrantedAuthority::getAuthority)
+                .collect(java.util.stream.Collectors.toSet());
         boolean staff = (authorities.contains("ROLE_STAFF") && authorities.contains("STAFF_DISPUTE_REVIEW"))
                 || (authorities.contains("ROLE_ADMIN") && authorities.contains("ADMIN_RBAC_MANAGE"));
         var content = walletService.readWithdrawalEvidence(currentUserProvider.resolveUserId(userDetails), staff, id);
@@ -200,6 +236,14 @@ public class WalletController {
             @RequestParam(required = false) String status,
             @ParameterObject Pageable pageable) {
         return ResponseEntity.ok(PageResponse.from(walletService.getAllWithdrawals(status, pageable)));
+    }
+
+    @GetMapping("/admin/withdrawals/{id}/history")
+    @PreAuthorize("(hasRole('STAFF') and hasAuthority('STAFF_DISPUTE_REVIEW')) or (hasRole('ADMIN') and hasAuthority('ADMIN_RBAC_MANAGE'))")
+    @Operation(summary = "Admin/Staff xem lịch sử trạng thái của yêu cầu rút tiền")
+    public ResponseEntity<java.util.List<com.secondlife.secondlife.dto.response.WalletWithdrawalStatusHistoryResponse>> getAdminWithdrawalHistory(
+            @PathVariable UUID id) {
+        return ResponseEntity.ok(walletService.getAdminWithdrawalStatusHistory(id));
     }
 
     @PostMapping("/admin/withdrawals/{id}/review")

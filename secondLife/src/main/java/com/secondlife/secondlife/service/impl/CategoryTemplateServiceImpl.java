@@ -589,7 +589,7 @@ public class CategoryTemplateServiceImpl implements CategoryTemplateService {
                 PHẦN 1 — GIỮ ĐẦY ĐỦ CHI TIẾT 3 CÂU HỎI CỐT LÕI VỀ HIỆN TRẠNG & KHẤU HAO:
                 1. Câu 1 — Tần suất và cường độ sử dụng thực tế? (Ví dụ phân biệt rõ: Mới dùng lướt vài lần cất kho, Dùng gia đình ít 2-3 lần/tuần, Dùng hằng ngày ổn định, Dùng cường độ cao).
                 2. Câu 2 — Tình trạng ngoại quan thực tế và phụ kiện đi kèm đặc thù của "%s"? (Ví dụ phải nhắc đúng phụ kiện thực tế của "%s" như remote giọng nói/chân đế với Tivi, khay kệ với Tủ lạnh, dây cấp/ống xả với Máy giặt, lòng nồi/vỉ hứng dầu với Nồi chiên, nệm lót/gối tựa với Sofa...).
-                3. Câu 3 — Tình trạng vận hành kỹ thuật, lịch sử sửa chữa và bảo hành? (Ví dụ sát đặc tính kỹ thuật của "%s": nguyên zin 100%% chưa bung sửa, vận hành êm ổn định không lỗi vặt, còn bảo hành hãng hay đã hết bảo hành).
+                3. Câu 3 — Tình trạng vận hành thực tế của "%s"? Mỗi lựa chọn chỉ mô tả một trạng thái như hoạt động bình thường, có tiếng ồn bất thường hoặc chưa kiểm tra. Không gộp với bảo hành, sửa chữa.
 
                 PHẦN 2 — BẮT BUỘC BỔ SUNG 2 ĐẾN 3 CÂU HỎI CHUYÊN BIỆT VỀ THÔNG SỐ KỸ THUẬT CỦA RIÊNG "%s":
                 TUYỆT ĐỐI KHÔNG gộp thành 1 câu hỏi chung chung kiểu "Thông số kỹ thuật là gì?". Phải tách thành 2 - 3 câu hỏi trực diện vào đúng thông số quyết định giá trị của "%s":

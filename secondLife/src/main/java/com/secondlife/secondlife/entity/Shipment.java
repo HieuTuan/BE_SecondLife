@@ -104,4 +104,9 @@ public class Shipment {
     private Instant createdAt = Instant.now();
     @Column(nullable = false)
     private Instant updatedAt = Instant.now();
+
+    @org.springframework.data.domain.DomainEvents
+    ResourceChanged realtimeChange() {
+        return ResourceChanged.owned("SHIPMENT", id, buyer, seller);
+    }
 }

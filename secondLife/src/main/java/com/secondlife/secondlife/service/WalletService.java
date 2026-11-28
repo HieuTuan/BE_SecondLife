@@ -36,6 +36,8 @@ public interface WalletService {
     WalletWithdrawalResponse requestWithdrawal(UUID userId, WalletWithdrawalRequest request, String idempotencyKey, boolean bankInfoConfirmed, String warningVersion);
     WalletWithdrawalResponse reviewWithdrawal(UUID adminId, UUID withdrawalId, WalletWithdrawalReviewRequest request);
     WalletWithdrawalResponse reportWithdrawalIssue(UUID userId, UUID withdrawalId, String type, String description);
+    WalletWithdrawalResponse reportWithdrawalIssue(UUID userId, UUID withdrawalId, String type, String description, java.util.List<String> evidenceUrls);
+    WalletWithdrawalResponse requestWithdrawalException(UUID userId, UUID withdrawalId, String reason, java.util.List<String> evidenceUrls);
     WalletWithdrawalResponse cancelWithdrawal(UUID userId, UUID withdrawalId, String reason);
     WalletWithdrawalResponse confirmReceipt(UUID userId, UUID id);
     int completeExpiredWithdrawals();
@@ -43,6 +45,7 @@ public interface WalletService {
     ReportEvidenceContent readWithdrawalEvidence(UUID actorId, boolean staff, UUID withdrawalId);
     WalletWithdrawalResponse getMyWithdrawal(UUID userId, UUID withdrawalId);
     java.util.List<WalletWithdrawalStatusHistoryResponse> getMyWithdrawalStatusHistory(UUID userId, UUID withdrawalId);
+    java.util.List<WalletWithdrawalStatusHistoryResponse> getAdminWithdrawalStatusHistory(UUID withdrawalId);
     Page<WalletWithdrawalResponse> getMyWithdrawals(UUID userId, Pageable pageable);
     Page<WalletWithdrawalResponse> getAllWithdrawals(String status, Pageable pageable);
 }

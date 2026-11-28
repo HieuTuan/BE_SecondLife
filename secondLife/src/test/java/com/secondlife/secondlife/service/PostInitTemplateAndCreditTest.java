@@ -108,8 +108,7 @@ class PostInitTemplateAndCreditTest {
                 mock(PostMapper.class),
                 null,
                 mock(com.secondlife.secondlife.common.validation.ImageUploadValidator.class),
-                 mock(ListingPhotoContentReview.class)
-        );
+                 mock(ListingPhotoContentReview.class), mock(AiValuationService.class));
 
         userId = UUID.randomUUID();
         categoryId = UUID.randomUUID();

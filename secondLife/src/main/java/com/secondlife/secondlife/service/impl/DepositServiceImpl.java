@@ -69,6 +69,14 @@ public class DepositServiceImpl implements DepositService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public DepositResponseDTO getDepositRequest(UUID userId, UUID requestId) {
+        var request = depositRequestRepository.findByIdAndUser_IdAndOrderIdIsNull(requestId, userId)
+                .orElseThrow(() -> new NotFoundException("Deposit request not found"));
+        return walletMapper.toDepositResponse(request, bankAccountName, bankAccountNumber, bankName);
+    }
+
+    @Override
     @Transactional
     public void processSepayWebhook(SePayWebhookDTO webhookDTO) {
         if (!"in".equalsIgnoreCase(webhookDTO.transferType())) return;

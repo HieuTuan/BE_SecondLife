@@ -2,7 +2,7 @@ package com.secondlife.secondlife.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
@@ -10,7 +10,7 @@ import java.math.BigDecimal;
 
 public record WalletWithdrawalRequest(
     @NotNull(message = "Số tiền rút không được để trống")
-    @Positive(message = "Số tiền rút phải lớn hơn 0")
+    @DecimalMin(value = "10000", message = "Số tiền rút tối thiểu là 10.000 VND")
     BigDecimal amount,
     @NotBlank(message = "Mã ngân hàng không được để trống (vd: VCB, MB, TCB)")
     @Pattern(regexp = "^[A-Za-z0-9]{2,20}$", message = "Mã ngân hàng không hợp lệ")

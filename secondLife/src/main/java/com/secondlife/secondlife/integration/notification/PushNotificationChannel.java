@@ -54,16 +54,16 @@ public class PushNotificationChannel implements NotificationChannel {
         }
 
         if (FirebaseApp.getApps().isEmpty()) {
-            log.info("Push notification [{}] (FCM Mock): dispatched to {} device(s) of user {} (Title: {})",
-                    message.type(), tokens.size(), message.recipient().userId(), message.subject());
+            log.info("Push notification [{}] (FCM Mock): dispatched to {} device(s) of user {}",
+                    message.type(), tokens.size(), message.recipient().userId());
             return;
         }
 
         try {
-            String bodyText = message.payload().get("body") instanceof String s ? s : message.subject();
+            // Lock-screen notifications carry no personal or financial details.
             Notification notification = Notification.builder()
-                    .setTitle(message.subject())
-                    .setBody(bodyText)
+                    .setTitle("SecondLife")
+                    .setBody("Bạn có cập nhật mới. Mở ứng dụng để xem.")
                     .build();
 
             MulticastMessage.Builder multicastBuilder = MulticastMessage.builder()
@@ -76,7 +76,7 @@ public class PushNotificationChannel implements NotificationChannel {
             Object refType = message.payload().get("referenceType");
             if (refType != null) multicastBuilder.putData("referenceType", refType.toString());
             Object deepLink = message.payload().get("deepLink");
-            if (deepLink != null) multicastBuilder.putData("deepLink", deepLink.toString());
+            if (deepLink instanceof String path && path.startsWith("/") && !path.startsWith("//") && !path.contains("?") && !path.contains("#")) multicastBuilder.putData("deepLink", deepLink.toString());
 
             MulticastMessage multicastMessage = multicastBuilder.build();
             var batchResponse = FirebaseMessaging.getInstance().sendEachForMulticast(multicastMessage);
@@ -91,7 +91,7 @@ public class PushNotificationChannel implements NotificationChannel {
                         String failedToken = tokens.get(i);
                         String errorCode = responses.get(i).getException().getMessagingErrorCode() != null
                                 ? responses.get(i).getException().getMessagingErrorCode().name() : "UNKNOWN";
-                        log.warn("FCM push to token [{}] failed with code [{}]", failedToken, errorCode);
+                        log.warn("FCM delivery failed with code [{}]", errorCode);
                         if ("UNREGISTERED".equals(errorCode) || "INVALID_ARGUMENT".equals(errorCode)) {
                             deviceTokenRepository.deleteByToken(failedToken);
                         }

@@ -8,6 +8,7 @@ import com.secondlife.secondlife.entity.UserWallet;
 import com.secondlife.secondlife.entity.WalletTransaction;
 import com.secondlife.secondlife.entity.WalletWithdrawal;
 import com.secondlife.secondlife.entity.WalletWithdrawalStatusHistory;
+import com.secondlife.secondlife.enums.AccountStatus;
 import com.secondlife.secondlife.enums.NotificationType;
 import com.secondlife.secondlife.enums.WalletTransactionType;
 import com.secondlife.secondlife.enums.WalletTransactionReferenceType;
@@ -43,6 +44,19 @@ import java.io.IOException;
 @Service
 public class WalletServiceImpl implements WalletService {
     private final WalletMapper walletMapper;
+    private org.springframework.context.ApplicationEventPublisher realtimeEvents;
+
+    @Autowired
+    void setRealtimeEvents(org.springframework.context.ApplicationEventPublisher publisher) {
+        realtimeEvents = publisher;
+    }
+
+    private void saveChangedWallet(UserWallet wallet) {
+        userWalletRepository.save(wallet);
+        if (realtimeEvents != null) {
+            realtimeEvents.publishEvent(new WalletRealtimeDelivery.Changed(wallet.getUser().getId(), wallet.getId()));
+        }
+    }
 
     private final UserWalletRepository userWalletRepository;
     private final WalletTransactionRepository walletTransactionRepository;
@@ -53,6 +67,10 @@ public class WalletServiceImpl implements WalletService {
     private final ReportEvidenceStorage reportEvidenceStorage;
     @Value("${app.wallet.withdrawal.bank-warning.version:withdrawal-bank-warning-v1}")
     private String bankWarningVersion = "withdrawal-bank-warning-v1";
+    @Value("${app.wallet.withdrawal.max-pending:3}")
+    private int maxPendingWithdrawals = 3;
+    @Value("${app.wallet.withdrawal.evidence.max-file-size-bytes:${app.media.max-file-size-bytes:10485760}}")
+    private long maxEvidenceFileSizeBytes = 10L * 1024 * 1024;
 
     public WalletServiceImpl(UserWalletRepository userWalletRepository,
                              WalletTransactionRepository walletTransactionRepository,
@@ -130,7 +148,7 @@ public class WalletServiceImpl implements WalletService {
 
         UserWallet wallet = getWalletWithLock(userId);
         wallet.setBalance(wallet.getBalance().add(amount));
-        userWalletRepository.save(wallet);
+        saveChangedWallet(wallet);
 
         createTransaction(wallet, amount, WalletTransactionType.DEPOSIT, referenceId);
 
@@ -168,7 +186,7 @@ public class WalletServiceImpl implements WalletService {
         }
 
         wallet.setBalance(wallet.getBalance().subtract(amount));
-        userWalletRepository.save(wallet);
+        saveChangedWallet(wallet);
 
         // Record a negative transaction for payment
         createTransaction(wallet, amount.negate(), WalletTransactionType.PAYMENT, orderId, referenceType);
@@ -190,7 +208,7 @@ public class WalletServiceImpl implements WalletService {
 
         UserWallet wallet = getWalletWithLock(userId);
         wallet.setBalance(wallet.getBalance().add(amount));
-        userWalletRepository.save(wallet);
+        saveChangedWallet(wallet);
 
         createTransaction(wallet, amount, WalletTransactionType.EARNING, orderId, referenceType);
 
@@ -223,7 +241,7 @@ public class WalletServiceImpl implements WalletService {
 
         UserWallet wallet = getWalletWithLock(userId);
         wallet.setBalance(wallet.getBalance().add(amount));
-        userWalletRepository.save(wallet);
+        saveChangedWallet(wallet);
 
         createTransaction(wallet, amount, WalletTransactionType.REFUND, orderId, referenceType);
 
@@ -250,7 +268,7 @@ public class WalletServiceImpl implements WalletService {
         userWalletRepository.ensureWalletExists(UUID.randomUUID(), userId);
         UserWallet wallet = getWalletWithLock(userId);
         wallet.setBalance(wallet.getBalance().add(amount));
-        userWalletRepository.save(wallet);
+        saveChangedWallet(wallet);
         createTransaction(wallet, amount, WalletTransactionType.SHIPPING_REIMBURSE, shipmentId,
                 WalletTransactionReferenceType.SHIPMENT);
     }
@@ -292,7 +310,7 @@ public class WalletServiceImpl implements WalletService {
         BigDecimal collected = wallet.getBalance().min(amount);
         if (collected.signum() > 0) {
             wallet.setBalance(wallet.getBalance().subtract(collected));
-            userWalletRepository.save(wallet);
+            saveChangedWallet(wallet);
             createTransaction(wallet, collected.negate(), type, referenceId, referenceType);
         }
         return collected;
@@ -388,24 +406,33 @@ public class WalletServiceImpl implements WalletService {
         }
 
         UserWallet wallet = getWalletWithLock(userId);
+        if (!wallet.isActive()) {
+            throw new BadRequestException("Ví của bạn đang tạm khóa hoặc đóng băng; không thể tạo yêu cầu rút tiền");
+        }
         if (idempotencyKey != null && !idempotencyKey.isBlank()) {
             var existing = walletWithdrawalRepository.findByUserIdAndIdempotencyKey(userId, idempotencyKey.trim());
             if (existing.isPresent()) {
                 if (!sameWithdrawalPayload(existing.get(), request)) throw new ConflictException("Idempotency key was already used with different withdrawal details");
-                return walletMapper.toWithdrawalResponse(existing.get());
+                return walletMapper.toWithdrawalResponse(existing.get(), wallet);
             }
         }
         if (wallet.getBalance().compareTo(request.amount()) < 0) {
             throw new BadRequestException("Số dư khả dụng không đủ để thực hiện rút tiền");
         }
+        if (maxPendingWithdrawals > 0 && walletWithdrawalRepository.countByUserIdAndStatus(userId, "PENDING") >= maxPendingWithdrawals) {
+            throw new BadRequestException("Bạn chỉ có thể có tối đa " + maxPendingWithdrawals + " yêu cầu rút tiền đang chờ xử lý cùng lúc");
+        }
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        if (user.getAccountStatus() != null && user.getAccountStatus() != AccountStatus.ACTIVE) {
+            throw new BadRequestException("Tài khoản đang bị tạm khóa hoặc chưa hoạt động; không thể thực hiện rút tiền");
+        }
 
         // balance is spendable funds; a withdrawal moves the same amount to reserved funds.
         wallet.setBalance(wallet.getBalance().subtract(request.amount()));
         wallet.setReservedBalance(zeroIfNull(wallet.getReservedBalance()).add(request.amount()));
-        userWalletRepository.save(wallet);
-
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new NotFoundException("User not found"));
+        saveChangedWallet(wallet);
 
         WalletWithdrawal withdrawal = new WalletWithdrawal(
                 user,
@@ -434,11 +461,11 @@ public class WalletServiceImpl implements WalletService {
                 NotificationType.WALLET,
                 withdrawal.getId(),
                 "WALLET_WITHDRAWAL",
-                "/wallet"
+                "/wallet/withdrawals/" + withdrawal.getId()
             );
         }
 
-        return walletMapper.toWithdrawalResponse(withdrawal);
+        return walletMapper.toWithdrawalResponse(withdrawal, wallet);
     }
 
     @Override
@@ -459,14 +486,39 @@ public class WalletServiceImpl implements WalletService {
         withdrawal.setUpdatedAt(now);
         if (request.adminNote() != null && !request.adminNote().isBlank()) withdrawal.setAdminNote(request.adminNote().trim());
 
+        UserWallet touchedWallet = null;
+
         switch (action) {
             case "CLAIM", "ACCEPT" -> {
                 if (!("PENDING".equals(withdrawal.getStatus()) || "TRANSFER_FAILED".equals(withdrawal.getStatus())))
                     throw new BadRequestException("Chỉ yêu cầu chờ tiếp nhận hoặc chuyển khoản thất bại mới có thể được nhận xử lý");
-                withdrawal.setStatus("PROCESSING"); withdrawal.setAcceptedBy(admin); withdrawal.setAcceptedAt(now);
+                withdrawal.setStatus("PROCESSING");
+                withdrawal.setAcceptedBy(admin);
+                withdrawal.setAcceptedAt(now);
+            }
+            case "UNCLAIM" -> {
+                requireStatus(withdrawal, "PROCESSING");
+                assertAssignedStaffOrAdmin(withdrawal, admin);
+                withdrawal.setStatus("PENDING");
+                withdrawal.setAcceptedBy(null);
+                withdrawal.setAcceptedAt(null);
+            }
+            case "REASSIGN" -> {
+                requireStatus(withdrawal, "PROCESSING");
+                if (!admin.hasRole("ADMIN")) {
+                    throw new ConflictException("Chỉ quản trị viên mới có quyền điều phối lại nhân viên xử lý");
+                }
+                if (request.targetStaffId() == null) {
+                    throw new BadRequestException("Vui lòng chọn nhân viên nhận bàn giao");
+                }
+                User targetStaff = userRepository.findById(request.targetStaffId())
+                        .orElseThrow(() -> new NotFoundException("Không tìm thấy nhân viên được bàn giao"));
+                withdrawal.setAcceptedBy(targetStaff);
+                withdrawal.setAcceptedAt(now);
             }
             case "APPROVE", "CONFIRM_TRANSFER" -> {
                 requireStatus(withdrawal, "PROCESSING");
+                assertAssignedStaffOrAdmin(withdrawal, admin);
                 if (withdrawal.getEvidenceStorageId() == null || withdrawal.getEvidenceUrl() == null
                         || !withdrawal.getEvidenceUrl().matches("/api/v1/wallets/withdrawals/evidence/[0-9a-fA-F-]{36}"))
                     throw new BadRequestException("Tải ảnh minh chứng giao dịch thành công lên trước khi xác nhận chuyển khoản");
@@ -474,7 +526,8 @@ public class WalletServiceImpl implements WalletService {
                 BigDecimal reserved = zeroIfNull(wallet.getReservedBalance());
                 if (reserved.compareTo(withdrawal.getAmount()) < 0) throw new ConflictException("Wallet reserved balance is inconsistent");
                 wallet.setReservedBalance(reserved.subtract(withdrawal.getAmount()));
-                userWalletRepository.save(wallet);
+                saveChangedWallet(wallet);
+                touchedWallet = wallet;
                 withdrawal.setTransferredBy(admin); withdrawal.setTransferredAt(now);
                 withdrawal.setNotificationAt(now); withdrawal.setDisputeDeadline(now.plusSeconds(48L * 60 * 60));
                 withdrawal.setReviewedBy(admin); withdrawal.setReviewedAt(now); withdrawal.setStatus("TRANSFERRED_AWAITING_REVIEW");
@@ -482,41 +535,122 @@ public class WalletServiceImpl implements WalletService {
             case "REJECT", "CANCEL" -> {
                 if (!("PENDING".equals(withdrawal.getStatus()) || "PROCESSING".equals(withdrawal.getStatus()) || "TRANSFER_FAILED".equals(withdrawal.getStatus())))
                     throw new BadRequestException("Yêu cầu chỉ có thể bị từ chối trước khi chuyển khoản thành công");
-                releaseWithdrawalReservation(withdrawal);
+                if ("PROCESSING".equals(withdrawal.getStatus())) {
+                    assertAssignedStaffOrAdmin(withdrawal, admin);
+                }
+                touchedWallet = releaseWithdrawalReservation(withdrawal);
                 withdrawal.setReviewedBy(admin); withdrawal.setReviewedAt(now); withdrawal.setStatus("REJECTED");
             }
             case "TRANSFER_FAILED" -> {
-                requireStatus(withdrawal, "PROCESSING"); withdrawal.setStatus("TRANSFER_FAILED"); withdrawal.setReviewedBy(admin); withdrawal.setReviewedAt(now);
+                requireStatus(withdrawal, "PROCESSING");
+                assertAssignedStaffOrAdmin(withdrawal, admin);
+                clearWithdrawalEvidence(withdrawal);
+                withdrawal.setStatus("TRANSFER_FAILED");
+                withdrawal.setReviewedBy(admin);
+                withdrawal.setReviewedAt(now);
+            }
+            case "START_DISPUTE_REVIEW" -> {
+                requireStatus(withdrawal, "DISPUTED");
+                withdrawal.setStatus("DISPUTE_PROCESSING");
+                withdrawal.setReviewedBy(admin);
+                withdrawal.setReviewedAt(now);
             }
             case "RESOLVE_DISPUTE" -> {
-                requireStatus(withdrawal, "DISPUTED"); withdrawal.setStatus("DISPUTE_RESOLVED");
-                withdrawal.setDisputeResolvedBy(admin); withdrawal.setDisputeResolution(request.adminNote());
+                if (!("DISPUTED".equals(withdrawal.getStatus()) || "DISPUTE_PROCESSING".equals(withdrawal.getStatus()))) {
+                    throw new ConflictException("Withdrawal request status changed; current status is " + withdrawal.getStatus());
+                }
+                String outcome = normalizeDisputeResolutionOutcome(request.disputeResolutionOutcome());
+                withdrawal.setDisputeResolutionOutcome(outcome);
+                withdrawal.setDisputeResolvedBy(admin);
+                withdrawal.setDisputeResolution(request.adminNote());
+                String resEvidence = firstNonBlank(request.evidenceUrl(),
+                        request.evidenceUrls() != null && !request.evidenceUrls().isEmpty() ? request.evidenceUrls().get(0) : null);
+                if (resEvidence != null) {
+                    withdrawal.setDisputeResolutionEvidenceUrl(resEvidence);
+                }
+                withdrawal.setReviewedBy(admin);
+                withdrawal.setReviewedAt(now);
+
+                if ("RESOLVED_REFUND_TO_WALLET".equals(outcome)) {
+                    UserWallet wallet = getWalletWithLock(withdrawal.getUser().getId());
+                    wallet.setBalance(wallet.getBalance().add(withdrawal.getAmount()));
+                    saveChangedWallet(wallet);
+                    createTransaction(wallet, withdrawal.getAmount(), WalletTransactionType.REFUND, withdrawal.getId(), WalletTransactionReferenceType.WITHDRAWAL);
+                    touchedWallet = wallet;
+                    withdrawal.setStatus("DISPUTE_RESOLVED");
+                } else if ("RESOLVED_RETRY_TRANSFER".equals(outcome)) {
+                    UserWallet wallet = getWalletWithLock(withdrawal.getUser().getId());
+                    wallet.setReservedBalance(zeroIfNull(wallet.getReservedBalance()).add(withdrawal.getAmount()));
+                    saveChangedWallet(wallet);
+                    touchedWallet = wallet;
+                    clearWithdrawalEvidence(withdrawal);
+                    withdrawal.setStatus("TRANSFER_FAILED");
+                } else {
+                    withdrawal.setStatus("DISPUTE_RESOLVED");
+                }
             }
             default -> throw new BadRequestException("Hành động không hợp lệ: " + action);
         }
 
         withdrawal = walletWithdrawalRepository.save(withdrawal);
         recordWithdrawalStatus(withdrawal, oldStatus, withdrawal.getStatus(), admin, action, request.adminNote());
-        if (notificationService != null && "TRANSFERRED_AWAITING_REVIEW".equals(withdrawal.getStatus())) {
-            var notification = notificationService.notifyInApp(withdrawal.getUser().getId(), "Yêu cầu rút tiền đã được chuyển khoản",
+        sendReviewNotifications(withdrawal, action, request.adminNote());
+        return enrichWithdrawalResponse(withdrawal, touchedWallet);
+    }
+
+    private void sendReviewNotifications(WalletWithdrawal withdrawal, String action, String adminNote) {
+        if (notificationService == null) {
+            return;
+        }
+        String targetUrl = "/wallet/withdrawals/" + withdrawal.getId();
+        UUID ownerId = withdrawal.getUser().getId();
+        if ("TRANSFERRED_AWAITING_REVIEW".equals(withdrawal.getStatus())) {
+            var notification = notificationService.notifyInApp(ownerId, "Yêu cầu rút tiền đã được chuyển khoản",
                     "Yêu cầu " + withdrawal.getRequestCode() + " đã được xác nhận chuyển khoản. Vui lòng kiểm tra tài khoản ngân hàng; bạn có thể báo cáo vấn đề trước " + withdrawal.getDisputeDeadline() + ".",
-                    NotificationType.WALLET, withdrawal.getId(), "WALLET_WITHDRAWAL", "/wallet/withdrawals/" + withdrawal.getId());
+                    NotificationType.WALLET, withdrawal.getId(), "WALLET_WITHDRAWAL", targetUrl);
             if (notification != null && notification.createdAt() != null) {
                 withdrawal.setNotificationAt(notification.createdAt());
                 withdrawal.setDisputeDeadline(notification.createdAt().plusSeconds(48L * 60 * 60));
-                withdrawal = walletWithdrawalRepository.save(withdrawal);
+                walletWithdrawalRepository.save(withdrawal);
             }
-        } else if (notificationService != null && "REJECTED".equals(withdrawal.getStatus())) {
-            notificationService.notifyInApp(withdrawal.getUser().getId(), "Yêu cầu rút tiền đã bị từ chối",
-                    "Yêu cầu " + withdrawal.getRequestCode() + " đã bị từ chối. Số tiền đã được trả lại vào số dư khả dụng. Lý do: " + (request.adminNote() == null ? "Không có lý do cụ thể" : request.adminNote()),
-                    NotificationType.WALLET, withdrawal.getId(), "WALLET_WITHDRAWAL", "/wallet");
+        } else if ("REJECTED".equals(withdrawal.getStatus())) {
+            notificationService.notifyInApp(ownerId, "Yêu cầu rút tiền đã bị từ chối",
+                    "Yêu cầu " + withdrawal.getRequestCode() + " đã bị từ chối. Số tiền đã được trả lại vào số dư khả dụng. Lý do: " + (adminNote == null ? "Không có lý do cụ thể" : adminNote),
+                    NotificationType.WALLET, withdrawal.getId(), "WALLET_WITHDRAWAL", targetUrl);
+        } else if ("PROCESSING".equals(withdrawal.getStatus()) && ("CLAIM".equals(action) || "ACCEPT".equals(action))) {
+            notificationService.notifyInApp(ownerId, "Yêu cầu rút tiền đang được xử lý",
+                    "Nhân viên đã tiếp nhận yêu cầu rút tiền " + withdrawal.getRequestCode() + " và đang tiến hành đối chiếu chuyển khoản.",
+                    NotificationType.WALLET, withdrawal.getId(), "WALLET_WITHDRAWAL", targetUrl);
+        } else if ("TRANSFER_FAILED".equals(withdrawal.getStatus())) {
+            String msg = "RESOLVE_DISPUTE".equals(action)
+                    ? "Báo cáo cho lệnh " + withdrawal.getRequestCode() + " đã được xác nhận chuyển khoản lại. Nhân viên sẽ sớm thực hiện lại giao dịch."
+                    : "Chuyển khoản cho lệnh " + withdrawal.getRequestCode() + " chưa hoàn tất. Số tiền vẫn đang được giữ an toàn để nhân viên kiểm tra lại." + (adminNote != null && !adminNote.isBlank() ? " Ghi chú: " + adminNote : "");
+            notificationService.notifyInApp(ownerId, "Chuyển khoản rút tiền chưa hoàn tất",
+                    msg, NotificationType.WALLET, withdrawal.getId(), "WALLET_WITHDRAWAL", targetUrl);
+        } else if ("DISPUTE_PROCESSING".equals(withdrawal.getStatus())) {
+            notificationService.notifyInApp(ownerId, "Báo cáo vấn đề rút tiền đang được xác minh",
+                    "Nhân viên đã tiếp nhận báo cáo vấn đề cho lệnh rút tiền " + withdrawal.getRequestCode() + " và đang kiểm tra giao dịch ngân hàng.",
+                    NotificationType.WALLET, withdrawal.getId(), "WALLET_WITHDRAWAL", targetUrl);
+        } else if ("DISPUTE_RESOLVED".equals(withdrawal.getStatus())) {
+            String outcomeText = switch (String.valueOf(withdrawal.getDisputeResolutionOutcome())) {
+                case "RESOLVED_REFUND_TO_WALLET" -> "Số tiền rút đã được hoàn lại vào số dư khả dụng của ví.";
+                default -> "Giao dịch chuyển khoản đã được xác minh là hợp lệ.";
+            };
+            notificationService.notifyInApp(ownerId, "Báo cáo vấn đề rút tiền đã có kết quả",
+                    "Báo cáo cho lệnh " + withdrawal.getRequestCode() + " đã được giải quyết. " + outcomeText + (adminNote != null && !adminNote.isBlank() ? " Kết luận: " + adminNote : ""),
+                    NotificationType.WALLET, withdrawal.getId(), "WALLET_WITHDRAWAL", targetUrl);
         }
-        return walletMapper.toWithdrawalResponse(withdrawal);
     }
 
     @Override
     @Transactional
     public WalletWithdrawalResponse reportWithdrawalIssue(UUID userId, UUID withdrawalId, String type, String description) {
+        return reportWithdrawalIssue(userId, withdrawalId, type, description, java.util.List.of());
+    }
+
+    @Override
+    @Transactional
+    public WalletWithdrawalResponse reportWithdrawalIssue(UUID userId, UUID withdrawalId, String type, String description, java.util.List<String> evidenceUrls) {
         WalletWithdrawal withdrawal = walletWithdrawalRepository.findByIdForUpdate(withdrawalId)
                 .orElseThrow(() -> new NotFoundException("Withdrawal request not found"));
         if (!withdrawal.getUser().getId().equals(userId)) throw new NotFoundException("Withdrawal request not found");
@@ -526,15 +660,58 @@ public class WalletServiceImpl implements WalletService {
         if (type == null || type.isBlank() || description == null || description.isBlank())
             throw new BadRequestException("Vui lòng chọn loại vấn đề và mô tả chi tiết");
         String old = withdrawal.getStatus();
-        withdrawal.setStatus("DISPUTED"); withdrawal.setDisputeType(type.trim());
-        withdrawal.setDisputeDescription(description.trim()); withdrawal.setDisputedAt(now); withdrawal.setUpdatedAt(now);
+        withdrawal.setStatus("DISPUTED");
+        withdrawal.setDisputeType(type.trim());
+        withdrawal.setDisputeDescription(description.trim());
+        withdrawal.setDisputeEvidenceUrls(joinEvidenceUrls(evidenceUrls));
+        withdrawal.setDisputedAt(now);
+        withdrawal.setUpdatedAt(now);
         withdrawal = walletWithdrawalRepository.save(withdrawal);
-        recordWithdrawalStatus(withdrawal, old, "DISPUTED", withdrawal.getUser(), "USER_DISPUTE", type);
+        recordWithdrawalStatus(withdrawal, old, "DISPUTED", withdrawal.getUser(), "USER_DISPUTE", type.trim());
         if (notificationService != null) {
-            notificationService.notifyInApp(userId, "Đã ghi nhận báo cáo rút tiền", "Báo cáo cho yêu cầu " + withdrawal.getRequestCode() + " đã được ghi nhận để nhân viên xem xét.",
+            notificationService.notifyInApp(userId, "Đã ghi nhận báo cáo rút tiền",
+                    "Báo cáo cho yêu cầu " + withdrawal.getRequestCode() + " đã được ghi nhận để nhân viên xem xét.",
                     NotificationType.WALLET, withdrawal.getId(), "WALLET_WITHDRAWAL", "/wallet/withdrawals/" + withdrawal.getId());
+            notifyAssignedStaffForWithdrawal(withdrawal,
+                    "Có báo cáo vấn đề cho lệnh rút tiền " + withdrawal.getRequestCode(),
+                    "Người dùng đã báo cáo vấn đề (" + type.trim() + ") cho lệnh rút tiền " + withdrawal.getRequestCode() + ". Vui lòng kiểm tra và xác minh.");
         }
-        return walletMapper.toWithdrawalResponse(withdrawal);
+        return enrichWithdrawalResponse(withdrawal, null);
+    }
+
+    @Override
+    @Transactional
+    public WalletWithdrawalResponse requestWithdrawalException(UUID userId, UUID withdrawalId, String reason, java.util.List<String> evidenceUrls) {
+        WalletWithdrawal withdrawal = walletWithdrawalRepository.findByIdForUpdate(withdrawalId)
+                .orElseThrow(() -> new NotFoundException("Withdrawal request not found"));
+        if (!withdrawal.getUser().getId().equals(userId)) {
+            throw new NotFoundException("Withdrawal request not found");
+        }
+        if (!"COMPLETED".equals(withdrawal.getStatus())) {
+            throw new BadRequestException("Yêu cầu hỗ trợ ngoại lệ chỉ áp dụng cho giao dịch rút tiền đã hoàn tất");
+        }
+        if (withdrawal.getExceptionRequestedAt() != null) {
+            throw new ConflictException("Bạn đã gửi yêu cầu hỗ trợ ngoại lệ cho giao dịch rút tiền này trước đó");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new BadRequestException("Vui lòng mô tả chi tiết lý do cần hỗ trợ ngoại lệ");
+        }
+        Instant now = Instant.now();
+        withdrawal.setExceptionRequestedAt(now);
+        withdrawal.setExceptionReason(reason.trim());
+        withdrawal.setExceptionEvidenceUrls(joinEvidenceUrls(evidenceUrls));
+        withdrawal.setUpdatedAt(now);
+        withdrawal = walletWithdrawalRepository.save(withdrawal);
+        recordWithdrawalStatus(withdrawal, "COMPLETED", "COMPLETED", withdrawal.getUser(), "EXCEPTION_REQUESTED", reason.trim());
+        if (notificationService != null) {
+            notificationService.notifyInApp(userId, "Đã ghi nhận yêu cầu hỗ trợ ngoại lệ",
+                    "Yêu cầu hỗ trợ ngoại lệ cho lệnh rút tiền " + withdrawal.getRequestCode() + " đã được ghi nhận để Admin/Manager xem xét. Giao dịch không tự động hoàn tiền trong thời gian xác minh.",
+                    NotificationType.WALLET, withdrawal.getId(), "WALLET_WITHDRAWAL", "/wallet/withdrawals/" + withdrawal.getId());
+            notifyAssignedStaffForWithdrawal(withdrawal,
+                    "Có yêu cầu hỗ trợ ngoại lệ sau 48h cho lệnh " + withdrawal.getRequestCode(),
+                    "Người dùng gửi yêu cầu ngoại lệ sau hoàn tất cho lệnh " + withdrawal.getRequestCode() + ". Lý do: " + reason.trim());
+        }
+        return enrichWithdrawalResponse(withdrawal, null);
     }
 
     @Override
@@ -545,15 +722,15 @@ public class WalletServiceImpl implements WalletService {
         if (!withdrawal.getUser().getId().equals(userId)) throw new NotFoundException("Withdrawal request not found");
         requireStatus(withdrawal, "PENDING");
         String old = withdrawal.getStatus();
-        releaseWithdrawalReservation(withdrawal);
+        UserWallet wallet = releaseWithdrawalReservation(withdrawal);
         withdrawal.setStatus("CANCELLED"); withdrawal.setAdminNote(reason == null || reason.isBlank() ? "Cancelled by owner" : reason.trim());
         withdrawal.setUpdatedAt(Instant.now());
         withdrawal = walletWithdrawalRepository.save(withdrawal);
         recordWithdrawalStatus(withdrawal, old, "CANCELLED", withdrawal.getUser(), "USER_CANCELLED", withdrawal.getAdminNote());
         if (notificationService != null) notificationService.notifyInApp(userId, "Yêu cầu rút tiền đã được hủy",
                 "Yêu cầu " + withdrawal.getRequestCode() + " đã được hủy; số tiền đã trở lại số dư khả dụng.",
-                NotificationType.WALLET, withdrawal.getId(), "WALLET_WITHDRAWAL", "/wallet");
-        return walletMapper.toWithdrawalResponse(withdrawal);
+                NotificationType.WALLET, withdrawal.getId(), "WALLET_WITHDRAWAL", "/wallet/withdrawals/" + withdrawal.getId());
+        return enrichWithdrawalResponse(withdrawal, wallet);
     }
 
     @Override
@@ -562,14 +739,46 @@ public class WalletServiceImpl implements WalletService {
         var w = walletWithdrawalRepository.findByIdForUpdate(id)
                 .filter(item -> item.getUser().getId().equals(userId))
                 .orElseThrow(() -> new NotFoundException("Withdrawal request not found"));
-        requireStatus(w, "TRANSFERRED_AWAITING_REVIEW");
+        String oldStatus = w.getStatus();
         Instant now = Instant.now();
-        if (!now.isBefore(w.getDisputeDeadline())) throw new ConflictException("Đã hết hạn đối soát");
+        boolean closingDispute = "DISPUTED".equals(oldStatus) || "DISPUTE_PROCESSING".equals(oldStatus);
+        if ("TRANSFERRED_AWAITING_REVIEW".equals(oldStatus)) {
+            if (w.getDisputeDeadline() != null && !now.isBefore(w.getDisputeDeadline())) {
+                throw new ConflictException("Đã hết hạn đối soát");
+            }
+        } else if (!closingDispute) {
+            throw new ConflictException("Withdrawal request status changed; current status is " + oldStatus);
+        }
+
         w.setStatus("COMPLETED");
         w.setCompletedAt(now);
         w.setUpdatedAt(now);
-        recordWithdrawalStatus(w, "TRANSFERRED_AWAITING_REVIEW", "COMPLETED", w.getUser(), "OWNER_CONFIRMED", null);
-        return walletMapper.toWithdrawalResponse(w);
+        if (closingDispute) {
+            w.setDisputeResolutionOutcome("RESOLVED_VALID_TRANSFER");
+            w.setDisputeResolution("Người dùng đã nhận được tiền và chủ động đóng báo cáo sự cố");
+        }
+        walletWithdrawalRepository.save(w);
+        recordWithdrawalStatus(
+                w,
+                oldStatus,
+                "COMPLETED",
+                w.getUser(),
+                closingDispute ? "OWNER_CLOSED_DISPUTE_CONFIRMED" : "OWNER_CONFIRMED",
+                closingDispute ? "Người dùng xác nhận đã nhận đủ tiền và đóng báo cáo sự cố" : null
+        );
+        if (notificationService != null) {
+            notificationService.notifyInApp(userId, "Yêu cầu rút tiền đã hoàn tất",
+                    closingDispute
+                            ? "Bạn đã đóng báo cáo sự cố và xác nhận nhận đủ tiền cho lệnh rút tiền " + w.getRequestCode() + "."
+                            : "Bạn đã xác nhận nhận đủ tiền cho lệnh rút tiền " + w.getRequestCode() + ".",
+                    NotificationType.WALLET, w.getId(), "WALLET_WITHDRAWAL", "/wallet/withdrawals/" + w.getId());
+            if (closingDispute) {
+                notifyAssignedStaffForWithdrawal(w,
+                        "Người dùng đã đóng báo cáo cho lệnh " + w.getRequestCode(),
+                        "Chủ ví đã xác nhận nhận được tiền và chủ động đóng báo cáo sự cố cho lệnh rút tiền " + w.getRequestCode() + ".");
+            }
+        }
+        return enrichWithdrawalResponse(w, null);
     }
 
     @Override
@@ -583,10 +792,12 @@ public class WalletServiceImpl implements WalletService {
             int milestone = left.compareTo(java.time.Duration.ofHours(1)) <= 0 ? 1 :
                     left.compareTo(java.time.Duration.ofHours(6)) <= 0 ? 6 :
                     left.compareTo(java.time.Duration.ofHours(12)) <= 0 ? 12 : 24;
-            notificationService.notifyInApp(w.getUser().getId(), "Bạn đã nhận được tiền chưa?",
-                    "Lệnh " + w.getRequestCode() + " còn " + Math.max(1, left.toMinutes()) +
-                    " phút để xác nhận đã nhận hoặc báo cáo lỗi.", NotificationType.WALLET, id,
-                    "WALLET_WITHDRAWAL", "/wallet/withdrawals/" + id);
+            if (notificationService != null) {
+                notificationService.notifyInApp(w.getUser().getId(), "Bạn đã nhận được tiền chưa?",
+                        "Lệnh " + w.getRequestCode() + " còn " + Math.max(1, left.toMinutes()) +
+                        " phút để xác nhận đã nhận hoặc báo cáo lỗi.", NotificationType.WALLET, id,
+                        "WALLET_WITHDRAWAL", "/wallet/withdrawals/" + id);
+            }
             w.setReminderHours(milestone);
         }
         var due = walletWithdrawalRepository.findByDisputeDeadlineBeforeAndStatus(Instant.now(), "TRANSFERRED_AWAITING_REVIEW", Pageable.ofSize(200));
@@ -599,6 +810,11 @@ public class WalletServiceImpl implements WalletService {
             withdrawal.setStatus("COMPLETED"); withdrawal.setCompletedAt(Instant.now()); withdrawal.setUpdatedAt(Instant.now());
             walletWithdrawalRepository.save(withdrawal);
             recordWithdrawalStatus(withdrawal, old, "COMPLETED", null, "AUTO_COMPLETE", null);
+            if (notificationService != null) {
+                notificationService.notifyInApp(withdrawal.getUser().getId(), "Yêu cầu rút tiền đã hoàn tất",
+                        "Lệnh rút tiền " + withdrawal.getRequestCode() + " đã tự động chuyển sang hoàn tất sau 48 giờ đối soát.",
+                        NotificationType.WALLET, withdrawal.getId(), "WALLET_WITHDRAWAL", "/wallet/withdrawals/" + withdrawal.getId());
+            }
             count++;
         }
         return count;
@@ -608,24 +824,28 @@ public class WalletServiceImpl implements WalletService {
     @Transactional
     public WalletWithdrawalResponse uploadWithdrawalEvidence(UUID staffId, UUID withdrawalId, MultipartFile file) {
         if (file == null || file.isEmpty()) throw new BadRequestException("Ảnh minh chứng đang trống");
-        if (file.getSize() >= 5_000_000) throw new BadRequestException("Ảnh minh chứng phải nhỏ hơn 5 MB");
+        long maxBytes = maxEvidenceFileSizeBytes > 0 ? maxEvidenceFileSizeBytes : 10L * 1024 * 1024;
+        if (file.getSize() > maxBytes) {
+            throw new BadRequestException("Ảnh minh chứng không được vượt quá " + formatEvidenceSizeLimit(maxBytes));
+        }
         if (!java.util.Set.of("image/jpeg", "image/png", "image/webp").contains(String.valueOf(file.getContentType())))
             throw new BadRequestException("Chỉ chấp nhận ảnh JPEG, PNG hoặc WEBP");
         if (reportEvidenceStorage == null) throw new IllegalStateException("Private evidence storage is not configured");
         WalletWithdrawal withdrawal = walletWithdrawalRepository.findByIdForUpdate(withdrawalId)
                 .orElseThrow(() -> new NotFoundException("Withdrawal request not found"));
         if (!"PROCESSING".equals(withdrawal.getStatus())) throw new ConflictException("Evidence can only be attached to a processing withdrawal");
-        if (withdrawal.getAcceptedBy() == null || !withdrawal.getAcceptedBy().getId().equals(staffId))
+        User staff = userRepository.findById(staffId).orElseThrow(() -> new NotFoundException("Staff not found"));
+        if (withdrawal.getAcceptedBy() == null || (!withdrawal.getAcceptedBy().getId().equals(staffId) && !staff.hasRole("ADMIN")))
             throw new ConflictException("Only the assigned staff member may upload transfer evidence");
         try {
             var stored = reportEvidenceStorage.upload(file);
             withdrawal.setEvidenceStorageId(stored.storageId());
             withdrawal.setEvidenceContentType(stored.contentType());
-            withdrawal.setEvidenceUploadedBy(userRepository.findById(staffId).orElseThrow(() -> new NotFoundException("Staff not found")));
+            withdrawal.setEvidenceUploadedBy(staff);
             withdrawal.setEvidenceUploadedAt(Instant.now());
             withdrawal.setEvidenceUrl("/api/v1/wallets/withdrawals/evidence/" + withdrawal.getId());
             withdrawal.setUpdatedAt(Instant.now());
-            return walletMapper.toWithdrawalResponse(walletWithdrawalRepository.save(withdrawal));
+            return enrichWithdrawalResponse(walletWithdrawalRepository.save(withdrawal), null);
         } catch (IOException ex) {
             throw new BadRequestException("Tải ảnh minh chứng lên kho riêng tư thất bại; vui lòng thử lại");
         }
@@ -648,7 +868,7 @@ public class WalletServiceImpl implements WalletService {
         WalletWithdrawal withdrawal = walletWithdrawalRepository.findById(withdrawalId)
                 .filter(row -> row.getUser().getId().equals(userId))
                 .orElseThrow(() -> new NotFoundException("Withdrawal request not found"));
-        return walletMapper.toWithdrawalResponse(withdrawal);
+        return enrichWithdrawalResponse(withdrawal, null);
     }
 
     @Override
@@ -661,14 +881,113 @@ public class WalletServiceImpl implements WalletService {
                         row.getActor() == null ? null : row.getActor().getId(), row.getAction(), row.getReason(), row.getCreatedAt())).toList();
     }
 
-    private void releaseWithdrawalReservation(WalletWithdrawal withdrawal) {
+    @Override
+    @Transactional(readOnly = true)
+    public java.util.List<WalletWithdrawalStatusHistoryResponse> getAdminWithdrawalStatusHistory(UUID withdrawalId) {
+        walletWithdrawalRepository.findById(withdrawalId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy yêu cầu rút tiền với mã: " + withdrawalId));
+        if (withdrawalHistoryRepository == null) return java.util.List.of();
+        return withdrawalHistoryRepository.findByWithdrawalIdOrderByCreatedAtAsc(withdrawalId).stream()
+                .map(row -> new WalletWithdrawalStatusHistoryResponse(row.getOldStatus(), row.getNewStatus(),
+                        row.getActor() == null ? null : row.getActor().getId(), row.getAction(), row.getReason(), row.getCreatedAt())).toList();
+    }
+
+    private UserWallet releaseWithdrawalReservation(WalletWithdrawal withdrawal) {
         UserWallet wallet = getWalletWithLock(withdrawal.getUser().getId());
         BigDecimal reserved = zeroIfNull(wallet.getReservedBalance());
         if (reserved.compareTo(withdrawal.getAmount()) < 0) throw new ConflictException("Wallet reserved balance is inconsistent");
         wallet.setReservedBalance(reserved.subtract(withdrawal.getAmount()));
         wallet.setBalance(wallet.getBalance().add(withdrawal.getAmount()));
-        userWalletRepository.save(wallet);
+        saveChangedWallet(wallet);
         createTransaction(wallet, withdrawal.getAmount(), WalletTransactionType.REFUND, withdrawal.getId(), WalletTransactionReferenceType.WITHDRAWAL);
+        return wallet;
+    }
+
+    private void assertAssignedStaffOrAdmin(WalletWithdrawal withdrawal, User actor) {
+        if (withdrawal.getAcceptedBy() != null
+                && !withdrawal.getAcceptedBy().getId().equals(actor.getId())
+                && !actor.hasRole("ADMIN")) {
+            throw new ConflictException("Yêu cầu rút tiền này đang được nhân viên khác tiếp nhận xử lý");
+        }
+    }
+
+    private void clearWithdrawalEvidence(WalletWithdrawal withdrawal) {
+        withdrawal.setEvidenceUrl(null);
+        withdrawal.setEvidenceStorageId(null);
+        withdrawal.setEvidenceContentType(null);
+        withdrawal.setEvidenceUploadedAt(null);
+        withdrawal.setEvidenceUploadedBy(null);
+    }
+
+    private static String formatEvidenceSizeLimit(long bytes) {
+        double mb = bytes / (1024.0 * 1024.0);
+        if (mb >= 1.0) {
+            if (Math.abs(mb - Math.rint(mb)) < 1e-6) {
+                return String.format(java.util.Locale.ROOT, "%.0f MB", mb);
+            }
+            return String.format(java.util.Locale.ROOT, "%.1f MB", mb);
+        }
+        long kb = Math.max(1L, Math.round(bytes / 1024.0));
+        return kb + " KB";
+    }
+
+    private String normalizeDisputeResolutionOutcome(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "RESOLVED_VALID_TRANSFER";
+        }
+        String upper = raw.trim().toUpperCase();
+        return switch (upper) {
+            case "RESOLVED_VALID_TRANSFER", "RESOLVED_RETRY_TRANSFER", "RESOLVED_REFUND_TO_WALLET" -> upper;
+            default -> throw new BadRequestException("Kết quả xử lý khiếu nại không hợp lệ: " + raw);
+        };
+    }
+
+    private String joinEvidenceUrls(java.util.List<String> urls) {
+        if (urls == null || urls.isEmpty()) {
+            return null;
+        }
+        java.util.List<String> cleaned = urls.stream()
+                .filter(u -> u != null && !u.isBlank())
+                .map(String::trim)
+                .filter(u -> u.startsWith("http://") || u.startsWith("https://") || u.startsWith("/"))
+                .distinct()
+                .limit(5)
+                .toList();
+        return cleaned.isEmpty() ? null : String.join("\n", cleaned);
+    }
+
+    private String firstNonBlank(String a, String b) {
+        if (a != null && !a.isBlank()) return a.trim();
+        if (b != null && !b.isBlank()) return b.trim();
+        return null;
+    }
+
+    private void notifyAssignedStaffForWithdrawal(WalletWithdrawal withdrawal, String title, String message) {
+        if (notificationService == null) {
+            return;
+        }
+        java.util.Set<UUID> staffIds = new java.util.LinkedHashSet<>();
+        if (withdrawal.getAcceptedBy() != null && withdrawal.getAcceptedBy().getId() != null) {
+            staffIds.add(withdrawal.getAcceptedBy().getId());
+        }
+        if (withdrawal.getTransferredBy() != null && withdrawal.getTransferredBy().getId() != null) {
+            staffIds.add(withdrawal.getTransferredBy().getId());
+        }
+        UUID ownerId = withdrawal.getUser() != null ? withdrawal.getUser().getId() : null;
+        for (UUID staffId : staffIds) {
+            if (!staffId.equals(ownerId)) {
+                notificationService.notifyInApp(staffId, title, message,
+                        NotificationType.WALLET, withdrawal.getId(), "WALLET_WITHDRAWAL", "/admin/withdrawals");
+            }
+        }
+    }
+
+    private WalletWithdrawalResponse enrichWithdrawalResponse(WalletWithdrawal withdrawal, UserWallet knownWallet) {
+        UserWallet wallet = knownWallet;
+        if (wallet == null && withdrawal != null && withdrawal.getUser() != null && withdrawal.getUser().getId() != null && userWalletRepository != null) {
+            wallet = userWalletRepository.findByUserId(withdrawal.getUser().getId()).orElse(null);
+        }
+        return walletMapper.toWithdrawalResponse(withdrawal, wallet);
     }
 
     private void requireStatus(WalletWithdrawal withdrawal, String expected) {
@@ -697,8 +1016,9 @@ public class WalletServiceImpl implements WalletService {
         if (walletWithdrawalRepository == null) {
             throw new IllegalStateException("WalletWithdrawalRepository is not available");
         }
+        UserWallet wallet = userWalletRepository != null ? userWalletRepository.findByUserId(userId).orElse(null) : null;
         return walletWithdrawalRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable)
-                .map(walletMapper::toWithdrawalResponse);
+                .map(w -> walletMapper.toWithdrawalResponse(w, wallet));
     }
 
     @Override
@@ -707,11 +1027,15 @@ public class WalletServiceImpl implements WalletService {
         if (walletWithdrawalRepository == null) {
             throw new IllegalStateException("WalletWithdrawalRepository is not available");
         }
-        if (status != null && !status.isBlank()) {
-            return walletWithdrawalRepository.findByStatusOrderByCreatedAtDesc(status.trim().toUpperCase(), pageable)
-                    .map(walletMapper::toWithdrawalResponse);
-        }
-        return walletWithdrawalRepository.findAllByOrderByCreatedAtDesc(pageable)
-                .map(walletMapper::toWithdrawalResponse);
+        Page<WalletWithdrawal> page = (status != null && !status.isBlank())
+                ? walletWithdrawalRepository.findByStatusOrderByCreatedAtDesc(status.trim().toUpperCase(), pageable)
+                : walletWithdrawalRepository.findAllByOrderByCreatedAtDesc(pageable);
+        java.util.Map<UUID, UserWallet> walletCache = new java.util.HashMap<>();
+        return page.map(w -> {
+            UUID uid = w.getUser() != null ? w.getUser().getId() : null;
+            UserWallet wallet = uid == null ? null : walletCache.computeIfAbsent(uid,
+                    id -> userWalletRepository != null ? userWalletRepository.findByUserId(id).orElse(null) : null);
+            return walletMapper.toWithdrawalResponse(w, wallet);
+        });
     }
 }

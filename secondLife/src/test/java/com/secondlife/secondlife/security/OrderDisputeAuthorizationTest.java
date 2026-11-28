@@ -56,7 +56,12 @@ class OrderDisputeAuthorizationTest {
     }
 
     @Test @WithMockUser(authorities = {"ROLE_STAFF", "STAFF_DISPUTE_REVIEW"})
-    void authorizedOperationalStaffCanBookReturn() {
+    void staffWhoCanApproveReturnsCannotBookOnTheBuyersBehalf() {
+        assertThrows(AccessDeniedException.class, () -> shipments.create(null, UUID.randomUUID(), returned()));
+    }
+
+    @Test @WithMockUser(roles = "BUYER")
+    void buyerCanSubmitApprovedReturnForOwnershipValidation() {
         assertDoesNotThrow(() -> shipments.create(null, UUID.randomUUID(), returned()));
     }
 

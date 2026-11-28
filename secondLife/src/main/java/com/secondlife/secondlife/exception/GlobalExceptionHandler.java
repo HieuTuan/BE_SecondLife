@@ -286,4 +286,9 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ErrorResponse.of("An unexpected internal error occurred. Please try again later.", request.getRequestURI()));
     }
+
+    @ExceptionHandler(InsufficientProductInformationException.class)
+    public ResponseEntity<ErrorResponse> handleMissingProductInformation(InsufficientProductInformationException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(ErrorResponse.of(ex.getMessage(), request.getRequestURI()));
+    }
 }

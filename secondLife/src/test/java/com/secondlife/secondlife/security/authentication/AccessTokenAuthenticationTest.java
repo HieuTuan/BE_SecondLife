@@ -98,7 +98,7 @@ class AccessTokenAuthenticationTest {
         currentDetails();
 
         assertNull(authenticateHttp(token));
-        assertNull(authenticateWebSocket(token));
+        assertThrows(AccessDeniedException.class, () -> authenticateWebSocket(token));
         assertPrivateSubscriptionDenied();
     }
 
@@ -112,7 +112,7 @@ class AccessTokenAuthenticationTest {
         currentDetails();
 
         assertNull(authenticateHttp(token));
-        assertNull(authenticateWebSocket(token));
+        assertThrows(AccessDeniedException.class, () -> authenticateWebSocket(token));
     }
 
     @Test
@@ -125,7 +125,7 @@ class AccessTokenAuthenticationTest {
         currentDetails();
 
         assertNull(authenticateHttp(token));
-        assertNull(authenticateWebSocket(token));
+        assertThrows(AccessDeniedException.class, () -> authenticateWebSocket(token));
     }
 
     @Test
@@ -137,7 +137,7 @@ class AccessTokenAuthenticationTest {
         doThrow(new UsernameNotFoundException("User not found")).when(users).loadSecurityState(user.getId());
 
         assertNull(authenticateHttp(token));
-        assertNull(authenticateWebSocket(token));
+        assertThrows(AccessDeniedException.class, () -> authenticateWebSocket(token));
     }
 
     @ParameterizedTest
@@ -148,7 +148,7 @@ class AccessTokenAuthenticationTest {
         currentDetails();
 
         assertNull(authenticateHttp(token));
-        assertNull(authenticateWebSocket(token));
+        assertThrows(AccessDeniedException.class, () -> authenticateWebSocket(token));
         assertPrivateSubscriptionDenied();
     }
 
@@ -162,7 +162,7 @@ class AccessTokenAuthenticationTest {
         };
 
         assertNull(authenticateHttp(token));
-        assertNull(authenticateWebSocket(token));
+        assertThrows(AccessDeniedException.class, () -> authenticateWebSocket(token));
         verifyNoInteractions(users);
     }
 
@@ -173,7 +173,7 @@ class AccessTokenAuthenticationTest {
         doThrow(new UsernameNotFoundException("User not found")).when(users).loadSecurityState(user.getId());
 
         assertNull(authenticateHttp(token));
-        assertNull(authenticateWebSocket(token));
+        assertThrows(AccessDeniedException.class, () -> authenticateWebSocket(token));
     }
 
     @Test
@@ -196,7 +196,7 @@ class AccessTokenAuthenticationTest {
         StompHeaderAccessor headers = StompHeaderAccessor.create(StompCommand.CONNECT);
         headers.setLeaveMutable(true);
         Message<byte[]> message = MessageBuilder.createMessage(new byte[0], headers.getMessageHeaders());
-        assertSame(message, webSocket.preSend(message, channel));
+        assertThrows(AccessDeniedException.class, () -> webSocket.preSend(message, channel));
         assertNull(headers.getUser());
         verifyNoInteractions(tokens, users);
         assertPrivateSubscriptionDenied();
@@ -230,7 +230,7 @@ class AccessTokenAuthenticationTest {
                 .when(users).loadSecurityState(user.getId());
 
         assertNull(authenticateHttp(token));
-        assertNull(authenticateWebSocket(token));
+        assertThrows(AccessDeniedException.class, () -> authenticateWebSocket(token));
     }
 
     @Test

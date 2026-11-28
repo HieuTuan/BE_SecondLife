@@ -364,6 +364,15 @@ public class OrderServiceImpl implements OrderService {
         if (order.getEscrowStatus() != EscrowStatus.HELD) {
             throw new BadRequestException("Escrow funds are not HELD. Cannot cancel and refund.");
         }
+        if (inspectionOrderRepository != null) {
+            var linkedInspection = inspectionOrderRepository.findByOrderId(orderId).orElse(null);
+            if (linkedInspection != null
+                    && linkedInspection.getOrderType() == com.secondlife.secondlife.enums.InspectionOrderType.AT_CENTER
+                    && linkedInspection.getFinalPaymentPaidAt() != null) {
+                throw new ConflictException(
+                        "Không thể hủy trực tiếp đơn kiểm định tại trung tâm đã xác nhận mua vì sản phẩm đang ở trung tâm kiểm định");
+            }
+        }
         var shipping=shipments.findByOrderIdOrderByCreatedAtAsc(orderId);
         if (shipping.stream().anyMatch(s -> !"CANCELLED".equals(s.getStatus())) || (order.getStatus()!=OrderStatus.PROCESSING && order.getStatus()!=OrderStatus.CONFIRMED))
             throw new ConflictException("Cancel the carrier shipment before cancelling the order; shipped/delivered goods require return review");

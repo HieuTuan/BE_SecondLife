@@ -5,10 +5,14 @@ import com.secondlife.secondlife.dto.request.*;
 import com.secondlife.secondlife.dto.response.AuthResponse;
 import com.secondlife.secondlife.dto.response.TokenResponse;
 import com.secondlife.secondlife.dto.response.UserSummaryResponse;
+import com.secondlife.secondlife.entity.PolicyVersion;
 import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.entity.UserProfile;
 import com.secondlife.secondlife.enums.AccountStatus;
+import com.secondlife.secondlife.enums.PolicyAcceptanceContext;
+import com.secondlife.secondlife.enums.PolicyAcceptanceSource;
+import com.secondlife.secondlife.enums.PolicyType;
 import com.secondlife.secondlife.enums.RoleCode;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
@@ -19,6 +23,7 @@ import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.AuthService;
 import com.secondlife.secondlife.service.GoogleAuthService;
 import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.service.PolicyService;
 import com.secondlife.secondlife.service.TokenService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,10 +57,18 @@ public class AuthServiceImpl implements AuthService {
     private final NotificationService notificationService;
     private final UserMapper userMapper;
     private final GoogleAuthService googleAuthService;
+    private final PolicyService policyService;
 
     @Override
     @Transactional
     public AuthResponse register(RegisterRequest request) {
+        PolicyVersion activePolicy = policyService.validateExplicitAcceptance(
+                request.acceptTerms(),
+                request.acceptedPolicyVersionId(),
+                PolicyType.TERMS_OF_SERVICE
+        );
+        PolicyAcceptanceSource source = PolicyAcceptanceSource.fromNullable(request.acceptanceSource());
+
         String normalizedEmail = request.email().trim().toLowerCase();
 
         if (userRepository.existsByEmailIgnoreCase(normalizedEmail)) {
@@ -75,6 +88,7 @@ public class AuthServiceImpl implements AuthService {
         user.addRole(buyerRole);
 
         User savedUser = userRepository.save(user);
+        policyService.recordAcceptance(savedUser, activePolicy, source, PolicyAcceptanceContext.REGISTER);
 
         // Create email verification OTP & send async/gracefully via NotificationService
         String verificationOtp = tokenService.createEmailVerificationOtp(savedUser);
@@ -99,6 +113,13 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public AuthResponse login(LoginRequest request) {
+        PolicyVersion activePolicy = policyService.validateExplicitAcceptance(
+                request.acceptTerms(),
+                request.acceptedPolicyVersionId(),
+                PolicyType.TERMS_OF_SERVICE
+        );
+        PolicyAcceptanceSource source = PolicyAcceptanceSource.fromNullable(request.acceptanceSource());
+
         String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
 
         // BCrypt's limit is measured in UTF-8 bytes, not Java character count.
@@ -123,6 +144,7 @@ public class AuthServiceImpl implements AuthService {
 
         user.setLastLoginAt(Instant.now());
         userRepository.save(user);
+        policyService.recordAcceptance(user, activePolicy, source, PolicyAcceptanceContext.LOGIN);
 
         TokenResponse tokenPair = tokenService.generateTokenPair(user);
         UserSummaryResponse summary = userMapper.toSummaryResponse(user);
@@ -204,10 +226,18 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public AuthResponse loginWithGoogle(GoogleLoginRequest request) {
+        PolicyVersion activePolicy = policyService.validateExplicitAcceptance(
+                request.acceptTerms(),
+                request.acceptedPolicyVersionId(),
+                PolicyType.TERMS_OF_SERVICE
+        );
+        PolicyAcceptanceSource source = PolicyAcceptanceSource.fromNullable(request.acceptanceSource());
+
         GoogleUserInfo googleUser = googleAuthService.verifyToken(request.idToken());
         String normalizedEmail = googleUser.email().trim().toLowerCase();
 
         User user = userRepository.findByEmailWithAuthoritiesIgnoreCase(normalizedEmail).orElse(null);
+        boolean isNewUser = (user == null);
 
         if (user == null) {
             // First time login with Google -> auto-register as BUYER
@@ -253,6 +283,12 @@ public class AuthServiceImpl implements AuthService {
 
         user.setLastLoginAt(Instant.now());
         User savedUser = userRepository.save(user);
+        policyService.recordAcceptance(
+                savedUser,
+                activePolicy,
+                source,
+                isNewUser ? PolicyAcceptanceContext.REGISTER : PolicyAcceptanceContext.GOOGLE_LOGIN
+        );
 
         TokenResponse tokenPair = tokenService.generateTokenPair(savedUser);
         UserSummaryResponse summary = userMapper.toSummaryResponse(savedUser);

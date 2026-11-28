@@ -19,6 +19,7 @@ import java.util.UUID;
 
 @Repository
 public interface DepositRequestRepository extends JpaRepository<DepositRequest, UUID> {
+    Optional<DepositRequest> findByIdAndUser_IdAndOrderIdIsNull(UUID id, UUID userId);
     Optional<DepositRequest> findByCode(String code);
     interface PaymentReference { UUID getId(); UUID getOrderId(); }
     @Query("select d.id as id,d.orderId as orderId from DepositRequest d where d.code=:code")

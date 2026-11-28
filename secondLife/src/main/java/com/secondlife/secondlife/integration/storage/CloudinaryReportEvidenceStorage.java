@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.integration.storage;
 import com.cloudinary.Cloudinary;
 import com.cloudinary.utils.ObjectUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
@@ -16,10 +17,16 @@ public class CloudinaryReportEvidenceStorage implements ReportEvidenceStorage {
     private final RestClient client;
     private final long maxBytes;
     private final int timeoutMs;
+    public CloudinaryReportEvidenceStorage(Cloudinary cloudinary, int timeoutMs, long maxBytes) {
+        this(cloudinary, timeoutMs, maxBytes, maxBytes);
+    }
+    @Autowired
     public CloudinaryReportEvidenceStorage(Cloudinary cloudinary,@Value("${app.reputation.storage-timeout-ms}") int timeoutMs,
-            @Value("${app.media.max-file-size-bytes}") long maxBytes) {
-        if(timeoutMs<=0 || maxBytes<=0 || maxBytes>=Integer.MAX_VALUE) throw new IllegalArgumentException("Invalid report evidence storage limits");
-        this.cloudinary=cloudinary; this.timeoutMs=timeoutMs; this.maxBytes=maxBytes;
+            @Value("${app.media.max-file-size-bytes}") long maxBytes,
+            @Value("${app.wallet.withdrawal.evidence.max-file-size-bytes:${app.media.max-file-size-bytes:10485760}}") long withdrawalEvidenceMaxBytes) {
+        long effectiveMaxBytes = Math.max(maxBytes, withdrawalEvidenceMaxBytes);
+        if(timeoutMs<=0 || effectiveMaxBytes<=0 || effectiveMaxBytes>=Integer.MAX_VALUE) throw new IllegalArgumentException("Invalid report evidence storage limits");
+        this.cloudinary=cloudinary; this.timeoutMs=timeoutMs; this.maxBytes=effectiveMaxBytes;
         var factory=new SimpleClientHttpRequestFactory(); factory.setConnectTimeout(timeoutMs); factory.setReadTimeout(timeoutMs);
         this.client=RestClient.builder().requestFactory(factory).build();
     }

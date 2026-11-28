@@ -195,19 +195,7 @@ public class ChatServiceImpl implements ChatService {
 
         ChatMessageDto dto = chatMapper.toMessage(message);
 
-        // Broadcast to both buyer and seller (so sender's other devices sync too)
-        System.out.println("[ChatWS] Broadcasting message to Room: " + room.getId() + ", Buyer: " + room.getBuyer().getId() + ", Seller: " + room.getSeller().getId());
-        
-        messagingTemplate.convertAndSendToUser(
-                room.getBuyer().getId().toString(),
-                "/queue/messages",
-                dto
-        );
-        messagingTemplate.convertAndSendToUser(
-                room.getSeller().getId().toString(),
-                "/queue/messages",
-                dto
-        );
+        publishMessage(room, dto);
 
         return dto;
     }
@@ -231,9 +219,14 @@ public class ChatServiceImpl implements ChatService {
 
         ChatMessageDto dto = chatMapper.toMessage(message);
 
-        // Broadcast to buyer and seller
-        messagingTemplate.convertAndSendToUser(room.getBuyer().getId().toString(), "/queue/messages", dto);
-        messagingTemplate.convertAndSendToUser(room.getSeller().getId().toString(), "/queue/messages", dto);
+        publishMessage(room, dto);
+    }
+
+    private void publishMessage(ChatRoom room, ChatMessageDto dto) {
+        for (UUID recipient : java.util.List.of(room.getBuyer().getId(), room.getSeller().getId())) {
+            AfterCommitDelivery.run(() -> messagingTemplate.convertAndSendToUser(
+                    recipient.toString(), "/queue/messages", dto));
+        }
     }
 
     private ChatRoomDto toDto(ChatRoom room) {

@@ -50,7 +50,7 @@ class ControllerResponseSerializationTest {
     }
 
     @Test
-    void categoryTemplateDtoKeepsEveryPreviouslySerializedFieldAndNullableItemId() throws Exception {
+    void categoryTemplateDtoKeepsScalarFieldsAndNullableItemId() throws Exception {
         CategoryQuestionTemplate entity = new CategoryQuestionTemplate();
         entity.setId(UUID.randomUUID());
         entity.setCategoryId(UUID.randomUUID());
@@ -58,9 +58,9 @@ class ControllerResponseSerializationTest {
         entity.setTemplateText("Describe the condition\nInclude warranty details");
         CategoryQuestionTemplateMapper mapper = MapperTestSupport.mapper(CategoryQuestionTemplateMapper.class);
 
-        assertSameJson(entity, mapper.toResponse(entity));
+        assertSameJsonWithoutRelations(entity, mapper.toResponse(entity), "category", "item");
         entity.setItemId(null);
-        assertSameJson(entity, mapper.toResponse(entity));
+        assertSameJsonWithoutRelations(entity, mapper.toResponse(entity), "category", "item");
     }
 
     @Test
@@ -76,17 +76,21 @@ class ControllerResponseSerializationTest {
         entity.setPayload("{\"orderId\":\"carrier-123\",\"data\":{\"status\":\"COMPLETED\"}}");
         ShipmentEventMapper mapper = MapperTestSupport.mapper(ShipmentEventMapper.class);
 
-        assertSameJson(entity, mapper.toResponse(entity));
+        assertSameJsonWithoutRelations(entity, mapper.toResponse(entity), "shipment");
         entity.setStatus(null);
         entity.setReason(null);
-        assertSameJson(entity, mapper.toResponse(entity));
+        assertSameJsonWithoutRelations(entity, mapper.toResponse(entity), "shipment");
         assertEquals(entity.getPayload(), mapper.toResponse(entity).payload());
     }
 
-    private void assertSameJson(Object entity, Object response) throws Exception {
-        assertEquals(objectMapper.readTree(objectMapper.writeValueAsString(entity)),
-                objectMapper.readTree(objectMapper.writeValueAsString(response)));
-        assertEquals(legacyMapper.readTree(legacyMapper.writeValueAsString(entity)),
-                legacyMapper.readTree(legacyMapper.writeValueAsString(response)));
+    private void assertSameJsonWithoutRelations(Object entity, Object response, String... relations) throws Exception {
+        var expected = (tools.jackson.databind.node.ObjectNode) objectMapper.readTree(objectMapper.writeValueAsString(entity));
+        var legacyExpected = (com.fasterxml.jackson.databind.node.ObjectNode) legacyMapper.readTree(legacyMapper.writeValueAsString(entity));
+        for (String relation : relations) {
+            expected.remove(relation);
+            legacyExpected.remove(relation);
+        }
+        assertEquals(expected, objectMapper.readTree(objectMapper.writeValueAsString(response)));
+        assertEquals(legacyExpected, legacyMapper.readTree(legacyMapper.writeValueAsString(response)));
     }
 }

@@ -266,6 +266,16 @@ class OrderBankTransferIntegrationTest {
         assertEquals(1,count("order_settlements","order_id",id(o)));
         money("50000",jdbc.queryForObject("SELECT platform_commission FROM order_settlements WHERE order_id=?",BigDecimal.class,id(o)));
     }
+    @Test void checkoutInvalidatesBuyerAndSellerOrderViewsAfterCommit() throws Exception {
+        var fixture = fixture();
+        UUID orderId = id(checkout(fixture, UUID.randomUUID()));
+        for (var owner : List.of(fixture.buyer(), fixture.seller())) {
+            verify(messages, atLeastOnce()).convertAndSendToUser(eq(owner.getId().toString()), eq("/queue/updates"),
+                    argThat((Object payload) -> payload instanceof com.secondlife.secondlife.service.impl.WalletRealtimeDelivery.Invalidation e
+                            && "ORDER_CHANGED".equals(e.eventType()) && orderId.equals(e.resourceId())));
+        }
+    }
+
     private Map<String,Object> payload(JsonNode o,long amount,long eventId) {
         var p=new HashMap<String,Object>();p.put("id",eventId);p.put("transferType","in");p.put("accountNumber","0000000000");
         p.put("code",o.path("payment").path("transferContent").asText());p.put("transferAmount",amount);return p;

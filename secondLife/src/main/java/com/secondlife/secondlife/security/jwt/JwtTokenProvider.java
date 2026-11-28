@@ -76,6 +76,10 @@ public class JwtTokenProvider {
         );
     }
 
+    public Instant verifiedExpiration(String token) {
+        return parser.parseSignedClaims(token).getPayload().getExpiration().toInstant();
+    }
+
     public long getAccessExpirationMs() {
         return accessExpirationMs;
     }

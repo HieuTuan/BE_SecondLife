@@ -22,6 +22,8 @@ public interface WalletWithdrawalRepository extends JpaRepository<WalletWithdraw
 
     Page<WalletWithdrawal> findByStatusOrderByCreatedAtDesc(String status, Pageable pageable);
 
+    long countByUserIdAndStatus(UUID userId, String status);
+
     Optional<WalletWithdrawal> findByUserIdAndIdempotencyKey(UUID userId, String idempotencyKey);
 
     Page<WalletWithdrawal> findByDisputeDeadlineBeforeAndStatus( java.time.Instant deadline, String status, Pageable pageable);

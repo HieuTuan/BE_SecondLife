@@ -103,6 +103,12 @@ class AiPriceVisionTest {
         verifyNoInteractions(text);
     }
 
+    @Test void insufficientInformationHasItsOwnRecoverableError() {
+        when(text.call(any(Prompt.class))).thenReturn(response("{\"error\":\"insufficient_product_information\"}"));
+        assertThrows(com.secondlife.secondlife.exception.InsufficientProductInformationException.class,
+                () -> provider.estimate("Thiết bị chưa rõ loại"));
+    }
+
     @Test void noSavedImagesPreservesLegacyTextValuation() {
         when(text.call(any(Prompt.class))).thenReturn(response(VALID));
         assertEquals("gemma4:31b-cloud", provider.estimate("product", List.of()).modelVersion());

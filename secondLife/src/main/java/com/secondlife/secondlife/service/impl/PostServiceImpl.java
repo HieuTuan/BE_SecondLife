@@ -39,6 +39,7 @@ import com.secondlife.secondlife.repository.ItemRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.AiChatService;
+import com.secondlife.secondlife.service.AiValuationService;
 import com.secondlife.secondlife.service.CategoryTemplateService;
 import com.secondlife.secondlife.service.CloudinaryService;
 import com.secondlife.secondlife.service.ListingAccessService;
@@ -49,13 +50,10 @@ import com.secondlife.secondlife.service.ListingPublicationService;
 import com.secondlife.secondlife.service.ListingReviewService;
 import com.secondlife.secondlife.service.PostService;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.criteria.Fetch;
 import jakarta.persistence.criteria.JoinType;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.Prompt;
+import com.secondlife.secondlife.integration.ai.ListingModeration;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -97,6 +95,7 @@ public class PostServiceImpl implements PostService {
     private final ListingCreditService listingCredits;
     private final ListingAccessService listingAccess;
     private final AiChatService aiChatService;
+    private final AiValuationService valuations;
     private final CategoryTemplateService categoryTemplateService;
     private final CategoryQuestionTemplateRepository templateRepository;
     private final AiChatSessionRepository sessionRepository;
@@ -137,7 +136,8 @@ public class PostServiceImpl implements PostService {
                            PostMapper postMapper,
                            PlatformTransactionManager transactions,
                            ImageUploadValidator imageValidator,
-                           ListingPhotoContentReview photoContentReview) {
+                           ListingPhotoContentReview photoContentReview, AiValuationService valuations) {
+        this.valuations = valuations;
         this.transactionTemplate = transactions != null ? new TransactionTemplate(transactions) : null;
         this.postMapper = postMapper;
         this.imageValidator = imageValidator;
@@ -607,7 +607,7 @@ public class PostServiceImpl implements PostService {
 
                     YÊU CẦU BẮT BUỘC:
                     - Độ dài tiêu đề: từ 35 đến 80 ký tự.
-                    - Chứa tên thiết bị, thương hiệu (nếu có), phân khúc/tính năng nổi bật và độ mới thực tế (ví dụ: Like New 99%%, Đẹp 95%%, Chính Hãng...).
+                    - Dùng tên thiết bị và các đặc điểm đã xác nhận. Bỏ qua thông tin thiếu. Không tự thêm phần trăm độ mới, xuất xứ hay bảo hành.
                     - CHỈ trả về đúng 01 dòng tiêu đề duy nhất. TUYỆT ĐỐI KHÔNG sử dụng emoji/icon, không có dấu ngoặc kép, không có lời chào hay giải thích gì thêm.
                     """,
                     categoryName, itemName, context != null ? context : "", description != null ? description : "");
@@ -708,7 +708,7 @@ public class PostServiceImpl implements PostService {
             return submitResponse(post);
         }
 
-        String scanResult = aiScanPost(post);
+        String scanResult = ListingModeration.review(googleChatGateway, post);
         if (scanResult.startsWith("REJECTED:")) {
             String reason = scanResult.substring("REJECTED:".length()).trim();
             post.setStatus("REJECTED");
@@ -762,51 +762,6 @@ public class PostServiceImpl implements PostService {
                         : "SELECT_INSPECTION_METHOD") : null);
     }
 
-    /**
-     * Gọi Google Gemini để scan bài đăng.
-     * Returns "APPROVED" hoặc "REJECTED:<reason>"
-     */
-    private String aiScanPost(Post post) {
-        String prompt = String.format("""
-                Bạn là hệ thống kiểm duyệt tự động cho sàn mua bán đồ cũ SecondLife.
-                Hãy đánh giá bài đăng sản phẩm sau có phù hợp để hiển thị trên sàn hay không:
-                Tiêu đề: %s
-                Mô tả: %s
-                Giá: %s VNĐ
-                TIÊU CHÍ KIỂM DUYỆT:
-                1. HỢP LỆ (APPROVED):
-                   - Sản phẩm là đồ dùng, gia dụng, thiết bị sinh hoạt cũ/đã qua sử dụng hợp pháp.
-                   - Mô tả rõ ràng (chấp nhận định dạng Markdown hoặc mô tả do AI hỗ trợ tạo).
-                   - Mức giá khả thi (không phải giá 0 VNĐ hoặc spam số ảo).
-                2. TỪ CHỐI (REJECTED):
-                   - Hàng cấm theo quy định (vũ khí, ma túy, chất kích thích, động vật quý hiếm, nội dung đồi trụy).
-                   - Dấu hiệu lừa đảo trắng trợn, spam vô nghĩa, lôi kéo giao dịch ngoài sàn.
-                   - Tiêu đề và mô tả hoàn toàn sai lệch hoặc không liên quan đến đồ dùng cần bán.
-                QUY TẮC BẮT BUỘC:
-                CHỈ trả về đúng một trong hai dạng sau trên một dòng duy nhất, không giải thích thêm:
-                APPROVED
-                hoặc
-                REJECTED:<lý do ngắn gọn bằng tiếng Việt>
-                """,
-                post.getTitle(), post.getDescription(), post.getPrice()
-        );
-
-        Prompt aiPrompt = new Prompt(new UserMessage(prompt));
-        String result;
-        try {
-            result = googleChatGateway.complete(aiPrompt);
-        } catch (Exception ex) {
-            throw new AiProviderException("AI moderation unavailable; no listing credit was consumed", ex);
-        }
-
-        if (result == null) throw new AiProviderException("AI moderation returned no result");
-        result = result.trim();
-
-        if (!"APPROVED".equals(result) && !(result.startsWith("REJECTED:") && result.substring(9).trim().length() > 0))
-            throw new AiProviderException("AI moderation returned an invalid result");
-
-        return result;
-    }
 
     @Override
     @Transactional
@@ -928,145 +883,8 @@ public class PostServiceImpl implements PostService {
 
     @Override
     public AiPriceEstimationResponse estimatePrice(UUID userId, UUID postId, String requestId) {
-        ValuationPromptContext promptContext = executeInTransaction(() -> {
-            Post post = postRepository.findById(postId)
-                    .orElseThrow(() -> new NotFoundException("Post not found"));
-            if (post.getUser() == null || !userId.equals(post.getUser().getId())) {
-                throw new ForbiddenException("This post belongs to another user");
-            }
-
-            listingAccess.requireDraft(post);
-
-            String valuationKey = "VALUATION:" + postId + ":" + UUID.randomUUID();
-            listingCredits.consume(userId, CreditType.VALUATION, valuationKey);
-
-            String itemName = post.getItemId() != null
-                    ? itemRepository.findById(post.getItemId()).map(Item::getName).orElse("Không xác định")
-                    : "Không xác định";
-
-            String description = post.getDescription() != null ? post.getDescription() : "Không có mô tả";
-            String priceContext = post.getAiSuggestedPrice() != null
-                    ? "Giá mà người bán đã đề xuất: " + post.getAiSuggestedPrice() + " VNĐ."
-                    : "";
-
-            StringBuilder chatContext = new StringBuilder();
-            UUID targetSessionId = null;
-            if (requestId != null && !requestId.trim().isEmpty()) {
-                try {
-                    targetSessionId = UUID.fromString(requestId.trim());
-                } catch (Exception ignored) {
-                }
-            }
-
-            if (targetSessionId == null && post.getAiChatSession() != null) {
-                targetSessionId = post.getAiChatSession().getId();
-            }
-
-            if (targetSessionId != null) {
-                List<AiChatMessage> messages =
-                        chatMessageRepository.findBySessionIdOrderBySentAtAsc(targetSessionId);
-
-                if (messages.isEmpty() && post.getAiChatSession() != null && !targetSessionId.equals(post.getAiChatSession().getId())) {
-                    targetSessionId = post.getAiChatSession().getId();
-                    messages = chatMessageRepository.findBySessionIdOrderBySentAtAsc(targetSessionId);
-                }
-
-                for (AiChatMessage msg : messages) {
-                    if ("USER".equals(msg.getRole()) && msg.getMessageContent() != null && !msg.getMessageContent().isBlank()) {
-                        String content = AiChatServiceImpl.sanitizePersistedMessageForContext("USER", msg.getMessageContent());
-                        if (!content.isBlank() && !content.startsWith("Danh mục người bán chọn:")) {
-                            chatContext.append("- ").append(content).append("\n");
-                        }
-                    }
-                }
-            }
-
-            String pricePrompt = String.format(
-                    """
-                    Bạn là chuyên gia thẩm định và định giá đồ gia dụng cũ tại thị trường Việt Nam.
-                    Nhiệm vụ của bạn là thẩm định sản phẩm dựa trên thông tin thực tế của sản phẩm và người bán để đưa ra khoảng giá thanh lý hợp lý nhất bằng VNĐ.
-
-                    THÔNG TIN SẢN PHẨM:
-                    - Loại sản phẩm: %s
-                    - Mô tả hiện tại: %s
-                    %s
-                    - Chi tiết người bán cung cấp thêm:
-                    %s
-
-                    QUY TẮC ĐỊNH GIÁ THỰC TẾ:
-                    1. Ước lượng giá mua mới của sản phẩm trên thị trường Việt Nam làm mốc chuẩn. Bỏ qua giá mua mới nếu người bán cung cấp mức giá phi thực tế.
-                    2. ĐÁNH GIÁ THEO HAO MÒN THỰC TẾ & TẦN SUẤT SỬ DỤNG (Ưu tiên ngoại quan, số lần dùng và tình trạng bảo hành/phụ kiện hơn là chỉ đếm thời gian mua):
-                       - Hàng lướt / Like New: Mới dùng vài lần, nguyên hộp/phụ kiện, đẹp 98-99%% (kể cả đã mua vài tháng đến 1 năm nhưng ít dùng): Giảm 15-25%% so với giá mới.
-                       - Hàng còn rất tốt / Dùng giữ gìn: Ngoại hình đẹp 90-95%%, không lỗi lầm, dùng ít hoặc mua 6 tháng - 1 năm tần suất sử dụng thấp: Giảm 25-35%% so với giá mới.
-                       - Hàng sử dụng thông thường: Dùng đều đặn 1-2 năm, có trầy xước nhẹ/hao mòn tự nhiên, hết bảo hành: Giảm 35-50%% so với giá mới.
-                       - Hàng đã dùng lâu / Đời cũ: Dùng trên 2-3 năm, có hao mòn rõ rệt hoặc lỗi thời: Giảm 50-65%% so với giá mới.
-                    3. Giá đề xuất (suggestedPrice) là giá thanh lý thực tế, dễ bán nhất trên thị trường đồ cũ Việt Nam. Tuyệt đối không định giá đồ cũ cao hơn hoặc bằng giá mới.
-                    4. Ràng buộc: fairPriceMin <= suggestedPrice <= fairPriceMax. Tất cả các giá đều là số nguyên dương VND (> 0).
-                    5. BẮT BUỘC chỉ trả về duy nhất định dạng JSON sau, không bọc markdown và không giải thích gì thêm:
-                    {"fairPriceMin": <số nguyên VND>, "fairPriceMax": <số nguyên VND>, "suggestedPrice": <số nguyên VND>, "expectedSellTime": "<ví dụ: 3-5 ngày>"}
-                    """,
-                    itemName, description, priceContext, chatContext.length() > 0 ? chatContext.toString() : "Không có thêm thông tin");
-            return new ValuationPromptContext(pricePrompt, valuationKey);
-        });
-
-        String aiResult;
-        try {
-            aiResult = googleChatGateway.complete(promptContext.pricePrompt());
-        } catch (RuntimeException ex) {
-            runInTransaction(() -> listingCredits.refund(
-                    userId, CreditType.VALUATION, promptContext.valuationKey() + ":REFUND"));
-            throw ex;
-        }
-
-        BigDecimal fairPriceMin = BigDecimal.ZERO;
-        BigDecimal fairPriceMax = BigDecimal.ZERO;
-        BigDecimal suggestedPrice = BigDecimal.ZERO;
-        String expectedSellTime = "3-5 ngày";
-
-        try {
-            String jsonStr = aiResult;
-            if (aiResult.contains("{") && aiResult.contains("}")) {
-                jsonStr = aiResult.substring(aiResult.indexOf("{"), aiResult.lastIndexOf("}") + 1);
-            }
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode node = mapper.readTree(jsonStr);
-            fairPriceMin = BigDecimal.valueOf(node.get("fairPriceMin").asLong());
-            fairPriceMax = BigDecimal.valueOf(node.get("fairPriceMax").asLong());
-            suggestedPrice = BigDecimal.valueOf(node.get("suggestedPrice").asLong());
-            if (node.has("expectedSellTime")) {
-                expectedSellTime = node.get("expectedSellTime").asText();
-            }
-        } catch (Exception e) {
-            Matcher m = Pattern.compile("[0-9]{5,}").matcher(aiResult != null ? aiResult.replaceAll("[.,]", "") : "");
-            List<Long> nums = new ArrayList<>();
-            while (m.find()) nums.add(Long.parseLong(m.group()));
-            if (nums.size() >= 3) {
-                fairPriceMin = BigDecimal.valueOf(nums.get(0));
-                fairPriceMax = BigDecimal.valueOf(nums.get(1));
-                suggestedPrice = BigDecimal.valueOf(nums.get(2));
-            }
-        }
-
-        final BigDecimal finalSuggestedPrice = suggestedPrice;
-        if (finalSuggestedPrice != null && finalSuggestedPrice.compareTo(BigDecimal.ZERO) > 0) {
-            runInTransaction(() -> {
-                Post post = postRepository.findById(postId).orElse(null);
-                if (post != null) {
-                    post.setAiSuggestedPrice(finalSuggestedPrice);
-                    postRepository.save(post);
-                }
-            });
-        }
-
-        return AiPriceEstimationResponse.builder()
-                .requestId(requestId)
-                .fairPriceMin(fairPriceMin)
-                .fairPriceMax(fairPriceMax)
-                .suggestedPrice(suggestedPrice)
-                .modelVersion("SecondLife-AI-v2.1")
-                .expectedSellTime(expectedSellTime)
-                .createdAt(Instant.now())
-                .build();
+        UUID key = requestId == null || requestId.isBlank() ? UUID.randomUUID() : UUID.fromString(requestId.trim());
+        return valuations.create(userId, postId, key);
     }
 
     @Override
@@ -1178,6 +996,4 @@ public class PostServiceImpl implements PostService {
     private record TitlePromptContext(String promptText, String fallbackTitle, String creditKey) {
     }
 
-    private record ValuationPromptContext(String pricePrompt, String valuationKey) {
-    }
 }

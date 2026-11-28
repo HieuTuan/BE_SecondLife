@@ -50,7 +50,7 @@ public class ShipmentController {
         return ApiResponse.success(quotes.saveParcel(actor(user),postId,body));
     }
     @PostMapping("/orders/{orderId}/shipments")
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("isAuthenticated() and (#body.leg() != 'BUYER_TO_SELLER' or hasRole('BUYER'))")
     public ApiResponse<ShipmentResponse> create(@AuthenticationPrincipal CustomUserDetails user,@PathVariable UUID orderId,@Valid @RequestBody CreateShipmentRequest body) {
         return ApiResponse.success(shipments.createForOrder(actor(user),staff(),orderId,body));
     }

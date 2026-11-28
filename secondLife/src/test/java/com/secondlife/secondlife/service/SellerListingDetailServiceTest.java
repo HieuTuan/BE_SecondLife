@@ -58,7 +58,7 @@ class SellerListingDetailServiceTest {
                 publication, reviews, mock(ListingImageSimilarity.class), mock(ListingFingerprint.class),
                 30, 10485760, 3, 6,
                 MapperTestSupport.mapper(PostMapper.class), null, mock(ImageUploadValidator.class),
-                mock(ListingPhotoContentReview.class));
+                mock(ListingPhotoContentReview.class), mock(AiValuationService.class));
     }
 
     @ParameterizedTest

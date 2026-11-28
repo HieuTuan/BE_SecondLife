@@ -291,18 +291,18 @@ class ShippingQuoteExplanationApiTest {
         centerShipment.setLeg("SELLER_TO_CENTER");
         centerShipment.setStatus("DELIVERED");
         centerShipment.setPayload(json.writeValueAsString(Map.of("to_name", "Center", "to_phone", "0912345678",
-                "to_address", "Da Nang center", "to_latitude", "16.0678", "to_longitude", "108.2208")));
+                "to_address", "Ho Chi Minh City center", "to_latitude", "10.7769", "to_longitude", "106.7009")));
         when(inspections.findFirstByPostIdAndStatusOrderByCreatedAtDesc(listing.getId(), "PASSED"))
                 .thenReturn(Optional.of(inspection));
         when(shipments.findByInspectionOrderIdOrderByCreatedAtAsc(inspection.getId())).thenReturn(List.of(centerShipment));
         catalogue();
         reject("ERR_OUT_OF_SERVICE_AREA");
-        quotation("LD_PICKUP_TRUCK", "1000000", "950", "km");
+        quotation("LD_PICKUP_TRUCK", "1000000", "12", "km");
         request().andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print()).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.leg").value("CENTER_TO_BUYER"))
-                .andExpect(jsonPath("$.data.vehicleSelection.pickupCity").value("Thành phố Đà Nẵng"))
+                .andExpect(jsonPath("$.data.vehicleSelection.pickupCity").value("Thành phố Hồ Chí Minh"))
                 .andExpect(jsonPath("$.data.vehicleSelection.deliveryCity").value("Thành phố Hồ Chí Minh"))
-                .andExpect(jsonPath("$.data.vehicleSelection.distanceKm").value(950))
+                .andExpect(jsonPath("$.data.vehicleSelection.distanceKm").value(12))
                 .andExpect(jsonPath("$.data.vehicleSelection.message").value(not(containsString("Hà Nội"))));
         carrier.verify();
     }
@@ -327,7 +327,7 @@ class ShippingQuoteExplanationApiTest {
         carrier.expect(requestTo(BASE + "/v3/cities")).andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(json.writeValueAsString(Map.of("data", List.of(
                         Map.of("locode", "VN HAN", "services", services),
-                        Map.of("locode", "VN DAD", "services", services)))), MediaType.APPLICATION_JSON));
+                        Map.of("locode", "VN SGN", "services", services)))), MediaType.APPLICATION_JSON));
     }
 
     private Map<String, Object> vehicle(String key, String maxKg) {

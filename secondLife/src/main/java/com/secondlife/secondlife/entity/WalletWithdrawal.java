@@ -110,6 +110,24 @@ public class WalletWithdrawal {
     @Column(name = "dispute_resolution", columnDefinition = "TEXT")
     private String disputeResolution;
 
+    @Column(name = "dispute_evidence_urls", columnDefinition = "TEXT")
+    private String disputeEvidenceUrls;
+
+    @Column(name = "dispute_resolution_outcome", length = 40)
+    private String disputeResolutionOutcome;
+
+    @Column(name = "dispute_resolution_evidence_url", columnDefinition = "TEXT")
+    private String disputeResolutionEvidenceUrl;
+
+    @Column(name = "exception_requested_at")
+    private Instant exceptionRequestedAt;
+
+    @Column(name = "exception_reason", columnDefinition = "TEXT")
+    private String exceptionReason;
+
+    @Column(name = "exception_evidence_urls", columnDefinition = "TEXT")
+    private String exceptionEvidenceUrls;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "reviewed_by")
     private User reviewedBy;
@@ -135,5 +153,10 @@ public class WalletWithdrawal {
         this.status = "PENDING";
         this.createdAt = Instant.now();
         this.updatedAt = Instant.now();
+    }
+
+    @org.springframework.data.domain.DomainEvents
+    ResourceChanged realtimeChange() {
+        return ResourceChanged.owned("WITHDRAWAL", id, user);
     }
 }

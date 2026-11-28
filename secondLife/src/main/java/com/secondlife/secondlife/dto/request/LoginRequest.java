@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Size;
 import tools.jackson.databind.annotation.JsonDeserialize;
 
 import java.util.Locale;
+import java.util.UUID;
 
 public record LoginRequest(
     @NotBlank(message = "Email is required")
@@ -22,11 +23,24 @@ public record LoginRequest(
     @JsonDeserialize(using = StrictStringDeserializer.class)
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     @Schema(accessMode = Schema.AccessMode.WRITE_ONLY)
-    String password
+    String password,
+
+    @Schema(description = "Explicit user confirmation of current Terms of Service & Operating Policy", example = "true")
+    Boolean acceptTerms,
+
+    @Schema(description = "ID of the active Terms of Service policy version accepted by the user")
+    UUID acceptedPolicyVersionId,
+
+    @Schema(description = "Client source: WEB, MOBILE_BUYER, MOBILE_SELLER, MOBILE_INSPECTOR, MOBILE, API", example = "WEB")
+    String acceptanceSource
 ) {
     public LoginRequest {
         email = email == null ? null : email.trim().toLowerCase(Locale.ROOT);
         // Passwords are compared exactly as supplied; never trim or normalize them.
+    }
+
+    public LoginRequest(String email, String password) {
+        this(email, password, null, null, null);
     }
 
     @Override

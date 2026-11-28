@@ -3,6 +3,7 @@ package com.secondlife.secondlife.service.impl;
 import com.secondlife.secondlife.entity.InspectionFeeSettlement;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Post;
+import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.Shipment;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.InspectionFeePayer;
@@ -88,6 +89,7 @@ class InspectionFeeSettlementServiceImplTest {
 
         manager = new User();
         manager.setId(UUID.randomUUID());
+        manager.addRole(new Role("INSPECTION_CENTER", "Inspection Center", null));
 
         inspector = new User();
         inspector.setId(UUID.randomUUID());

@@ -7,5 +7,6 @@ import java.util.UUID;
 
 public interface DepositService {
     DepositResponseDTO createDepositRequest(UUID userId, DepositCreateRequestDTO requestDTO);
+    DepositResponseDTO getDepositRequest(UUID userId, UUID requestId);
     void processSepayWebhook(SePayWebhookDTO webhookDTO);
 }

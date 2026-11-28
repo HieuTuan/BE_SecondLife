@@ -318,4 +318,28 @@ public class InspectionOrder {
     protected void onUpdate() {
         this.updatedAt = Instant.now();
     }
+
+    @jakarta.persistence.Transient
+    private final java.util.Set<UUID> removedInspectors = new java.util.HashSet<>();
+
+    public void setInspector(User next) {
+        if (inspector != null && inspector.getId() != null
+                && (next == null || !inspector.getId().equals(next.getId()))) {
+            removedInspectors.add(inspector.getId());
+        }
+        inspector = next;
+    }
+
+    @org.springframework.data.domain.DomainEvents
+    List<ResourceChanged> realtimeChanges() {
+        var current = ResourceChanged.owned("INSPECTION", id, buyer, seller, inspector, inspectionCenter);
+        var removed = removedInspectors.stream().filter(owner -> !current.owners().contains(owner)).toList();
+        return removed.isEmpty() ? List.of(current)
+                : List.of(current, new ResourceChanged("INSPECTION", null, removed));
+    }
+
+    @org.springframework.data.domain.AfterDomainEventPublication
+    void clearRemovedInspectors() {
+        removedInspectors.clear();
+    }
 }

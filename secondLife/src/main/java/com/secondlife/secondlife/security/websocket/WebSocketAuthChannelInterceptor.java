@@ -18,10 +18,23 @@ import org.springframework.stereotype.Component;
 @Component
 public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
 
+    private static final java.util.Set<String> PERSONAL_QUEUES = java.util.Set.of(
+            "/user/queue/notifications", "/user/queue/messages",
+            "/user/queue/wallet", "/user/queue/wallet-updates", "/user/queue/updates");
+
     private final AccessTokenAuthenticator authenticator;
 
     public WebSocketAuthChannelInterceptor(AccessTokenAuthenticator authenticator) {
         this.authenticator = authenticator;
+    }
+
+    private SocketExpiry expiry;
+    private com.secondlife.secondlife.security.jwt.JwtTokenProvider jwt;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void configureExpiry(SocketExpiry expiry, com.secondlife.secondlife.security.jwt.JwtTokenProvider jwt) {
+        this.expiry = expiry;
+        this.jwt = jwt;
     }
 
     @Override
@@ -35,13 +48,11 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
             authenticateConnect(accessor);
         } else if (StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
             String destination = accessor.getDestination();
-            if (destination != null
-                    && (destination.startsWith("/user/") || destination.startsWith("/queue/")
-                    || destination.contains("notifications"))
-                    && accessor.getUser() == null) {
-                log.warn("Chặn truy cập trái phép: Người dùng chưa xác thực cố gắng subscribe vào {}", destination);
-                throw new AccessDeniedException("Cần đăng nhập để đăng ký nhận thông báo từ " + destination);
+            if (accessor.getUser() == null || destination == null || !PERSONAL_QUEUES.contains(destination)) {
+                throw new AccessDeniedException("Subscription is not permitted");
             }
+        } else if (StompCommand.SEND.equals(accessor.getCommand())) {
+            throw new AccessDeniedException("Client messages must use the REST API");
         }
         return message;
     }
@@ -49,17 +60,18 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
     private void authenticateConnect(StompHeaderAccessor accessor) {
         String bearerToken = accessor.getFirstNativeHeader(HttpHeaders.AUTHORIZATION);
         if (bearerToken == null || !bearerToken.startsWith("Bearer ")) {
-            return;
+            throw new AccessDeniedException("Authentication required");
         }
         try {
             CustomUserDetails userDetails = authenticator.authenticate(bearerToken.substring(7));
+            if (expiry != null) expiry.expireAt(accessor.getSessionId(), jwt.verifiedExpiration(bearerToken.substring(7)));
             // The UUID principal name routes convertAndSendToUser messages to this session.
             accessor.setUser(new UsernamePasswordAuthenticationToken(
                     userDetails.getId().toString(), null, userDetails.getAuthorities()
             ));
         } catch (Exception ex) {
             accessor.setUser(null);
-            log.warn("WebSocket authentication failed ({})", ex.getClass().getSimpleName());
+            throw new AccessDeniedException("Invalid WebSocket credentials");
         }
     }
 }

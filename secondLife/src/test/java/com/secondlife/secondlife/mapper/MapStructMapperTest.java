@@ -30,7 +30,7 @@ class MapStructMapperTest {
     }
 
     @Test
-    void postProjectionKeepsSellerAddressAndCopiesImages() {
+    void postProjectionUsesListingPickupAddressAndCopiesImages() {
         User user = user("seller@example.test");
         UserProfile profile = new UserProfile();
         profile.setFullName("Seller");
@@ -41,12 +41,13 @@ class MapStructMapperTest {
         user.setProfile(profile);
         Post post = new Post();
         post.setUser(user);
+        post.setSellerPickupAddress("45 Warehouse Street, City");
         post.getImages().add(new PostImage("first.jpg", "fingerprint"));
         var mapper = context.getBean(PostMapper.class);
 
         var response = mapper.toResponse(post);
         assertEquals(user.getId(), response.user().id());
-        assertEquals("12 Main Street, Ward 1, City", response.user().address());
+        assertEquals("45 Warehouse Street, City", response.user().address());
         assertEquals("first.jpg", response.imageUrls().getFirst());
         post.getImages().clear();
         assertEquals("first.jpg", response.imageUrls().getFirst());

@@ -87,7 +87,7 @@ class ListingImageValidationTest {
                 new ListingFingerprintImpl(), 30,
                 10485760, 3, 6, mock(PostMapper.class), null,
                 new ImageUploadValidator(600, 16000, 25000000, 2560),
-                photoReview);
+                photoReview, mock(AiValuationService.class));
         when(photoVision.complete(any(Prompt.class))).thenReturn("""
                 {"images":[{"number":1,"status":"RELATED"},{"number":2,"status":"RELATED"},{"number":3,"status":"RELATED"}]}
                 """);

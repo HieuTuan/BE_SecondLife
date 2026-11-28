@@ -23,8 +23,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.util.HashMap;
@@ -72,6 +70,13 @@ public class NotificationServiceImpl implements NotificationService {
         return createNotification(userId, title, message, type, referenceId, referenceType, actionUrl, false);
     }
 
+    private void invalidateInbox(UUID userId) {
+        var event = new WalletRealtimeDelivery.Invalidation(UUID.randomUUID(), 1,
+                "NOTIFICATIONS_CHANGED", "NOTIFICATIONS", null, Instant.now());
+        AfterCommitDelivery.run(() -> messagingTemplate.convertAndSendToUser(
+                userId.toString(), "/queue/updates", event));
+    }
+
     private NotificationResponseDTO createNotification(UUID userId, String title, String message, String type, UUID referenceId, String referenceType, String actionUrl, boolean dispatchExternalChannels) {
         if (userId == null) {
             log.warn("Cannot create notification: userId is null");
@@ -100,7 +105,7 @@ public class NotificationServiceImpl implements NotificationService {
         NotificationResponseDTO dto = notificationMapper.toResponse(notification);
 
         // A rollback must not publish a notification for money or penalty changes that never committed.
-        afterCommit(() -> {
+        AfterCommitDelivery.run(() -> {
             try {
                 messagingTemplate.convertAndSendToUser(userId.toString(), "/queue/notifications", dto);
                 log.debug("Dispatched realtime notification [{}] to user {}", type, userId);
@@ -111,7 +116,7 @@ public class NotificationServiceImpl implements NotificationService {
 
         // Dispatch to push notification channels (FCM)
         if (dispatchExternalChannels && channels != null && !channels.isEmpty()) {
-            afterCommit(() -> {
+            AfterCommitDelivery.run(() -> {
                 NotificationType parsedType = NotificationType.SYSTEM;
                 try {
                     if (type != null) parsedType = NotificationType.valueOf(type.trim().toUpperCase());
@@ -173,7 +178,7 @@ public class NotificationServiceImpl implements NotificationService {
         NotificationResponseDTO dto = notify(user.getId(), title, message, type, referenceId, referenceType, actionUrl);
 
         // Send high-priority financial/legal/certificate email asynchronously or protected with try-catch
-        afterCommit(() -> criticalMailer.send(user, emailSubject != null ? emailSubject : title, type,
+        AfterCommitDelivery.run(() -> criticalMailer.send(user, emailSubject != null ? emailSubject : title, type,
                 emailBody != null ? emailBody : message, actionUrl));
 
         return dto;
@@ -220,6 +225,7 @@ public class NotificationServiceImpl implements NotificationService {
             notification.setRead(true);
             notification.setReadAt(Instant.now());
             notification = notificationRepository.save(notification);
+            invalidateInbox(userId);
         }
 
         return notificationMapper.toResponse(notification);
@@ -229,6 +235,7 @@ public class NotificationServiceImpl implements NotificationService {
     @Transactional
     public NotificationActionResponseDTO markAllAsRead(UUID userId) {
         int updatedCount = notificationRepository.markAllAsRead(userId, Instant.now());
+        if (updatedCount > 0) invalidateInbox(userId);
         return NotificationActionResponseDTO.builder()
                 .success(true)
                 .affectedCount(updatedCount)
@@ -244,12 +251,14 @@ public class NotificationServiceImpl implements NotificationService {
 
         notification.setDeleted(true);
         notificationRepository.save(notification);
+        invalidateInbox(userId);
     }
 
     @Override
     @Transactional
     public NotificationActionResponseDTO clearReadNotifications(UUID userId) {
         int count = notificationRepository.softDeleteAllReadByUserId(userId);
+        if (count > 0) invalidateInbox(userId);
         return NotificationActionResponseDTO.builder()
                 .success(true)
                 .affectedCount(count)
@@ -261,25 +270,12 @@ public class NotificationServiceImpl implements NotificationService {
     @Transactional
     public NotificationActionResponseDTO clearAllNotifications(UUID userId) {
         int count = notificationRepository.softDeleteAllByUserId(userId);
+        if (count > 0) invalidateInbox(userId);
         return NotificationActionResponseDTO.builder()
                 .success(true)
                 .affectedCount(count)
                 .message("Đã dọn sạch toàn bộ thông báo.")
                 .build();
-    }
-
-    private void afterCommit(Runnable delivery) {
-        Runnable safe=()-> {
-            try { delivery.run(); }
-            catch(RuntimeException error) { log.warn("Notification delivery failed after commit ({})",error.getClass().getSimpleName()); }
-        };
-        if(TransactionSynchronizationManager.isActualTransactionActive()
-                && TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(
-                new TransactionSynchronization() {
-                    @Override public void afterCommit() { safe.run(); }
-                });
-        } else safe.run();
     }
 
     // =========================================================================

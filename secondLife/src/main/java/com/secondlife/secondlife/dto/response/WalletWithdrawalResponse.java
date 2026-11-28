@@ -4,9 +4,10 @@ import lombok.Builder;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
-@Builder
+@Builder(toBuilder = true)
 public record WalletWithdrawalResponse(
     UUID id,
     UUID userId,
@@ -35,6 +36,15 @@ public record WalletWithdrawalResponse(
     String disputeType,
     String disputeDescription,
     String disputeResolution,
-    String ownerRole
+    String ownerRole,
+    Instant serverTime,
+    Long remainingDisputeSeconds,
+    List<String> disputeEvidenceUrls,
+    String disputeResolutionOutcome,
+    String disputeResolutionEvidenceUrl,
+    Instant exceptionRequestedAt,
+    String exceptionReason,
+    List<String> exceptionEvidenceUrls,
+    String walletStatus
 ) {
 }

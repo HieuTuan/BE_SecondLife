@@ -2,17 +2,23 @@ package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.dto.response.TokenResponse;
 import com.secondlife.secondlife.entity.Permission;
+import com.secondlife.secondlife.entity.PolicyVersion;
 import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.entity.UserProfile;
 import com.secondlife.secondlife.enums.AccountStatus;
+import com.secondlife.secondlife.enums.PolicyType;
+import com.secondlife.secondlife.enums.PolicyVersionStatus;
+import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.GlobalExceptionHandler;
+import com.secondlife.secondlife.exception.InvalidRequestFieldException;
 import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetailsService;
 import com.secondlife.secondlife.service.GoogleAuthService;
 import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.service.PolicyService;
 import com.secondlife.secondlife.service.TokenService;
 import com.secondlife.secondlife.service.impl.AuthServiceImpl;
 import org.junit.jupiter.api.AfterEach;
@@ -71,12 +77,14 @@ class SecureLoginApiTest {
     private static final String EMAIL = "be02.user@example.com";
     private static final String PASSWORD = "Unique-BE02-ApiPassword#2026";
     private static final UUID USER_ID = UUID.fromString("fd6dbdb9-4624-48f2-98fa-6f4b987a2e36");
+    private static final UUID ACTIVE_POLICY_ID = UUID.fromString("11111111-2222-3333-4444-555555555555");
 
     @Mock private UserRepository userRepository;
     @Mock private RoleRepository roleRepository;
     @Mock private TokenService tokenService;
     @Mock private NotificationService notificationService;
     @Mock private GoogleAuthService googleAuthService;
+    @Mock private PolicyService policyService;
 
     private final JsonMapper json = JsonMapper.builder().build();
     private BCryptPasswordEncoder passwordEncoder;
@@ -85,12 +93,27 @@ class SecureLoginApiTest {
 
     @BeforeEach
     void setUp() {
+        PolicyVersion activePolicy = new PolicyVersion();
+        activePolicy.setId(ACTIVE_POLICY_ID);
+        activePolicy.setPolicyType(PolicyType.TERMS_OF_SERVICE);
+        activePolicy.setVersion("1.0.0");
+        activePolicy.setStatus(PolicyVersionStatus.ACTIVE);
+        org.mockito.Mockito.lenient()
+                .when(policyService.validateExplicitAcceptance(Boolean.TRUE, ACTIVE_POLICY_ID, PolicyType.TERMS_OF_SERVICE))
+                .thenReturn(activePolicy);
+        org.mockito.Mockito.lenient()
+                .when(policyService.validateExplicitAcceptance(org.mockito.ArgumentMatchers.argThat(b -> !Boolean.TRUE.equals(b)), any(), org.mockito.ArgumentMatchers.eq(PolicyType.TERMS_OF_SERVICE)))
+                .thenThrow(new InvalidRequestFieldException("acceptTerms", "Must accept terms"));
+        org.mockito.Mockito.lenient()
+                .when(policyService.validateExplicitAcceptance(Boolean.TRUE, null, PolicyType.TERMS_OF_SERVICE))
+                .thenThrow(new InvalidRequestFieldException("acceptedPolicyVersionId", "Policy version is required"));
+
         passwordEncoder = new BCryptPasswordEncoder();
         DaoAuthenticationProvider provider = new DaoAuthenticationProvider(new CustomUserDetailsService(userRepository));
         provider.setPasswordEncoder(passwordEncoder);
         AuthServiceImpl authService = new AuthServiceImpl(
                 userRepository, roleRepository, passwordEncoder, new ProviderManager(provider), tokenService,
-                notificationService, MapperTestSupport.mapper(UserMapper.class), googleAuthService);
+                notificationService, MapperTestSupport.mapper(UserMapper.class), googleAuthService, policyService);
 
         validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
@@ -276,10 +299,49 @@ class SecureLoginApiTest {
         verifyNoInteractions(userRepository, roleRepository, tokenService, notificationService, googleAuthService);
     }
 
+    @Test
+    void directApiLoginWithoutAcceptTermsIsRejectedWith400() throws Exception {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("email", EMAIL);
+        body.put("password", PASSWORD);
+        body.put("acceptTerms", false);
+        body.put("acceptedPolicyVersionId", ACTIVE_POLICY_ID.toString());
+
+        mockMvc.perform(post(LOGIN_PATH).contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(body)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[*].field").value(hasItem("acceptTerms")));
+
+        verifyNoInteractions(userRepository, roleRepository, tokenService, notificationService, googleAuthService);
+    }
+
+    @Test
+    void directApiLoginWithOutdatedPolicyVersionReturns409Conflict() throws Exception {
+        UUID staleId = UUID.randomUUID();
+        when(policyService.validateExplicitAcceptance(Boolean.TRUE, staleId, PolicyType.TERMS_OF_SERVICE))
+                .thenThrow(new ConflictException("Policy updated to version 2.0.0"));
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("email", EMAIL);
+        body.put("password", PASSWORD);
+        body.put("acceptTerms", true);
+        body.put("acceptedPolicyVersionId", staleId.toString());
+
+        mockMvc.perform(post(LOGIN_PATH).contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(body)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(userRepository, roleRepository, tokenService, notificationService, googleAuthService);
+    }
+
     private ResultActions login(Object email, Object password) throws Exception {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("email", email);
         body.put("password", password);
+        body.put("acceptTerms", true);
+        body.put("acceptedPolicyVersionId", ACTIVE_POLICY_ID.toString());
+        body.put("acceptanceSource", "WEB");
         return mockMvc.perform(post(LOGIN_PATH).contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(body)));
     }

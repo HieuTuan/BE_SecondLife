@@ -485,8 +485,8 @@ class InspectionServiceImplWorkflowTest {
     }
 
     @Test
-    @DisplayName("WP-2: Pre-listing inspection FAILED -> Bài đăng chuyển REJECTED và thiết lập hạn khiếu nại 24h")
-    void testPreListingInspectionFailedRejectsPostAndSetsAppealWindow() {
+    @DisplayName("WP-2: Pre-listing inspection FAILED -> Bài đăng chuyển REJECTED và quyết toán phí")
+    void testPreListingInspectionFailedRejectsPostAndSettlesFees() {
         order.setInspectionScope(InspectionScope.PRE_LISTING);
         order.setSellerPaidAt(Instant.now());
         order.setBuyerPaidAt(Instant.now());
@@ -522,9 +522,10 @@ class InspectionServiceImplWorkflowTest {
         assertEquals(List.of(proofPhoto()), order.getEvidencePhotoUrls());
         assertNull(order.getTamperSealId());
         assertNull(order.getBarcode());
-        assertNotNull(order.getAppealDeadline());
+        assertNull(order.getAppealDeadline());
         assertEquals(InspectionAppealStatus.NONE, order.getAppealStatus());
         assertFalse(order.isReputationPenaltyApplied());
+        verify(feeSettlementService).settle(order, InspectionSettlementOutcome.FAILED_INSPECTION, resultReq.note());
         verify(postRepository, times(1)).save(post);
     }
 
@@ -1042,5 +1043,31 @@ class InspectionServiceImplWorkflowTest {
                 any(),
                 anyBoolean()
         );
+    }
+
+    @Test
+    @DisplayName("Final Purchase: từ chối paymentMethod=BANK_TRANSFER để tránh trừ ví và tạo đơn thiếu DepositRequest")
+    void testConfirmFinalPurchaseRejectsNonWalletPaymentMethod() {
+        order.setStatus("PASSED");
+        order.setFinalPaymentDeadline(Instant.now().plus(3, ChronoUnit.HOURS));
+        order.setFinalPaymentPaidAt(null);
+        order.setOrder(null);
+        order.setFinalItemPrice(new BigDecimal("2000000"));
+        UUID quoteId = UUID.randomUUID();
+
+        when(inspectionOrderRepository.findPostId(order.getId())).thenReturn(Optional.of(post.getId()));
+        when(postRepository.findByIdForUpdate(post.getId())).thenReturn(Optional.of(post));
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+
+        var request = new com.secondlife.secondlife.dto.request.ConfirmInspectionPurchaseRequest(
+                UUID.randomUUID(),
+                quoteId,
+                com.secondlife.secondlife.enums.OrderPaymentMethod.BANK_TRANSFER,
+                null
+        );
+
+        assertThrows(BadRequestException.class, () -> service.confirmFinalPurchase(buyer.getId(), order.getId(), request));
+        verify(orderRepository, never()).saveAndFlush(any());
+        verify(paidOrderService, never()).complete(any(), anyBoolean());
     }
 }

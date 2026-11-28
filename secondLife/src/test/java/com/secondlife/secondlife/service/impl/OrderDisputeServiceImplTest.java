@@ -209,7 +209,11 @@ class OrderDisputeServiceImplTest {
         assertEquals(now, report.getRefundedAt()); assertEquals(actor, report.getRefundedBy());
         assertEquals(order.getFinalPrice(), report.getRefundAmount());
         verify(reputation).confirmSellerFault(any(), eq(actor), any());
-        verify(notifications, times(2)).notifyInApp(any(), anyString(), anyString(), any(NotificationType.class), any(), anyString(), anyString());
+        verify(notifications).notifyInApp(eq(report.getReporterId()), anyString(), anyString(),
+                eq(NotificationType.REPORT), eq(report.getId()), eq("REPORT"), eq("/reports/" + report.getId()));
+        verify(notifications).notifyInApp(eq(report.getSellerId()), anyString(), anyString(),
+                eq(NotificationType.REPORT), eq(report.getId()), eq("REPORT"), isNull());
+        verifyNoMoreInteractions(notifications);
     }
 
     private Resolve approval() {

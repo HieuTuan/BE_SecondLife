@@ -9,13 +9,19 @@ import com.secondlife.secondlife.dto.response.GoogleUserInfo;
 import com.secondlife.secondlife.dto.response.AuthResponse;
 import com.secondlife.secondlife.dto.response.TokenResponse;
 import com.secondlife.secondlife.dto.response.UserSummaryResponse;
+import com.secondlife.secondlife.entity.PolicyVersion;
 import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.AccountStatus;
+import com.secondlife.secondlife.enums.PolicyAcceptanceContext;
+import com.secondlife.secondlife.enums.PolicyAcceptanceSource;
+import com.secondlife.secondlife.enums.PolicyType;
+import com.secondlife.secondlife.enums.PolicyVersionStatus;
 import com.secondlife.secondlife.enums.RoleCode;
 import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.ForbiddenException;
+import com.secondlife.secondlife.exception.InvalidRequestFieldException;
 import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.RoleRepository;
 import com.secondlife.secondlife.repository.UserRepository;
@@ -68,12 +74,16 @@ class AuthServiceTest {
     @Mock
     private GoogleAuthService googleAuthService;
 
+    @Mock
+    private PolicyService policyService;
+
     @InjectMocks
     private AuthServiceImpl authService;
 
     private Role buyerRole;
     private User user;
     private UUID userId;
+    private PolicyVersion activePolicy;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -83,6 +93,15 @@ class AuthServiceTest {
         Field idField = User.class.getDeclaredField("id");
         idField.setAccessible(true);
         idField.set(user, userId);
+
+        activePolicy = new PolicyVersion();
+        activePolicy.setId(UUID.randomUUID());
+        activePolicy.setPolicyType(PolicyType.TERMS_OF_SERVICE);
+        activePolicy.setVersion("1.0.0");
+        activePolicy.setStatus(PolicyVersionStatus.ACTIVE);
+
+        lenient().when(policyService.validateExplicitAcceptance(any(), any(), eq(PolicyType.TERMS_OF_SERVICE)))
+                .thenReturn(activePolicy);
     }
 
     @Test
@@ -296,5 +315,42 @@ class AuthServiceTest {
         when(userRepository.findByEmailWithAuthoritiesIgnoreCase("buyer@example.com")).thenReturn(Optional.of(user));
 
         assertThrows(ForbiddenException.class, () -> authService.loginWithGoogle(request));
+        verify(policyService, never()).recordAcceptance(any(), any(), any(), any());
+    }
+
+    @Test
+    void register_WhenPolicyNotAccepted_ShouldThrowAndNeverCreateUser() {
+        RegisterRequest request = new RegisterRequest("new@example.com", "Pass@1234", "John Doe", "0912345678", null, false, activePolicy.getId(), "WEB");
+        when(policyService.validateExplicitAcceptance(false, activePolicy.getId(), PolicyType.TERMS_OF_SERVICE))
+                .thenThrow(new InvalidRequestFieldException("acceptTerms", "Must accept terms"));
+
+        assertThrows(InvalidRequestFieldException.class, () -> authService.register(request));
+        verify(userRepository, never()).save(any());
+        verify(policyService, never()).recordAcceptance(any(), any(), any(), any());
+    }
+
+    @Test
+    void login_WhenCredentialsFail_ShouldNotRecordPolicyAcceptance() {
+        LoginRequest request = new LoginRequest("buyer@example.com", "WrongPass@123", true, activePolicy.getId(), "WEB");
+        when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class)))
+                .thenThrow(new BadCredentialsException("Bad credentials"));
+
+        assertThrows(BadCredentialsException.class, () -> authService.login(request));
+        verify(policyService, never()).recordAcceptance(any(), any(), any(), any());
+    }
+
+    @Test
+    void login_WhenValid_ShouldRecordAcceptanceWithSourceAndContext() {
+        LoginRequest request = new LoginRequest("buyer@example.com", "Pass@1234", true, activePolicy.getId(), "MOBILE_BUYER");
+        when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class))).thenReturn(null);
+        when(userRepository.findByEmailWithAuthoritiesIgnoreCase("buyer@example.com")).thenReturn(Optional.of(user));
+        when(tokenService.generateTokenPair(user)).thenReturn(new TokenResponse("access-jwt", "refresh-raw", 900000L));
+        when(userMapper.toSummaryResponse(user)).thenReturn(new UserSummaryResponse(userId, "buyer@example.com", "Buyer Name", null, null, AccountStatus.ACTIVE, true));
+        when(userMapper.extractRoleCodes(user)).thenReturn(Set.of("BUYER"));
+        when(userMapper.extractPermissionCodes(user)).thenReturn(Set.of("PROFILE_READ_SELF"));
+
+        authService.login(request);
+
+        verify(policyService).recordAcceptance(user, activePolicy, PolicyAcceptanceSource.MOBILE_BUYER, PolicyAcceptanceContext.LOGIN);
     }
 }

@@ -83,8 +83,7 @@ import com.secondlife.secondlife.service.TamperSealService;
 import com.secondlife.secondlife.service.WalletService;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.Prompt;
+import com.secondlife.secondlife.integration.ai.ListingModeration;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -426,7 +425,7 @@ public class InspectionServiceImpl implements InspectionService {
                         NotificationType.INSPECTION,
                         order.getId(),
                         "INSPECTION_ORDER",
-                        "/buyer/inspections/" + order.getId());
+                        "/buyer/inspections/" + order.getId() + "/decision");
             }
             return inspectionOrderMapper.toResponse(saved);
         }
@@ -1119,6 +1118,10 @@ public class InspectionServiceImpl implements InspectionService {
         OrderPaymentMethod paymentMethod = (request != null && request.paymentMethod() != null)
                 ? request.paymentMethod()
                 : OrderPaymentMethod.WALLET;
+        if (paymentMethod != OrderPaymentMethod.WALLET) {
+            throw new BadRequestException(
+                    "Thanh toán mua hàng sau kiểm định hiện chỉ hỗ trợ Ví SecondLife (WALLET)");
+        }
 
         Order newOrder = new Order();
         newOrder.setPost(post);
@@ -1684,7 +1687,7 @@ public class InspectionServiceImpl implements InspectionService {
                     notificationService.notifyWithEmail(
                             order.getSeller().getId(),
                             "[Biên bản] Kết quả kiểm định KHÔNG ĐẠT - " + title,
-                            "Sản phẩm \"" + title + "\" KHÔNG ĐẠT chuẩn kiểm định. Bạn có 24 giờ để gửi khiếu nại trước khi hệ thống trừ điểm uy tín.",
+                            "Sản phẩm \"" + title + "\" KHÔNG ĐẠT chuẩn kiểm định. Vui lòng xem kết quả trong chi tiết đơn kiểm định.",
                             NotificationType.INSPECTION,
                             order.getId(),
                             "INSPECTION_ORDER",
@@ -1700,7 +1703,7 @@ public class InspectionServiceImpl implements InspectionService {
             if (order.getInspectionScope() == InspectionScope.PRE_LISTING) {
                 feeSettlementService.settle(order, InspectionSettlementOutcome.PRE_LISTING_PASSED, request.note());
                 if ("PENDING_INSPECTION".equals(post.getStatus()) || "PENDING_APPROVAL".equals(post.getStatus())) {
-                    String scanResult = aiScanPost(post);
+                    String scanResult = ListingModeration.review(googleChatGateway, post);
                     if ("APPROVED".equals(scanResult)) {
                         if (order.getOrderType() == InspectionOrderType.AT_CENTER) {
                             post.setStatus("PENDING_INSPECTION");
@@ -2039,47 +2042,6 @@ public class InspectionServiceImpl implements InspectionService {
         }
     }
 
-    private String aiScanPost(Post post) {
-        String prompt = String.format("""
-                Bạn là hệ thống kiểm duyệt tự động cho sàn mua bán đồ cũ SecondLife.
-                Hãy đánh giá bài đăng sản phẩm sau có phù hợp để hiển thị trên sàn hay không:
-                Tiêu đề: %s
-                Mô tả: %s
-                Giá: %s VNĐ
-
-                TIÊU CHÍ KIỂM DUYỆT:
-                1. HỢP LỆ (APPROVED):
-                   - Sản phẩm là đồ dùng, gia dụng, thiết bị sinh hoạt cũ/đã qua sử dụng hợp pháp.
-                   - Mô tả rõ ràng (chấp nhận định dạng Markdown hoặc mô tả do AI hỗ trợ tạo).
-                   - Mức giá khả thi (không phải giá 0 VNĐ hoặc spam số ảo).
-                2. TỪ CHỐI (REJECTED):
-                   - Hàng cấm theo quy định (vũ khí, ma túy, chất kích thích, động vật quý hiếm, nội dung đồi trụy).
-                   - Dấu hiệu lừa đảo trắng trợn, spam vô nghĩa, lôi kéo giao dịch ngoài sàn.
-                   - Tiêu đề và mô tả hoàn toàn sai lệch hoặc không liên quan đến đồ dùng cần bán.
-
-                QUY TẮC BẮT BUỘC:
-                CHỈ trả về đúng một trong hai dạng sau trên một dòng duy nhất, không giải thích thêm:
-                APPROVED
-                hoặc
-                REJECTED:<lý do ngắn gọn bằng tiếng Việt>
-                """,
-                post.getTitle(), post.getDescription(), post.getPrice());
-
-        Prompt aiPrompt = new Prompt(new UserMessage(prompt));
-        String result;
-        try {
-            result = googleChatGateway.complete(aiPrompt);
-        } catch (Exception ex) {
-            throw new AiProviderException("AI moderation unavailable; no listing credit was consumed", ex);
-        }
-        if (result == null)
-            throw new AiProviderException("AI moderation returned no result");
-        result = result.trim();
-        if (!"APPROVED".equals(result) && !(result.startsWith("REJECTED:") && !result.substring(9).trim().isEmpty())) {
-            throw new AiProviderException("AI moderation returned an invalid result");
-        }
-        return result;
-    }
 
     @Override
     @Transactional(readOnly = true)

@@ -1,14 +1,18 @@
 package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.dto.response.TokenResponse;
+import com.secondlife.secondlife.entity.PolicyVersion;
 import com.secondlife.secondlife.entity.Role;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.AccountStatus;
+import com.secondlife.secondlife.enums.PolicyType;
+import com.secondlife.secondlife.enums.PolicyVersionStatus;
 import com.secondlife.secondlife.exception.GlobalExceptionHandler;
 import com.secondlife.secondlife.mapper.UserMapper;
 import com.secondlife.secondlife.repository.*;
 import com.secondlife.secondlife.service.GoogleAuthService;
 import com.secondlife.secondlife.service.NotificationService;
+import com.secondlife.secondlife.service.PolicyService;
 import com.secondlife.secondlife.service.TokenService;
 import com.secondlife.secondlife.service.UserService;
 import com.secondlife.secondlife.service.impl.AuthServiceImpl;
@@ -33,24 +37,32 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class RegistrationGenderApiTest {
+    private static final UUID POLICY_ID = UUID.fromString("11111111-2222-3333-4444-555555555555");
     private final UserRepository users=mock(UserRepository.class);
     private final RoleRepository roles=mock(RoleRepository.class);
     private final TokenService tokens=mock(TokenService.class);
     private final NotificationService notifications=mock(NotificationService.class);
+    private final PolicyService policies=mock(PolicyService.class);
     private final UserMapper mapper=MapperTestSupport.mapper(UserMapper.class);
     private MockMvc mvc;
     private User saved;
     @BeforeEach void setup() {
+        PolicyVersion active = new PolicyVersion();
+        active.setId(POLICY_ID);
+        active.setPolicyType(PolicyType.TERMS_OF_SERVICE);
+        active.setVersion("1.0.0");
+        active.setStatus(PolicyVersionStatus.ACTIVE);
+        when(policies.validateExplicitAcceptance(Boolean.TRUE, POLICY_ID, PolicyType.TERMS_OF_SERVICE)).thenReturn(active);
         when(roles.findByCodeWithPermissions("BUYER")).thenReturn(Optional.of(new Role("BUYER","Buyer","Buyer")));
         when(users.save(any())).thenAnswer(i -> { saved=i.getArgument(0); saved.setId(UUID.randomUUID()); return saved; });
         when(tokens.createEmailVerificationOtp(any())).thenReturn("123456");
         when(tokens.generateTokenPair(any())).thenReturn(new TokenResponse("access","refresh",1800000));
-        var service=new AuthServiceImpl(users,roles,new BCryptPasswordEncoder(),mock(AuthenticationManager.class),tokens,notifications,mapper,mock(GoogleAuthService.class));
+        var service=new AuthServiceImpl(users,roles,new BCryptPasswordEncoder(),mock(AuthenticationManager.class),tokens,notifications,mapper,mock(GoogleAuthService.class),policies);
         mvc=MockMvcBuilders.standaloneSetup(new AuthController(service,mock(UserService.class),mock(com.secondlife.secondlife.security.CurrentUserProvider.class)))
                 .setControllerAdvice(new GlobalExceptionHandler()).build();
     }
     private String request(String genderField) {
-        return "{\"email\":\"gender@example.test\",\"password\":\"Password@123\",\"fullName\":\"Nguyễn Test\",\"phone\":\"0912345678\""+genderField+"}";
+        return "{\"email\":\"gender@example.test\",\"password\":\"Password@123\",\"fullName\":\"Nguyễn Test\",\"phone\":\"0912345678\",\"acceptTerms\":true,\"acceptedPolicyVersionId\":\""+POLICY_ID+"\""+genderField+"}";
     }
     @ParameterizedTest @ValueSource(strings={"MALE","FEMALE","OTHER"})
     void selectedGenderIsSavedAndReturnedWithTheRegistration(String gender) throws Exception {

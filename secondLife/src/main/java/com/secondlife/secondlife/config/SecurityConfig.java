@@ -68,6 +68,9 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/webhooks/sepay").permitAll()
                         .requestMatchers(HttpMethod.POST,"/api/v1/shipping/lalamove/callback").permitAll()
                         .requestMatchers(HttpMethod.GET,
+                                "/api/v1/policies/current",
+                                "/api/v1/policies/versions",
+                                "/api/v1/policies/versions/*",
                                 "/api/v1/posts",
                                 "/api/v1/posts/*",
                                 "/api/v1/sellers/*/reputation",
@@ -78,6 +81,7 @@ public class SecurityConfig {
                         ).permitAll()
                         .requestMatchers("/api/v1/inspection/quote").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/inspection/seal/*", "/api/v1/inspections/seal/*").permitAll()
+                        .requestMatchers("/api/v1/wallets/withdrawals/mobile-upload/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         // Administrative role assignment is also guarded at the filter boundary.
                         .requestMatchers("/api/v1/admin/permissions", "/api/v1/admin/permissions/**",
