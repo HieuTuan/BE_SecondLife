@@ -197,7 +197,9 @@ class AdminTopupPackageIntegrationTest {
         UUID userId = fundedUser();
         UUID packageId = admin.createPackage(request("Concurrent", "59000", 2, 10, 2)).id();
         var body = buyRequest(packageId);
+        var revenueBefore = jdbc.queryForObject("SELECT revenue_balance FROM system_wallets WHERE id = 'MAIN'", BigDecimal.class);
         var start = new CountDownLatch(1);
+        UUID receiptId;
         try (var executor = Executors.newFixedThreadPool(4)) {
             var tasks = IntStream.range(0, 4).mapToObj(i ->
                     executor.submit(() -> { start.await(); return purchases.purchase(userId, packageId, body); })).toList();
@@ -205,8 +207,15 @@ class AdminTopupPackageIntegrationTest {
             var ids = new HashSet<UUID>();
             for (var task : tasks) ids.add(task.get(30, TimeUnit.SECONDS).id());
             assertEquals(1, ids.size());
+            receiptId = ids.iterator().next();
         }
         assertEquals(0, wallets.getWalletByUserId(userId).getBalance().compareTo(new BigDecimal("941000")));
+        assertEquals(new BigDecimal("59000.00"), jdbc.queryForObject("""
+                SELECT revenue_delta FROM system_wallet_statement
+                WHERE topup_package_purchase_id = ? AND fund_category = 'PACKAGE_REVENUE'
+                """, BigDecimal.class, receiptId));
+        assertEquals(revenueBefore.add(new BigDecimal("59000.00")),
+                jdbc.queryForObject("SELECT revenue_balance FROM system_wallets WHERE id = 'MAIN'", BigDecimal.class));
         assertEquals(2, credits.getUserCredit(userId).postCredits());
         assertEquals(1, purchases.getMyPurchases(userId, 0, 20).totalElements());
         var changed = new TopupPackagePurchaseRequest(body.requestId(), body.packageVersion(), new BigDecimal("58000"));

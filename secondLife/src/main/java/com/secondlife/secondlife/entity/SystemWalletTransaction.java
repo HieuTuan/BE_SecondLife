@@ -33,6 +33,7 @@ public class SystemWalletTransaction {
     private Long id;
     private UUID orderId;
     private UUID inspectionOrderId;
+    private UUID topupPackagePurchaseId;
     @Column(length = 32)
     private String inspectionEntry;
     @Column(nullable = false, precision = 18, scale = 2)

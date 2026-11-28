@@ -43,4 +43,11 @@ public interface ShipmentRepository extends JpaRepository<Shipment,UUID>, Refres
     @Query(value = "SELECT EXISTS(SELECT 1 FROM shipments WHERE order_id=:orderId AND leg='BUYER_TO_SELLER')", nativeQuery = true)
     boolean hasReturnShipment(@Param("orderId") UUID orderId);
 
+    @Query("""
+            select count(s) > 0 from Shipment s
+            where s.sellerId = :sellerId
+              and s.status not in ('DELIVERED', 'COMPLETED', 'CANCELLED', 'CANCELED', 'FAILED', 'REJECTED', 'EXPIRED')
+            """)
+    boolean hasInFlightSellerShipment(@Param("sellerId") UUID sellerId);
+
 }

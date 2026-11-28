@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service("listingPublicationService")
@@ -110,6 +111,23 @@ public class ListingPublicationServiceImpl implements ListingPublicationService 
         if ("PENDING_INSPECTION".equals(post.getStatus())) {
             markReadyToPublish(post);
         }
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void restoreAfterInspectionReturn(UUID inspectionId) {
+        InspectionOrder inspection = inspections.findByIdForUpdate(inspectionId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn kiểm định"));
+        if (inspection.getPost() == null) {
+            return;
+        }
+        Post post = posts.findByIdForUpdate(inspection.getPost().getId())
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy bài đăng"));
+        if (!Set.of("RETURNING", "RESERVED").contains(post.getStatus())) {
+            return;
+        }
+        post.setStatus(ListingPublicationService.resolveRestoredStatusForNegotiation(inspection, Instant.now()));
+        posts.save(post);
     }
 
     @Transactional(propagation = Propagation.MANDATORY)

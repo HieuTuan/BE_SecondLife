@@ -35,11 +35,17 @@ public record EkycResult(
     }
 
     public static EkycResult fail(ReasonCode reasonCode, String providerName, String providerRef) {
-        return fail(reasonCode, providerName, providerRef, null, null, null);
+        return fail(reasonCode, providerName, providerRef, null, null, null, null);
     }
 
     public static EkycResult fail(ReasonCode reasonCode, String providerName, String providerRef,
                                   Double faceMatchScore, Double livenessScore, Double docScore) {
+        return fail(reasonCode, providerName, providerRef, faceMatchScore, livenessScore, docScore, null);
+    }
+
+    public static EkycResult fail(ReasonCode reasonCode, String providerName, String providerRef,
+                                  Double faceMatchScore, Double livenessScore, Double docScore,
+                                  String userMessage) {
         return new EkycResult(
                 EkycStatus.FAILED,
                 reasonCode,
@@ -52,11 +58,23 @@ public record EkycResult(
                 docScore,
                 providerName,
                 providerRef,
-                reasonCode != null ? reasonCode.getDescription() : "eKYC thất bại"
+                userMessage != null && !userMessage.isBlank()
+                        ? userMessage
+                        : (reasonCode != null ? reasonCode.getDescription() : "eKYC thất bại")
         );
     }
 
     public static EkycResult uncertain(ReasonCode reasonCode, String providerName, String providerRef, Double faceMatchScore, Double livenessScore, Double docScore) {
+        return uncertain(reasonCode, providerName, providerRef, faceMatchScore, livenessScore, docScore, null);
+    }
+
+    public static EkycResult uncertain(ReasonCode reasonCode, String providerName, String providerRef, String userMessage) {
+        return uncertain(reasonCode, providerName, providerRef, null, null, null, userMessage);
+    }
+
+    public static EkycResult uncertain(ReasonCode reasonCode, String providerName, String providerRef,
+                                         Double faceMatchScore, Double livenessScore, Double docScore,
+                                         String userMessage) {
         return new EkycResult(
                 EkycStatus.UNCERTAIN,
                 reasonCode,
@@ -69,7 +87,9 @@ public record EkycResult(
                 docScore,
                 providerName,
                 providerRef,
-                reasonCode != null ? reasonCode.getDescription() : "eKYC chưa xác định"
+                userMessage != null && !userMessage.isBlank()
+                        ? userMessage
+                        : (reasonCode != null ? reasonCode.getDescription() : "eKYC chưa xác định")
         );
     }
 

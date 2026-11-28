@@ -195,6 +195,42 @@ class OrderDisputeIntegrationTest {
                 new BigDecimal("0.05"), BigDecimal.ZERO, null, true, "Configure integration fixture"));
     }
 
+    @Test void walletBalanceDetailsReconcileHeldProductAndNetShipping() throws Exception {
+        var firstPage = org.springframework.data.domain.PageRequest.of(0, 1);
+        var heldFund = com.secondlife.secondlife.dto.response.SystemWalletBalanceDetails.Fund.PRODUCT_ESCROW;
+        var shippingFund = com.secondlife.secondlife.dto.response.SystemWalletBalanceDetails.Fund.SHIPPING;
+        var heldBefore = systemWallet.getBalanceDetails(heldFund, firstPage);
+        var shippingBefore = systemWallet.getBalanceDetails(shippingFund, firstPage);
+        var kept = deliveredOrder(NOW.minusSeconds(60));
+        var refunded = deliveredOrder(NOW.minusSeconds(60));
+        new TransactionTemplate(transactions).executeWithoutResult(status ->
+                systemWallet.refund(refunded.order(), PRICE.add(FEE)));
+
+        String path = "/api/v1/admin/system-wallet/balance-details";
+        mvc.perform(get(path).param("fund", "PRODUCT_ESCROW").param("size", "100")
+                        .header("Authorization", bearer(reviewer)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.balance").value(heldBefore.balance().add(PRICE).doubleValue()))
+                .andExpect(jsonPath("$.data.recordsTotal").value(heldBefore.recordsTotal().add(PRICE).doubleValue()))
+                .andExpect(jsonPath("$.data.entries.totalElements").value(heldBefore.entries().totalElements() + 1))
+                .andExpect(jsonPath("$.data.entries.items[*].orderId", org.hamcrest.Matchers.hasItem(kept.order().getId().toString())))
+                .andExpect(jsonPath("$.data.entries.items[*].orderId",
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem(refunded.order().getId().toString()))));
+
+        mvc.perform(get(path).param("fund", "SHIPPING").param("size", "1")
+                        .header("Authorization", bearer(reviewer)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.balance").value(shippingBefore.balance().add(FEE).doubleValue()))
+                .andExpect(jsonPath("$.data.recordsTotal").value(shippingBefore.recordsTotal().add(FEE).doubleValue()))
+                .andExpect(jsonPath("$.data.credited").value(shippingBefore.credited().add(FEE.multiply(BigDecimal.TWO)).doubleValue()))
+                .andExpect(jsonPath("$.data.debited").value(shippingBefore.debited().add(FEE).doubleValue()))
+                .andExpect(jsonPath("$.data.entries.totalElements").value(shippingBefore.entries().totalElements() + 2))
+                .andExpect(jsonPath("$.data.entries.items[0].orderId").value(refunded.order().getId().toString()))
+                .andExpect(jsonPath("$.data.entries.items[0].amount").value(0));
+        mvc.perform(get(path).param("fund", "SHIPPING").header("Authorization", bearer(kept.buyer())))
+                .andExpect(status().isForbidden());
+    }
+
     @Test void buyerMustAttachEvidenceBeforeOpeningAnOrderDispute() throws Exception {
         Fixture fixture = deliveredOrder(NOW.minusSeconds(60));
         var missingEvidence = new ReportRequests.Create(UUID.randomUUID(), null, fixture.order().getId(),

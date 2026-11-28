@@ -102,6 +102,25 @@ class SellerOnboardingServiceTest {
         verify(shipping).savePickup(userId,canonical);
     }
 
+    @Test void verifiedSellerCanMoveWarehouseWithoutChangingShopVerification() {
+        var seller = new User();
+        seller.addRole(new com.secondlife.secondlife.entity.Role("SELLER", "Seller", "Seller"));
+        when(users.findByIdForRoleUpdate(userId)).thenReturn(Optional.of(seller));
+        var verifiedAt = Instant.now();
+        row.setEmailVerifiedAt(verifiedAt);
+        var request = new SellerPickupAddressRequest(address.name(), address.phone(),
+                new BigDecimal("10.7801"), new BigDecimal("106.7019"));
+        var moved = new ShippingAddress(request.name(), request.phone(), "Kho mới tại TP.HCM",
+                request.latitude(), request.longitude());
+        when(pickupAddresses.resolve(request)).thenReturn(moved);
+
+        var result = service.save(userId, new SellerOnboardingRequest(row.getShopName(), request, row.getEmail(), row.getPhone()));
+
+        assertEquals(verifiedAt, row.getEmailVerifiedAt());
+        assertEquals(moved.address(), result.pickupAddress().address());
+        verify(shipping).savePickup(userId, moved);
+    }
+
     @Test void savesNormalizedInformationAndInvalidatesConfirmationWhenChanged() {
         row.setEmailVerifiedAt(Instant.now());
         row.setEmailOtpHash(passwords.encode("123456"));
@@ -242,6 +261,33 @@ class SellerOnboardingServiceTest {
         service.save(userId, new SellerOnboardingRequest("Changed shop", pickupRequest, row.getEmail(), row.getPhone()));
         assertThrows(BadRequestException.class, () -> service.verifyEmailCode(userId, "123456"));
         verifyNoInteractions(shipping);
+    }
+
+    @Test void verifiedAccountEmailSkipsRedundantOnboardingOtp() {
+        User verifiedUser = new User();
+        verifiedUser.setEmail("tuannhse182788@fpt.edu.vn");
+        verifiedUser.setEmailVerified(true);
+        when(users.findByIdForRoleUpdate(userId)).thenReturn(Optional.of(verifiedUser));
+
+        var result = service.save(userId, new SellerOnboardingRequest("Gian Hang A", pickupRequest, "tuannhse182788@fpt.edu.vn", "+84976404178"));
+
+        assertTrue(result.emailVerified());
+        assertTrue(result.canStartEkyc());
+        assertEquals("EKYC", result.nextStep());
+        assertDoesNotThrow(() -> service.requireCompleted(userId));
+        assertThrows(ConflictException.class, () -> service.sendEmailCode(userId));
+        verifyNoInteractions(mailer);
+    }
+
+    @Test void changingShopNameOrPhoneKeepsAlreadyVerifiedSameEmail() {
+        var verifiedAt = Instant.now().minusSeconds(60);
+        row.setEmailVerifiedAt(verifiedAt);
+
+        var result = service.save(userId, new SellerOnboardingRequest("Ten Moi Hon", pickupRequest, row.getEmail(), "0912345678"));
+
+        assertTrue(result.emailVerified());
+        assertEquals(verifiedAt, row.getEmailVerifiedAt());
+        assertTrue(result.canStartEkyc());
     }
 
     private void pendingCode() {

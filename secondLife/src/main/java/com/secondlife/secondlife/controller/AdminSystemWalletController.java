@@ -2,6 +2,7 @@ package com.secondlife.secondlife.controller;
 
 import com.secondlife.secondlife.common.ApiResponse;
 import com.secondlife.secondlife.common.PageResponse;
+import com.secondlife.secondlife.dto.response.SystemWalletBalanceDetails;
 import com.secondlife.secondlife.dto.response.SystemWalletResponse;
 import com.secondlife.secondlife.dto.response.SystemWalletTransactionResponse;
 import com.secondlife.secondlife.enums.SystemWalletFundCategory;
@@ -32,6 +33,13 @@ public class AdminSystemWalletController {
     @GetMapping
     @Operation(summary = "Read product escrow, collected shipping, paid Hub fees and earned commission")
     public ApiResponse<SystemWalletResponse> get() { return ApiResponse.success(wallets.getWallet()); }
+
+    @GetMapping("/balance-details")
+    @Operation(summary = "Reconcile the current product escrow or shipping balance by order")
+    public ApiResponse<SystemWalletBalanceDetails> balanceDetails(
+            @RequestParam SystemWalletBalanceDetails.Fund fund, @ParameterObject Pageable pageable) {
+        return ApiResponse.success(wallets.getBalanceDetails(fund, pageable));
+    }
 
     @GetMapping("/transactions")
     @Operation(summary = "Read immutable order fund movements with optional filters")

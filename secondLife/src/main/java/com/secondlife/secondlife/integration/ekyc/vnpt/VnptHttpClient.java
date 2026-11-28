@@ -17,8 +17,10 @@ import org.springframework.web.client.RestTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-import java.util.Map;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
 import java.net.SocketTimeoutException;
 
 @Slf4j
@@ -74,19 +76,13 @@ public class VnptHttpClient {
                     } else if (root == null) {
                         status = 502;
                     }
-                    String providerCode = root != null ? findProviderCode(root, 0) : null;
-                    if (providerCode == null && root != null) {
-                        providerCode = safeCode(root.path("message").asText(null));
-                    }
-                    if (providerCode == null || "UNAVAILABLE".equals(providerCode)) {
-                        String logId = root != null ? root.path("logID").asText("") : "";
-                        providerCode = logId.contains("Zuulserver") ? "ZUUL_GATEWAY_REJECTED" : "REJECTED_BY_PROVIDER";
-                    }
+                    String providerCode = root != null ? extractProviderCode(root, "REJECTED_BY_PROVIDER") : "REJECTED_BY_PROVIDER";
                     String errorDetail = root != null ? providerErrorSummary(root) : "empty body";
                     log.warn("VNPT request rejected: endpoint={}, status={}, durationMs={}, code={}, detail={}",
                             path, status, (System.nanoTime() - started) / 1_000_000,
                             providerCode, errorDetail);
-                    throw new VnptApiException("VNPT returned an unsuccessful response", status, path, providerCode);
+                    throw new VnptApiException("VNPT returned an unsuccessful response", status, path,
+                            providerCode, extractReadableDetail(root));
                 }
                 log.info("VNPT request completed: endpoint={}, status=200, durationMs={}",
                         path, (System.nanoTime() - started) / 1_000_000);
@@ -103,17 +99,22 @@ public class VnptHttpClient {
                     throw new VnptAuthenticationException(status, path, "UNAUTHORIZED");
                 }
                 if (status == 403) throw new VnptAuthenticationException(status, path, "FORBIDDEN");
-                throw new VnptApiException("VNPT request failed", status, path, providerCode);
+                throw new VnptApiException("VNPT request failed", status, path,
+                        providerCode, extractReadableDetail(ex));
             } catch (ResourceAccessException ex) {
                 log.warn("VNPT connection failed: endpoint={}, durationMs={}",
                         path, (System.nanoTime() - started) / 1_000_000);
                 int status = isTimeout(ex) ? 504 : 503;
+                String timeoutDetail = status == 504
+                        ? "Kết nối tới cổng VNPT quá thời gian phản hồi"
+                        : "Không thể kết nối tới cổng VNPT";
                 throw new VnptApiException("VNPT connection failed", status, path,
-                        status == 504 ? "TIMEOUT" : "CONNECTION_FAILED");
+                        status == 504 ? "TIMEOUT" : "CONNECTION_FAILED", timeoutDetail);
             } catch (VnptApiException ex) {
                 throw ex;
             } catch (RuntimeException ex) {
-                throw new VnptApiException("Malformed VNPT response", 502, path, "MALFORMED_RESPONSE");
+                throw new VnptApiException("Malformed VNPT response", 502, path, "MALFORMED_RESPONSE",
+                        "Phản hồi từ VNPT không đúng định dạng JSON");
             }
         }
         throw new VnptAuthenticationException(401, path, "UNAUTHORIZED");
@@ -122,11 +123,25 @@ public class VnptHttpClient {
     private String providerCode(RestClientResponseException ex) {
         try {
             JsonNode root = objectMapper.readTree(ex.getResponseBodyAsString());
-            String code = findProviderCode(root, 0);
-            return code != null ? code : "UNAVAILABLE";
+            return extractProviderCode(root, "UNAVAILABLE");
         } catch (RuntimeException ignored) {
             return "UNAVAILABLE";
         }
+    }
+
+    private String extractProviderCode(JsonNode root, String fallbackCode) {
+        if (root == null) {
+            return fallbackCode;
+        }
+        String code = findProviderCode(root, 0);
+        if (code == null) {
+            code = safeCode(root.path("message").asText(null));
+        }
+        if (code == null || "UNAVAILABLE".equals(code)) {
+            String logId = root.path("logID").asText("");
+            return logId.contains("Zuulserver") ? "ZUUL_GATEWAY_REJECTED" : fallbackCode;
+        }
+        return code;
     }
 
     private String providerErrorSummary(RestClientResponseException ex) {
@@ -144,6 +159,73 @@ public class VnptHttpClient {
             String excerpt = plainText.isEmpty() ? "empty" : plainText.substring(0, Math.min(180, plainText.length()));
             return "non-JSON response; contentType=" + contentType
                     + "; bodyLength=" + responseBody.length() + "; excerpt=" + excerpt;
+        }
+    }
+
+    private String extractReadableDetail(RestClientResponseException ex) {
+        String responseBody = ex.getResponseBodyAsString();
+        try {
+            return extractReadableDetail(objectMapper.readTree(responseBody));
+        } catch (RuntimeException ignored) {
+            String plainText = sanitizeDetail(responseBody.replaceAll("<[^>]*>", " "));
+            return plainText.isEmpty() ? null : plainText.substring(0, Math.min(180, plainText.length()));
+        }
+    }
+
+    private String extractReadableDetail(JsonNode root) {
+        if (root == null) {
+            return null;
+        }
+        Set<String> details = new LinkedHashSet<>();
+        collectReadableDetails(root, details, 0);
+        if (details.isEmpty()) {
+            return null;
+        }
+        String joined = String.join("; ", details);
+        return joined.substring(0, Math.min(240, joined.length()));
+    }
+
+    private void collectReadableDetails(JsonNode node, Set<String> details, int depth) {
+        if (node == null || depth > 6 || details.size() >= 6) {
+            return;
+        }
+        if (node.isObject()) {
+            node.properties().forEach(entry -> {
+                if (details.size() >= 6) {
+                    return;
+                }
+                String key = entry.getKey();
+                JsonNode value = entry.getValue();
+                if (isDiagnosticField(key) && isScalar(value)) {
+                    addReadableText(details, value.asText());
+                } else if (isDiagnosticField(key) && value.isArray()) {
+                    value.forEach(item -> {
+                        if (isScalar(item)) {
+                            addReadableText(details, item.asText());
+                        } else {
+                            collectReadableDetails(item, details, depth + 1);
+                        }
+                    });
+                } else {
+                    collectReadableDetails(value, details, depth + 1);
+                }
+            });
+        } else if (node.isArray()) {
+            node.forEach(item -> collectReadableDetails(item, details, depth + 1));
+        }
+    }
+
+    private void addReadableText(Set<String> details, String raw) {
+        if (raw == null || raw.isBlank()) {
+            return;
+        }
+        String trimmed = raw.trim();
+        if (trimmed.matches("IDG-[A-Za-z0-9._-]+")) {
+            return;
+        }
+        String sanitized = sanitizeDetail(trimmed);
+        if (!sanitized.isEmpty()) {
+            details.add(sanitized.substring(0, Math.min(180, sanitized.length())));
         }
     }
 

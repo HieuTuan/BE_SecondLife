@@ -44,6 +44,16 @@ public interface SellerVerificationRepository extends JpaRepository<SellerVerifi
 
     long countByUserIdAndEkycStatus(UUID userId, EkycStatus ekycStatus);
 
+    @Query("SELECT sv.submittedAt FROM SellerVerification sv " +
+           "WHERE sv.user.id = :userId " +
+           "AND sv.status = :status " +
+           "AND sv.submittedAt >= :since " +
+           "ORDER BY sv.submittedAt DESC")
+    List<Instant> findRecentSubmittedAtByUserIdAndStatusSince(
+            @Param("userId") UUID userId,
+            @Param("status") SellerVerificationStatus status,
+            @Param("since") Instant since);
+
     @Query(value = "SELECT sv FROM SellerVerification sv " +
            "JOIN FETCH sv.user u " +
            "JOIN FETCH u.profile " +

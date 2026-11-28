@@ -842,6 +842,8 @@ public class PostServiceImpl implements PostService {
 
         if (status != null && !status.isEmpty()) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), status));
+        } else {
+            spec = spec.and((root, query, cb) -> cb.notEqual(root.get("status"), "DRAFT"));
         }
         if (categoryId != null) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("categoryId"), categoryId));
@@ -849,7 +851,12 @@ public class PostServiceImpl implements PostService {
         if (itemId != null) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("itemId"), itemId));
         }
-        return postRepository.findAll(spec, pageable).map(postMapper::toResponse);
+        Page<Post> page = postRepository.findAll(spec, pageable);
+        Set<UUID> returning = resolveAwaitingHubReturnIds(page.getContent());
+        return page.map(post -> {
+            PostDto dto = postMapper.toResponse(post);
+            return returning.contains(post.getId()) ? dto.toBuilder().status("RETURNING").build() : dto;
+        });
     }
 
     @Override
@@ -862,6 +869,7 @@ public class PostServiceImpl implements PostService {
             }
             return cb.equal(root.get("status"), "ACTIVE");
         };
+        spec = spec.and(Specification.not(PostRepository.awaitingHubReturn()));
 
         if (categoryId != null) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("categoryId"), categoryId));
@@ -876,7 +884,9 @@ public class PostServiceImpl implements PostService {
     @Transactional(readOnly = true)
     public PostDto getPostDetail(UUID postId) {
         Post post = postRepository.findById(postId).orElseThrow(() -> new NotFoundException("Post not found"));
-        return postMapper.toResponse(post);
+        PostDto dto = postMapper.toResponse(post);
+        boolean returning = canDisplayHubReturn(post) && postRepository.isAwaitingHubReturn(postId);
+        return returning ? dto.toBuilder().status("RETURNING").build() : dto;
     }
 
     @Override
@@ -887,9 +897,10 @@ public class PostServiceImpl implements PostService {
         if (post.getUser() == null || !userId.equals(post.getUser().getId())) {
             throw new ForbiddenException("This post belongs to another user");
         }
-        boolean reclassify = canOfferReclassification(post)
+        boolean returning = canDisplayHubReturn(post) && postRepository.isAwaitingHubReturn(postId);
+        boolean reclassify = !returning && canOfferReclassification(post)
                 && !postRepository.findReclassifiableIds(List.of(postId)).isEmpty();
-        return toSellerPost(post, reclassify);
+        return toSellerPost(post, reclassify, returning);
     }
 
     @Override
@@ -1073,20 +1084,43 @@ public class PostServiceImpl implements PostService {
         if (!page.isEmpty()) {
             postRepository.findAllWithImagesByIdIn(page.getContent().stream().map(Post::getId).toList());
         }
-        var candidates = page.getContent().stream().filter(this::canOfferReclassification).map(Post::getId).toList();
+        Set<UUID> returning = resolveAwaitingHubReturnIds(page.getContent());
+        var candidates = page.getContent().stream().filter(this::canOfferReclassification)
+                .map(Post::getId).filter(id -> !returning.contains(id)).toList();
         Set<UUID> reclassifiable = candidates.isEmpty()
                 ? Set.of() : Set.copyOf(postRepository.findReclassifiableIds(candidates));
-        return page.map(post -> toSellerPost(post, reclassifiable.contains(post.getId())));
+        return page.map(post -> toSellerPost(post, reclassifiable.contains(post.getId()), returning.contains(post.getId())));
+    }
+
+    private boolean canDisplayHubReturn(Post post) {
+        return "ACTIVE".equals(post.getStatus()) || "RESERVED".equals(post.getStatus());
+    }
+
+    private Set<UUID> resolveAwaitingHubReturnIds(List<Post> candidates) {
+        List<UUID> postIds = candidates.stream()
+                .filter(this::canDisplayHubReturn)
+                .map(Post::getId)
+                .toList();
+        if (postIds.isEmpty()) {
+            return Set.of();
+        }
+        return postRepository.findAll(
+                        PostRepository.withIds(postIds)
+                                .and(PostRepository.awaitingHubReturn()))
+                .stream()
+                .map(Post::getId)
+                .collect(Collectors.toSet());
     }
 
     private boolean canOfferReclassification(Post post) {
         return "ACTIVE".equals(post.getStatus()) || ListingAccessService.canEditDraft(post);
     }
 
-    private PostDto toSellerPost(Post post, boolean reclassify) {
+    private PostDto toSellerPost(Post post, boolean reclassify, boolean returning) {
         var actions = new PostDto.SellerActions(
-                ListingAccessService.canEditDraft(post), "ACTIVE".equals(post.getStatus()), reclassify);
-        return postMapper.toResponse(post).toBuilder().sellerActions(actions).build();
+                ListingAccessService.canEditDraft(post), !returning && "ACTIVE".equals(post.getStatus()), reclassify);
+        return postMapper.toResponse(post).toBuilder()
+                .status(returning ? "RETURNING" : post.getStatus()).sellerActions(actions).build();
     }
 
     @Override

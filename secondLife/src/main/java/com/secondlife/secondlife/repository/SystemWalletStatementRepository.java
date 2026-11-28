@@ -16,7 +16,7 @@ public interface SystemWalletStatementRepository extends JpaRepository<SystemWal
     @Query("""
             SELECT t FROM SystemWalletStatementEntry t
             WHERE (:type IS NULL OR t.type = :type)
-              AND (:orderId IS NULL OR t.orderId = :orderId)
+              AND (:orderId IS NULL OR t.orderId = :orderId OR t.topupPackagePurchaseId = :orderId)
               AND (:fundCategory IS NULL OR t.fundCategory = :fundCategory)
               AND (:hasShipping IS NULL
                    OR (:hasShipping = TRUE AND t.shippingDelta <> 0)

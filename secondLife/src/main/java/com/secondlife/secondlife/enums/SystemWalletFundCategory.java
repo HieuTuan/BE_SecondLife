@@ -4,5 +4,6 @@ public enum SystemWalletFundCategory {
     PRODUCT_ESCROW,
     USER_SHIPPING,
     HUB_PAYOUT,
-    COMMISSION
+    COMMISSION,
+    PACKAGE_REVENUE
 }

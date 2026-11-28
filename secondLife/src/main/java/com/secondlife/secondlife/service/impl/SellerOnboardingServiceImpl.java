@@ -51,7 +51,8 @@ public class SellerOnboardingServiceImpl implements SellerOnboardingService {
 
     @Transactional(readOnly = true)
     public SellerOnboardingResponse get(UUID userId) {
-        return onboarding.findById(userId).map(this::response)
+        return onboarding.findById(userId)
+                .map(row -> response(row, users.findById(userId).orElse(null)))
                 .orElseGet(() -> new SellerOnboardingResponse(null, null, null, null,
                         false, false, "SHOP_INFORMATION", null));
     }
@@ -65,9 +66,15 @@ public class SellerOnboardingServiceImpl implements SellerOnboardingService {
         boolean sameShop = Objects.equals(row.getShopName(), request.shopName())
                 && Objects.equals(row.getEmail(), request.email())
                 && Objects.equals(row.getPhone(), request.phone());
-        if (sameShop && Objects.equals(row.getPickupAddressJson(), addressJson)) return response(row);
-
         boolean isSeller = user.hasRole("SELLER");
+        if (sameShop && Objects.equals(row.getPickupAddressJson(), addressJson)) {
+            if (applyVerifiedAccountEmailIfMatch(user, row)) {
+                onboarding.save(row);
+            }
+            if (isSeller && updated != null) shipping.savePickup(userId, updated);
+            return response(row, user);
+        }
+
         boolean locked = isSeller || verifications.existsByUserIdAndStatusIn(userId, STARTED_VERIFICATION);
         ShippingAddress previous = readPickup(row);
         boolean sameContact = previous != null && updated != null
@@ -76,17 +83,19 @@ public class SellerOnboardingServiceImpl implements SellerOnboardingService {
                 || (previous.latitude().compareTo(updated.latitude()) == 0
                     && previous.longitude().compareTo(updated.longitude()) == 0));
 
-        if (sameShop && updated != null && (!locked || sameLocationOrMissingCoordinates)) {
+        if (sameShop && updated != null && (isSeller || !locked || sameLocationOrMissingCoordinates)) {
             row.setPickupAddressJson(addressJson);
             row.setPickupProvinceId(null);
             row.setPickupWardId(null);
+            applyVerifiedAccountEmailIfMatch(user, row);
             onboarding.save(row);
-            if (isSeller && row.getEmailVerifiedAt() != null) shipping.savePickup(userId, updated);
-            return response(row);
+            if (isSeller) shipping.savePickup(userId, updated);
+            return response(row, user);
         }
         if (locked) {
             throw new ConflictException("Shop information cannot be changed after seller verification has started");
         }
+        boolean keepVerifiedEmail = Objects.equals(row.getEmail(), request.email()) && row.getEmailVerifiedAt() != null;
         row.setUserId(userId);
         row.setShopName(request.shopName());
         row.setEmail(request.email());
@@ -94,17 +103,22 @@ public class SellerOnboardingServiceImpl implements SellerOnboardingService {
         row.setPickupAddressJson(addressJson);
         row.setPickupProvinceId(null);
         row.setPickupWardId(null);
-        row.setEmailVerifiedAt(null);
+        row.setEmailVerifiedAt(keepVerifiedEmail
+                ? row.getEmailVerifiedAt()
+                : (isAccountEmailVerified(user, request.email()) ? Instant.now() : null));
         clearCode(row);
         // Keep the last send time so changing email cannot bypass the resend cooldown.
         onboarding.save(row);
-        return response(row);
+        return response(row, user);
     }
 
     @Transactional
     public SellerOnboardingEmailCodeResponse sendEmailCode(UUID userId) {
-        lockUser(userId);
+        User user = lockUser(userId);
         var row = requiredProfile(userId);
+        if (applyVerifiedAccountEmailIfMatch(user, row)) {
+            onboarding.save(row);
+        }
         if (row.getEmailVerifiedAt() != null) throw new ConflictException("Shop email has already been verified");
         Instant now = Instant.now();
         if (row.getEmailOtpSentAt() != null
@@ -125,7 +139,7 @@ public class SellerOnboardingServiceImpl implements SellerOnboardingService {
 
     @Transactional(noRollbackFor = BadRequestException.class)
     public SellerOnboardingResponse verifyEmailCode(UUID userId, String otp) {
-        lockUser(userId);
+        User user = lockUser(userId);
         var row = requiredProfile(userId);
         if (row.getEmailVerifiedAt() != null) throw new ConflictException("Shop email has already been verified");
         if (row.getEmailOtpHash() == null || row.getEmailOtpExpiresAt() == null
@@ -143,13 +157,16 @@ public class SellerOnboardingServiceImpl implements SellerOnboardingService {
         row.setEmailVerifiedAt(Instant.now());
         clearCode(row);
         onboarding.save(row);
-        return response(row);
+        return response(row, user);
     }
 
     @Transactional
     public void requireCompleted(UUID userId) {
-        lockUser(userId);
+        User user = lockUser(userId);
         var row = requiredProfile(userId);
+        if (applyVerifiedAccountEmailIfMatch(user, row)) {
+            onboarding.save(row);
+        }
         if (row.getEmailVerifiedAt() == null) {
             throw new ConflictException("Verify the shop email before starting eKYC");
         }
@@ -175,6 +192,23 @@ public class SellerOnboardingServiceImpl implements SellerOnboardingService {
                 new ConflictException("Complete shop information and verify its email before starting eKYC"));
     }
 
+    private boolean isAccountEmailVerified(User user, String shopEmail) {
+        return user != null
+                && user.isEmailVerified()
+                && user.getEmail() != null
+                && shopEmail != null
+                && user.getEmail().trim().equalsIgnoreCase(shopEmail.trim());
+    }
+
+    private boolean applyVerifiedAccountEmailIfMatch(User user, SellerOnboarding row) {
+        if (row.getEmailVerifiedAt() == null && isAccountEmailVerified(user, row.getEmail())) {
+            row.setEmailVerifiedAt(Instant.now());
+            clearCode(row);
+            return true;
+        }
+        return false;
+    }
+
     private void clearCode(SellerOnboarding row) {
         row.setEmailOtpHash(null);
         row.setEmailOtpExpiresAt(null);
@@ -185,8 +219,8 @@ public class SellerOnboardingServiceImpl implements SellerOnboardingService {
         return row.getPickupAddressJson() == null ? null : mapper.readValue(row.getPickupAddressJson(), ShippingAddress.class);
     }
 
-    private SellerOnboardingResponse response(SellerOnboarding row) {
-        boolean verified = row.getEmailVerifiedAt() != null;
+    private SellerOnboardingResponse response(SellerOnboarding row, User user) {
+        boolean verified = row.getEmailVerifiedAt() != null || isAccountEmailVerified(user, row.getEmail());
         var address = readPickup(row);
         boolean hasCoordinates = address != null && address.latitude() != null && address.longitude() != null;
         boolean ready = verified && hasCoordinates;

@@ -93,7 +93,7 @@ class MarketplaceListingServiceTest {
             Root<Post> root = mock(Root.class);
             Fetch<Object, Object> seller = mock(Fetch.class);
             when(root.fetch("user", JoinType.LEFT)).thenReturn(seller);
-            CriteriaQuery<?> query = mock(CriteriaQuery.class);
+            CriteriaQuery<?> query = mock(CriteriaQuery.class, org.mockito.Answers.RETURNS_DEEP_STUBS);
             CriteriaBuilder cb = mock(CriteriaBuilder.class);
             Path<Object> statusPath = mock(Path.class), categoryPath = mock(Path.class), itemPath = mock(Path.class);
             when(root.get("status")).thenReturn(statusPath);
@@ -122,7 +122,7 @@ class MarketplaceListingServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"ACTIVE", "RESERVED"})
+    @ValueSource(strings = {"ACTIVE", "RESERVED", "RETURNING"})
     void publicDetailKeepsExistingVisibleStatuses(String status) {
         Post post = listing(); post.setStatus(status);
         when(posts.findById(post.getId())).thenReturn(Optional.of(post));

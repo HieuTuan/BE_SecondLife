@@ -14,10 +14,14 @@ import com.secondlife.secondlife.integration.shipping.LalamoveShippingProvider;
 import com.secondlife.secondlife.mapper.ShippingVehicleSelectionMapper;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.NegotiationRepository;
+import com.secondlife.secondlife.repository.OrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.ShipmentRepository;
 import com.secondlife.secondlife.repository.ShippingPickupAddressRepository;
+import com.secondlife.secondlife.repository.SellerOnboardingRepository;
 import com.secondlife.secondlife.repository.ShippingQuoteRepository;
+import com.secondlife.secondlife.repository.UserReportRepository;
+import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.service.ReverseGeocodingService;
 import com.secondlife.secondlife.service.ShippingCatalogService;
@@ -126,7 +130,9 @@ class ShippingQuoteExplanationApiTest {
         var selectionMapper = new ShippingVehicleSelectionMapper(
                 Mappers.getMapper(ShippingVehicleSelectionMapper.Delegate.class));
         var service = new ShippingQuoteServiceImpl(posts, mock(NegotiationRepository.class), addresses, quotes,
-                inspections, shipments, provider, json, geocoding, selectionMapper);
+                inspections, shipments, provider, json, geocoding, selectionMapper,
+                mock(UserRepository.class), mock(SellerOnboardingRepository.class),
+                mock(OrderRepository.class), mock(UserReportRepository.class));
         var current = mock(CurrentUserProvider.class);
         when(current.resolveUserId(any())).thenReturn(buyerId);
         mvc = MockMvcBuilders.standaloneSetup(new ShippingController(mock(ShippingCatalogService.class),

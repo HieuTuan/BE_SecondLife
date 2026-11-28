@@ -12,6 +12,7 @@ import com.secondlife.secondlife.exception.NotFoundException;
 import com.secondlife.secondlife.mapper.ChatMapper;
 import com.secondlife.secondlife.repository.ChatMessageRepository;
 import com.secondlife.secondlife.repository.ChatRoomRepository;
+import com.secondlife.secondlife.repository.NegotiationRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.ChatService;
@@ -21,6 +22,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -30,11 +34,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service("chatService")
 @RequiredArgsConstructor
 public class ChatServiceImpl implements ChatService {
+
+    private static final String SYSTEM_PREFIX = "SYSTEM:";
 
     private final ChatRoomRepository chatRoomRepository;
     private final ChatMessageRepository chatMessageRepository;
@@ -42,6 +49,8 @@ public class ChatServiceImpl implements ChatService {
     private final UserRepository userRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final ChatMapper chatMapper;
+    private final NegotiationRepository negotiations;
+    private final ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
     public ChatRoomDto getRoom(UUID postId, UUID buyerId) {
@@ -85,8 +94,11 @@ public class ChatServiceImpl implements ChatService {
         List<ChatRoom> rooms = chatRoomRepository.findUserChatRooms(userId);
         Map<UUID, String> lastMessages = new HashMap<>();
         if (!rooms.isEmpty()) {
-            for (ChatMessage message : chatMessageRepository.findLatestByRoomIds(rooms.stream().map(ChatRoom::getId).toList())) {
-                lastMessages.put(message.getChatRoom().getId(), message.getMessageContent());
+            var messages = chatMessageRepository.findLatestByRoomIds(rooms.stream().map(ChatRoom::getId).toList());
+            var currentOffers = currentOfferContents(messages);
+            for (ChatMessage message : messages) {
+                lastMessages.put(message.getChatRoom().getId(),
+                        currentOffers.getOrDefault(message.getId(), message.getMessageContent()));
             }
         }
         Map<String, ChatRoomDto> uniqueRooms = new LinkedHashMap<>();
@@ -111,9 +123,52 @@ public class ChatServiceImpl implements ChatService {
             throw new ForbiddenException("Not authorized to view this room");
         }
 
-        return chatMessageRepository.findByChatRoomIdOrderBySentAtAsc(roomId).stream()
-                .map(chatMapper::toMessage)
-                .collect(Collectors.toList());
+        var messages = chatMessageRepository.findByChatRoomIdOrderBySentAtAsc(roomId);
+        var currentOffers = currentOfferContents(messages);
+        return messages.stream().map(message -> {
+            var dto = chatMapper.toMessage(message);
+            var current = currentOffers.get(message.getId());
+            return current == null ? dto
+                    : new ChatMessageDto(dto.id(), dto.conversationId(), dto.senderId(), current, dto.sentAt());
+        }).toList();
+    }
+
+    private Map<UUID, String> currentOfferContents(List<ChatMessage> messages) {
+        var offers = new ArrayList<OfferMessage>();
+        for (ChatMessage message : messages) {
+            String content = message.getMessageContent();
+            if (content == null || !content.startsWith(SYSTEM_PREFIX)) continue;
+            try {
+                var parsed = objectMapper.readTree(content.substring(SYSTEM_PREFIX.length()));
+                if (parsed instanceof ObjectNode payload && "OFFER".equals(payload.path("type").asText())) {
+                    var negotiationId = UUID.fromString(payload.path("negotiationId").asText());
+                    offers.add(new OfferMessage(message, negotiationId, payload));
+                }
+            } catch (JacksonException | IllegalArgumentException ignored) {
+                // Older messages also include plain text and locally generated offer IDs.
+            }
+        }
+        if (offers.isEmpty()) return Map.of();
+
+        var ids = offers.stream().map(OfferMessage::negotiationId).collect(Collectors.toSet());
+        var states = negotiations.findChatOfferStates(ids).stream()
+                .collect(Collectors.toMap(NegotiationRepository.ChatOfferState::getId, Function.identity()));
+        Map<UUID, String> contents = new HashMap<>();
+        for (OfferMessage offer : offers) {
+            var state = states.get(offer.negotiationId());
+            var room = offer.message().getChatRoom();
+            if (state == null || !room.getPost().getId().equals(state.getPostId())
+                    || !room.getBuyer().getId().equals(state.getBuyerId())) {
+                continue;
+            }
+            offer.payload().put("status", state.getStatus().name());
+            offer.payload().put("price", state.getOfferedPrice());
+            contents.put(offer.message().getId(), SYSTEM_PREFIX + " " + objectMapper.writeValueAsString(offer.payload()));
+        }
+        return contents;
+    }
+
+    private record OfferMessage(ChatMessage message, UUID negotiationId, ObjectNode payload) {
     }
 
     @Transactional
@@ -185,7 +240,9 @@ public class ChatServiceImpl implements ChatService {
         String lastMessage = "New Conversation";
         Optional<ChatMessage> lastMsg = chatMessageRepository.findFirstByChatRoomIdOrderBySentAtDesc(room.getId());
         if (lastMsg.isPresent()) {
-            lastMessage = lastMsg.get().getMessageContent();
+            var message = lastMsg.get();
+            lastMessage = currentOfferContents(List.of(message))
+                    .getOrDefault(message.getId(), message.getMessageContent());
         }
 
         return chatMapper.toRoom(room, lastMessage);

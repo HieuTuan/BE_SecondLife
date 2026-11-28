@@ -6,6 +6,7 @@ import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.request.ShippingAddressRequest;
 import com.secondlife.secondlife.dto.request.ShippingQuoteRequest;
 import com.secondlife.secondlife.dto.response.GeocodedAddressResponse;
+import com.secondlife.secondlife.dto.response.PickupAddressUpdateStatusResponse;
 import com.secondlife.secondlife.dto.response.ShippingQuoteResponse;
 import com.secondlife.secondlife.dto.response.ShippingRouteErrorResponse;
 import com.secondlife.secondlife.dto.response.ShippingVehicleCatalogResponse;
@@ -78,6 +79,10 @@ public class ShippingController {
     @PutMapping("/pickup-address") @PreAuthorize("hasRole('SELLER')")
     public ApiResponse<ShippingAddress> savePickup(@AuthenticationPrincipal CustomUserDetails user,@Valid @RequestBody ShippingAddressRequest body) {
         return ApiResponse.success(quotes.savePickup(current.resolveUserId(user),geocoding.shipping(body)));
+    }
+    @GetMapping("/pickup-address/status") @PreAuthorize("hasRole('SELLER')")
+    public ApiResponse<PickupAddressUpdateStatusResponse> pickupUpdateStatus(@AuthenticationPrincipal CustomUserDetails user) {
+        return ApiResponse.success(quotes.pickupUpdateStatus(current.resolveUserId(user)));
     }
     @GetMapping("/pickup-address") @PreAuthorize("hasAnyRole('SELLER', 'BUYER')")
     public ApiResponse<ShippingAddress> pickup(@AuthenticationPrincipal CustomUserDetails user) { return ApiResponse.success(quotes.pickup(current.resolveUserId(user))); }

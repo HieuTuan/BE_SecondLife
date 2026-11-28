@@ -75,4 +75,59 @@ class SellerOnboardingAddressValidationTest {
                 .andExpect(status().isBadRequest());
         verifyNoInteractions(service);
     }
+
+    @Test
+    void shopNameShorterThanFiveCharactersIsRejected() throws Exception {
+        var service = mock(SellerOnboardingService.class);
+        var mvc = MockMvcBuilders.standaloneSetup(new SellerOnboardingController(service, mock(CurrentUserProvider.class)))
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver()).build();
+        mvc.perform(put("/api/v1/seller-onboarding/me").contentType(MediaType.APPLICATION_JSON).content("""
+                {"shopName":"Shop","email":"shop@example.test","phone":"0901234567",
+                 "pickupAddress":{"name":"Seller","phone":"0901234567","latitude":10.7756,"longitude":106.7019}}
+                """))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void shopNameWithSpecialCharactersIsRejected() throws Exception {
+        var service = mock(SellerOnboardingService.class);
+        var mvc = MockMvcBuilders.standaloneSetup(new SellerOnboardingController(service, mock(CurrentUserProvider.class)))
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver()).build();
+        mvc.perform(put("/api/v1/seller-onboarding/me").contentType(MediaType.APPLICATION_JSON).content("""
+                {"shopName":"Shop; Demo@1","email":"shop@example.test","phone":"0901234567",
+                 "pickupAddress":{"name":"Seller","phone":"0901234567","latitude":10.7756,"longitude":106.7019}}
+                """))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void shopNameLongerThanThirtyCharactersIsRejected() throws Exception {
+        var service = mock(SellerOnboardingService.class);
+        var mvc = MockMvcBuilders.standaloneSetup(new SellerOnboardingController(service, mock(CurrentUserProvider.class)))
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver()).build();
+        mvc.perform(put("/api/v1/seller-onboarding/me").contentType(MediaType.APPLICATION_JSON).content("""
+                {"shopName":"Cua hang dien gia dung 1234567890","email":"shop@example.test","phone":"0901234567",
+                 "pickupAddress":{"name":"Seller","phone":"0901234567","latitude":10.7756,"longitude":106.7019}}
+                """))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void validVietnameseShopNameBetweenFiveAndThirtyCharactersIsAccepted() throws Exception {
+        var service = mock(SellerOnboardingService.class);
+        var mvc = MockMvcBuilders.standaloneSetup(new SellerOnboardingController(service, mock(CurrentUserProvider.class)))
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver()).build();
+        mvc.perform(put("/api/v1/seller-onboarding/me").contentType(MediaType.APPLICATION_JSON).content("""
+                {"shopName":"Gia dụng Minh Anh 247","email":"shop@example.test","phone":"0901234567",
+                 "pickupAddress":{"name":"Seller","phone":"0901234567","latitude":10.7756,"longitude":106.7019}}
+                """))
+                .andExpect(status().isOk());
+    }
 }

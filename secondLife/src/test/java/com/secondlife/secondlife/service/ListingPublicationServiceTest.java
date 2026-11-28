@@ -2,8 +2,10 @@ package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.dto.response.InspectionQuoteResponse;
 import com.secondlife.secondlife.entity.InspectionOrder;
+import com.secondlife.secondlife.entity.Negotiation;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.enums.NegotiationStatus;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
@@ -143,6 +145,37 @@ class ListingPublicationServiceTest {
         assertNotNull(post.getPublishedAt());
         verify(credits).consume(seller.getId(), com.secondlife.secondlife.enums.CreditType.LISTING,
                 "LISTING_PUBLISH:" + post.getId());
+    }
+
+    @Test
+    void buyerRequestHubReturnRestoresActiveOrReservedFromNegotiation() {
+        var posts = mock(PostRepository.class);
+        var inspections = mock(InspectionOrderRepository.class);
+        var service = service(posts, inspections, 90, 2);
+
+        Post post = new Post();
+        post.setId(UUID.randomUUID());
+        post.setStatus("RETURNING");
+
+        InspectionOrder inspection = new InspectionOrder();
+        inspection.setId(UUID.randomUUID());
+        inspection.setPost(post);
+
+        when(inspections.findByIdForUpdate(inspection.getId())).thenReturn(Optional.of(inspection));
+        when(posts.findByIdForUpdate(post.getId())).thenReturn(Optional.of(post));
+
+        service.restoreAfterInspectionReturn(inspection.getId());
+        assertEquals("ACTIVE", post.getStatus());
+
+        post.setStatus("RETURNING");
+        var negotiation = new Negotiation();
+        negotiation.setStatus(NegotiationStatus.ACCEPTED);
+        negotiation.setExpiredAt(Instant.now().plusSeconds(600));
+        inspection.setNegotiation(negotiation);
+
+        service.restoreAfterInspectionReturn(inspection.getId());
+        assertEquals("RESERVED", post.getStatus());
+        verify(posts, times(2)).save(post);
     }
 
     private static ListingPublicationService service(PostRepository posts, InspectionOrderRepository inspections,

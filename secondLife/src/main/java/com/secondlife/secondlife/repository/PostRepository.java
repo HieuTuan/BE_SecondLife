@@ -1,10 +1,15 @@
 package com.secondlife.secondlife.repository;
 
 import com.secondlife.secondlife.config.JpaRepositoryConfiguration.RefreshOperations;
+import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Post;
+import com.secondlife.secondlife.entity.Shipment;
+import com.secondlife.secondlife.enums.InspectionOrderType;
+import com.secondlife.secondlife.enums.InspectionScope;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -24,6 +29,44 @@ import java.util.UUID;
 
 @Repository
 public interface PostRepository extends JpaRepository<Post, UUID>, JpaSpecificationExecutor<Post>, RefreshOperations {
+    static Specification<Post> withIds(Collection<UUID> postIds) {
+        return (post, query, cb) -> post.get("id").in(postIds);
+    }
+
+    static Specification<Post> awaitingHubReturn() {
+        return (post, query, cb) -> {
+            var pending = query.subquery(Integer.class);
+            var inspection = pending.from(InspectionOrder.class);
+            var pickedUp = pending.subquery(Integer.class);
+            var inbound = pickedUp.from(Shipment.class);
+            pickedUp.select(cb.literal(1)).where(
+                    cb.equal(inbound.get("inspectionOrderId"), inspection.get("id")),
+                    cb.equal(inbound.get("leg"), "SELLER_TO_CENTER"),
+                    inbound.get("status").in("PICKED", "DELIVERED"));
+
+            var delivered = pending.subquery(Integer.class);
+            var outbound = delivered.from(Shipment.class);
+            delivered.select(cb.literal(1)).where(
+                    cb.equal(outbound.get("inspectionOrderId"), inspection.get("id")),
+                    cb.equal(outbound.get("leg"), "CENTER_TO_SELLER"),
+                    cb.equal(outbound.get("status"), "DELIVERED"));
+
+            pending.select(cb.literal(1)).where(
+                    cb.equal(inspection.get("post"), post),
+                    cb.equal(inspection.get("orderType"), InspectionOrderType.AT_CENTER),
+                    cb.equal(inspection.get("inspectionScope"), InspectionScope.BUYER_REQUEST),
+                    inspection.get("status").in("FAILED", "CANCELLED"),
+                    cb.isNull(inspection.get("order")),
+                    cb.exists(pickedUp),
+                    cb.not(cb.exists(delivered)));
+            return cb.exists(pending);
+        };
+    }
+
+    default boolean isAwaitingHubReturn(UUID postId) {
+        return exists(withIds(List.of(postId)).and(awaitingHubReturn()));
+    }
+
     @EntityGraph(attributePaths = "images")
     Optional<Post> findByIdAndStatus(UUID id, String status);
     @Override

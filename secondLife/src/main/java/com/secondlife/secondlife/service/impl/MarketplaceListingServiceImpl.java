@@ -65,6 +65,7 @@ public class MarketplaceListingServiceImpl implements MarketplaceListingService 
             }
             return cb.equal(root.get("status"), "ACTIVE");
         };
+        filter = filter.and(Specification.not(PostRepository.awaitingHubReturn()));
         if (criteria.categoryId() != null) {
             filter = filter.and((root, query, cb) -> cb.equal(root.get("categoryId"), criteria.categoryId()));
         }
@@ -184,11 +185,16 @@ public class MarketplaceListingServiceImpl implements MarketplaceListingService 
     public MarketplaceListingResponse get(UUID postId) {
         Post post = posts.findById(postId)
                 .orElseThrow(() -> new NotFoundException("Listing not found"));
-        if (!"ACTIVE".equals(post.getStatus()) && !"RESERVED".equals(post.getStatus())) {
+        if (!"ACTIVE".equals(post.getStatus())
+                && !"RESERVED".equals(post.getStatus())
+                && !"RETURNING".equals(post.getStatus())) {
             throw new NotFoundException("Listing is not available for purchase");
         }
         var matches = inspections.findLatestListingInspections(List.of(postId));
-        return toResponse(post, matches.isEmpty() ? null : matches.getFirst());
+        var response = toResponse(post, matches.isEmpty() ? null : matches.getFirst());
+        return ("RETURNING".equals(post.getStatus()) || posts.isAwaitingHubReturn(postId))
+                ? response.toBuilder().status("RETURNING").build()
+                : response;
     }
 
     private MarketplaceListingResponse toResponse(Post post, ListingInspection inspection) {

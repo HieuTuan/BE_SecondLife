@@ -1,12 +1,15 @@
 package com.secondlife.secondlife.service;
 
 import com.secondlife.secondlife.dto.response.ChatRoomDto;
+import com.secondlife.secondlife.entity.ChatMessage;
 import com.secondlife.secondlife.entity.ChatRoom;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.User;
+import com.secondlife.secondlife.enums.NegotiationStatus;
 import com.secondlife.secondlife.mapper.ChatMapper;
 import com.secondlife.secondlife.repository.ChatMessageRepository;
 import com.secondlife.secondlife.repository.ChatRoomRepository;
+import com.secondlife.secondlife.repository.NegotiationRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +26,7 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -36,6 +40,7 @@ class ChatServiceTest {
     private UserRepository userRepository;
     private SimpMessagingTemplate messagingTemplate;
     private ChatService chatService;
+    private NegotiationRepository negotiations;
 
     @BeforeEach
     void setUp() {
@@ -44,7 +49,10 @@ class ChatServiceTest {
         postRepository = mock(PostRepository.class);
         userRepository = mock(UserRepository.class);
         messagingTemplate = mock(SimpMessagingTemplate.class);
-        chatService = new com.secondlife.secondlife.service.impl.ChatServiceImpl(chatRoomRepository, chatMessageRepository, postRepository, userRepository, messagingTemplate, MapperTestSupport.mapper(ChatMapper.class));
+        negotiations = mock(NegotiationRepository.class);
+        chatService = new com.secondlife.secondlife.service.impl.ChatServiceImpl(
+                chatRoomRepository, chatMessageRepository, postRepository, userRepository, messagingTemplate,
+                MapperTestSupport.mapper(ChatMapper.class), negotiations, new ObjectMapper());
     }
 
     @Test
@@ -205,6 +213,63 @@ class ChatServiceTest {
         assertEquals(status, result.postStatus());
         assertEquals(fixture.getBuyer().getId(), result.buyerId());
         verify(chatRoomRepository).save(any(ChatRoom.class));
+    }
+
+    @Test
+    void paidOfferUsesCurrentNegotiationStatusInHistoryAndInbox() {
+        var room = room("SOLD");
+        var negotiationId = UUID.randomUUID();
+        var message = acceptedOffer(room, negotiationId);
+        var current = mock(NegotiationRepository.ChatOfferState.class);
+        when(current.getId()).thenReturn(negotiationId);
+        when(current.getPostId()).thenReturn(room.getPost().getId());
+        when(current.getBuyerId()).thenReturn(room.getBuyer().getId());
+        when(current.getOfferedPrice()).thenReturn(new BigDecimal("1340000"));
+        when(current.getStatus()).thenReturn(NegotiationStatus.COMPLETED);
+        when(negotiations.findChatOfferStates(Set.of(negotiationId))).thenReturn(List.of(current));
+        when(chatRoomRepository.findById(room.getId())).thenReturn(Optional.of(room));
+        when(chatMessageRepository.findByChatRoomIdOrderBySentAtAsc(room.getId())).thenReturn(List.of(message));
+        when(chatRoomRepository.findUserChatRooms(room.getSeller().getId())).thenReturn(List.of(room));
+        when(chatMessageRepository.findLatestByRoomIds(List.of(room.getId()))).thenReturn(List.of(message));
+
+        for (User participant : List.of(room.getBuyer(), room.getSeller())) {
+            var result = chatService.getMessages(room.getId(), participant.getId()).getFirst();
+            assertEquals(message.getId(), result.id());
+            assertTrue(result.messageContent().contains("\"status\":\"COMPLETED\""));
+            assertTrue(result.messageContent().contains("\"price\":1340000"));
+        }
+        assertTrue(chatService.getUserRooms(room.getSeller().getId()).getFirst().lastMessage()
+                .contains("\"status\":\"COMPLETED\""));
+        assertTrue(message.getMessageContent().contains("\"status\":\"ACCEPTED\""));
+        verify(chatMessageRepository, never()).save(any());
+    }
+
+    @Test
+    void negotiationFromAnotherBuyerIsNotUsedToRefreshOffer() {
+        var room = room("ACTIVE");
+        var negotiationId = UUID.randomUUID();
+        var message = acceptedOffer(room, negotiationId);
+        var other = mock(NegotiationRepository.ChatOfferState.class);
+        when(other.getId()).thenReturn(negotiationId);
+        when(other.getPostId()).thenReturn(room.getPost().getId());
+        when(other.getBuyerId()).thenReturn(UUID.randomUUID());
+        when(negotiations.findChatOfferStates(Set.of(negotiationId))).thenReturn(List.of(other));
+        when(chatRoomRepository.findById(room.getId())).thenReturn(Optional.of(room));
+        when(chatMessageRepository.findByChatRoomIdOrderBySentAtAsc(room.getId())).thenReturn(List.of(message));
+
+        assertEquals(message.getMessageContent(),
+                chatService.getMessages(room.getId(), room.getBuyer().getId()).getFirst().messageContent());
+    }
+
+    private ChatMessage acceptedOffer(ChatRoom room, UUID negotiationId) {
+        var message = new ChatMessage();
+        message.setId(UUID.randomUUID());
+        message.setChatRoom(room);
+        message.setSender(room.getSeller());
+        message.setMessageContent("""
+                SYSTEM: {"type":"OFFER","status":"ACCEPTED","price":1340000,"negotiationId":"%s"}
+                """.formatted(negotiationId));
+        return message;
     }
 
     private ChatRoom room(String status) {

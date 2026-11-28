@@ -17,6 +17,7 @@ import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Negotiation;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.Role;
+import com.secondlife.secondlife.entity.Shipment;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.InspectionAppealStatus;
 import com.secondlife.secondlife.enums.InspectionAppointmentStatus;
@@ -900,6 +901,60 @@ class InspectionServiceImplWorkflowTest {
         assertEquals("ACTIVE", post.getStatus());
         verify(feeSettlementService).settle(eq(order), eq(InspectionSettlementOutcome.PASSED_BUYER_DEFAULTED), any());
         verify(inspectionOrderRepository).save(order);
+    }
+
+    @Test
+    @DisplayName("AT_CENTER buyer request keeps post in RETURNING while Hub has not delivered item back to seller")
+    void hubInspectionEndKeepsPostReturningUntilCenterToSellerDelivered() {
+        order.setOrderType(InspectionOrderType.AT_CENTER);
+        order.setInspectionScope(InspectionScope.BUYER_REQUEST);
+        order.setOrder(null);
+        order.setStatus(InspectionOrderStatus.PASSED.name());
+        post.setStatus("RESERVED");
+
+        Shipment inbound = new Shipment();
+        inbound.setLeg("SELLER_TO_CENTER");
+        inbound.setStatus("DELIVERED");
+        Shipment outbound = new Shipment();
+        outbound.setLeg("CENTER_TO_SELLER");
+        outbound.setStatus("READY_TO_PICK");
+
+        when(shipments.findByInspectionOrderIdOrderByCreatedAtAsc(order.getId())).thenReturn(List.of(inbound, outbound));
+        when(inspectionOrderRepository.findPostId(order.getId())).thenReturn(Optional.of(post.getId()));
+        when(postRepository.findByIdForUpdate(post.getId())).thenReturn(Optional.of(post));
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+        when(inspectionOrderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.rejectFinalPurchase(buyer.getId(), order.getId(), new InspectionRejectPurchaseRequest("Không mua nữa"));
+
+        assertEquals(InspectionOrderStatus.CANCELLED.name(), order.getStatus());
+        assertEquals("RETURNING", post.getStatus());
+        verify(postRepository).save(post);
+    }
+
+    @Test
+    @DisplayName("Expired final payment at Hub keeps post in RETURNING until Hub returns item")
+    void expiredFinalPaymentAtHubKeepsPostReturningUntilDelivered() {
+        order.setOrderType(InspectionOrderType.AT_CENTER);
+        order.setInspectionScope(InspectionScope.BUYER_REQUEST);
+        order.setOrder(null);
+        order.setStatus(InspectionOrderStatus.PASSED.name());
+        order.setFinalPaymentDeadline(Instant.now().minusSeconds(30));
+        post.setStatus("RESERVED");
+
+        Shipment inbound = new Shipment();
+        inbound.setLeg("SELLER_TO_CENTER");
+        inbound.setStatus("DELIVERED");
+
+        when(shipments.findByInspectionOrderIdOrderByCreatedAtAsc(order.getId())).thenReturn(List.of(inbound));
+        when(inspectionOrderRepository.findPostId(order.getId())).thenReturn(Optional.of(post.getId()));
+        when(postRepository.findByIdForUpdate(post.getId())).thenReturn(Optional.of(post));
+        when(inspectionOrderRepository.findByIdForUpdate(order.getId())).thenReturn(Optional.of(order));
+
+        service.processExpiredFinalPayment(order.getId());
+
+        assertEquals("RETURNING", post.getStatus());
+        verify(postRepository).save(post);
     }
 
     @Test

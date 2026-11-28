@@ -7,6 +7,7 @@ import com.secondlife.secondlife.dto.response.SellerVerificationResponse;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.GlobalExceptionHandler;
+import com.secondlife.secondlife.exception.TooManyRequestsException;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.security.CurrentUserProvider;
 import com.secondlife.secondlife.security.userdetails.CustomUserDetails;
@@ -183,5 +184,28 @@ class SellerVerificationControllerTest {
                         .content(jsonBody))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void submitVerification_WhenDailyRejectionCooldownActive_ShouldReturn429TooManyRequests() throws Exception {
+        String cooldownMessage = "Bạn đã gửi hồ sơ bị từ chối 5 lần trong 24 giờ qua. Vui lòng thử lại sau 10:30 ngày 29/11/2026.";
+        when(sellerVerificationService.submitVerification(eq(userId), any(SellerVerificationRequest.class)))
+                .thenThrow(new TooManyRequestsException(cooldownMessage));
+
+        String jsonBody = """
+                {
+                    "verificationType": "CITIZEN_ID",
+                    "documentNumber": "012345678901",
+                    "documentFrontUrl": "http://front.url",
+                    "documentBackUrl": "http://back.url"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/seller-verifications")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonBody))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value(cooldownMessage));
     }
 }

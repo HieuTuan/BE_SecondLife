@@ -1227,9 +1227,14 @@ public class ShipmentServiceImpl implements ShipmentService {
                         inspectionFeeSettlement.settleReturnShipping(inspection, observedFee);
                     }
                 }
-                if (publication != null && inspection.getInspectionScope() == InspectionScope.PRE_LISTING
-                        && "COMPLETED".equals(inspection.getStatus())) {
-                    publication.markReadyAfterInspectionReturn(inspection.getPost().getId());
+                if (publication != null && inspection.getPost() != null) {
+                    if (inspection.getInspectionScope() == InspectionScope.PRE_LISTING
+                            && "COMPLETED".equals(inspection.getStatus())) {
+                        publication.markReadyAfterInspectionReturn(inspection.getPost().getId());
+                    } else if (inspection.getInspectionScope() == InspectionScope.BUYER_REQUEST
+                            && Set.of("FAILED", "CANCELLED").contains(inspection.getStatus())) {
+                        publication.restoreAfterInspectionReturn(inspection.getId());
+                    }
                 }
             }
         }

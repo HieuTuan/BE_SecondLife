@@ -73,7 +73,7 @@ public class PostController {
             @Valid @ModelAttribute MarketplaceListingFilter filter,
             @RequestParam(defaultValue = "newest") String sort,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "10") int size) {
         Sort order = switch (sort) {
             case "newest" -> Sort.by(Sort.Order.desc("publishedAt"));
             case "priceAsc" -> Sort.by(Sort.Order.asc("price"), Sort.Order.desc("publishedAt"));

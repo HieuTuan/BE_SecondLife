@@ -25,6 +25,7 @@ import com.secondlife.secondlife.exception.BadRequestException;
 import com.secondlife.secondlife.exception.ConflictException;
 import com.secondlife.secondlife.exception.ForbiddenException;
 import com.secondlife.secondlife.exception.NotFoundException;
+import com.secondlife.secondlife.exception.TooManyRequestsException;
 import com.secondlife.secondlife.mapper.SellerVerificationMapper;
 import com.secondlife.secondlife.repository.SellerVerificationEventRepository;
 import com.secondlife.secondlife.repository.SellerVerificationRepository;
@@ -38,6 +39,7 @@ import com.secondlife.secondlife.service.SellerVerificationService;
 
 import lombok.extern.slf4j.Slf4j;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -47,7 +49,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -66,6 +71,11 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
             SellerVerificationStatus.NEEDS_REVIEW
     );
 
+    private static final int DEFAULT_MAX_DAILY_FAILED_SUBMISSIONS = 5;
+    private static final int DEFAULT_SUBMISSION_COOLDOWN_HOURS = 24;
+    private static final ZoneId VIETNAM_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
+    private static final DateTimeFormatter COOLDOWN_UNLOCK_FORMAT = DateTimeFormatter.ofPattern("HH:mm 'ngày' dd/MM/yyyy");
+
     private final SellerVerificationRepository sellerVerificationRepository;
     private final SellerVerificationEventRepository sellerVerificationEventRepository;
     private final UserRepository userRepository;
@@ -77,6 +87,8 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
     private final EkycRecoveryProperties recoveryProperties;
     private final int maxResubmissions;
     private final SellerOnboardingService onboarding;
+    private final int maxDailyFailedSubmissions;
+    private final int submissionCooldownHours;
 
     public SellerVerificationServiceImpl(
             SellerVerificationRepository sellerVerificationRepository,
@@ -88,8 +100,28 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
             SellerVerificationMapper sellerVerificationMapper,
             NotificationService notificationService,
             EkycRecoveryProperties recoveryProperties,
-            @Value("${app.ekyc.max-resubmissions}") int maxResubmissions,
+            int maxResubmissions,
             SellerOnboardingService onboarding) {
+        this(sellerVerificationRepository, sellerVerificationEventRepository, userRepository, roleAssignmentService,
+                ekycService, sellerRiskService, sellerVerificationMapper, notificationService, recoveryProperties,
+                maxResubmissions, onboarding, DEFAULT_MAX_DAILY_FAILED_SUBMISSIONS, DEFAULT_SUBMISSION_COOLDOWN_HOURS);
+    }
+
+    @Autowired
+    public SellerVerificationServiceImpl(
+            SellerVerificationRepository sellerVerificationRepository,
+            SellerVerificationEventRepository sellerVerificationEventRepository,
+            UserRepository userRepository,
+            RoleAssignmentService roleAssignmentService,
+            EkycService ekycService,
+            SellerRiskService sellerRiskService,
+            SellerVerificationMapper sellerVerificationMapper,
+            NotificationService notificationService,
+            EkycRecoveryProperties recoveryProperties,
+            @Value("${app.ekyc.max-resubmissions}") int maxResubmissions,
+            SellerOnboardingService onboarding,
+            @Value("${app.ekyc.max-daily-submissions:5}") int maxDailyFailedSubmissions,
+            @Value("${app.ekyc.submission-cooldown-hours:24}") int submissionCooldownHours) {
         this.sellerVerificationRepository = sellerVerificationRepository;
         this.sellerVerificationEventRepository = sellerVerificationEventRepository;
         this.userRepository = userRepository;
@@ -101,6 +133,8 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
         this.recoveryProperties = recoveryProperties;
         this.maxResubmissions = maxResubmissions;
         this.onboarding = onboarding;
+        this.maxDailyFailedSubmissions = maxDailyFailedSubmissions;
+        this.submissionCooldownHours = submissionCooldownHours;
     }
 
     @Override
@@ -119,6 +153,8 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
         if (hasActiveRequest) {
             throw new ConflictException("Bạn đã có hồ sơ xác thực người bán đang được xử lý. Retry xử lý lại hồ sơ cũ, không tạo hồ sơ mới. Gọi GET /api/v1/seller-verifications/me để xem trạng thái hiện tại.");
         }
+
+        enforceSubmissionCooldown(userId);
 
         String rawDocNumber = request.documentNumber().trim();
         String docHash = hashDocumentNumber(rawDocNumber);
@@ -146,6 +182,30 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
 
         // Process through automated eKYC & Risk Decision Pipeline
         return executeDecisionPipeline(saved, user, rawDocNumber, "USER");
+    }
+
+    private void enforceSubmissionCooldown(UUID userId) {
+        if (maxDailyFailedSubmissions <= 0 || submissionCooldownHours <= 0) {
+            return;
+        }
+        Instant now = Instant.now();
+        Instant windowStart = now.minus(Duration.ofHours(submissionCooldownHours));
+        List<Instant> recentRejections = sellerVerificationRepository
+                .findRecentSubmittedAtByUserIdAndStatusSince(userId, SellerVerificationStatus.REJECTED, windowStart);
+        if (recentRejections.size() < maxDailyFailedSubmissions) {
+            return;
+        }
+        Instant latestRejectedAt = recentRejections.get(0);
+        Instant unlockAt = latestRejectedAt.plus(Duration.ofHours(submissionCooldownHours));
+        if (unlockAt.isAfter(now)) {
+            String unlockText = unlockAt.atZone(VIETNAM_ZONE).format(COOLDOWN_UNLOCK_FORMAT);
+            log.warn("Seller verification cooldown active for user {}: {} rejected attempts within {}h, unlockAt={}",
+                    userId, recentRejections.size(), submissionCooldownHours, unlockAt);
+            throw new TooManyRequestsException(String.format(
+                    "Bạn đã gửi hồ sơ xác thực bị từ chối %d lần trong %d giờ qua. Vì lý do bảo mật, vui lòng thử lại sau %s.",
+                    maxDailyFailedSubmissions, submissionCooldownHours, unlockText
+            ));
+        }
     }
 
     private SellerVerificationResponse mapToSellerVerificationResponse(SellerVerification verification, UUID userId) {
@@ -600,6 +660,7 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
                                 ? riskResult.reasonCodes().get(0)
                                 : ReasonCode.MANUAL_REVIEW_REQUIRED;
                         verification.setReasonCode(primaryReason);
+                        verification.setRejectionReason(riskResult.summary());
                         recordEvent(verification, VerificationEventType.RISK_REVIEW_REQUIRED,
                                 SellerVerificationStatus.EKYC_PENDING, SellerVerificationStatus.NEEDS_REVIEW,
                                 primaryReason, "SYSTEM", null, "Hồ sơ cần quản trị viên xem xét do rủi ro: " + riskResult.summary());
@@ -664,6 +725,7 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
                     log.info("CASE 6: Uncertain eKYC requiring Admin review for user: {}, reason: {}",
                             user.getId(), ekycResult.reasonCode());
                     verification.transitionTo(SellerVerificationStatus.NEEDS_REVIEW);
+                    verification.setRejectionReason(ekycResult.userMessage());
                     recordEvent(verification, VerificationEventType.RISK_REVIEW_REQUIRED,
                             SellerVerificationStatus.EKYC_PENDING, SellerVerificationStatus.NEEDS_REVIEW,
                             ekycResult.reasonCode(), "SYSTEM", null,
@@ -676,14 +738,19 @@ public class SellerVerificationServiceImpl implements SellerVerificationService 
                         user.getId());
                 boolean isRecoverable = ekycResult.reasonCode() != ReasonCode.PROVIDER_REQUEST_REJECTED
                         && ekycResult.reasonCode() != ReasonCode.PROVIDER_AUTH_FAILED;
+                verification.setRejectionReason(ekycResult.userMessage());
                 verification.setNextRetryAt(isRecoverable && verification.getRecoveryAttempts() < recoveryProperties.maxAttempts()
                         ? Instant.now().plusMillis(recoveryProperties.delayMs()) : null);
+                String providerDetailNote = ekycResult.userMessage() != null && !ekycResult.userMessage().isBlank()
+                        ? " Chi tiết: " + ekycResult.userMessage()
+                        : "";
                 recordEvent(verification, VerificationEventType.EKYC_STARTED,
                         SellerVerificationStatus.EKYC_PENDING, SellerVerificationStatus.EKYC_PENDING,
                         ekycResult.reasonCode(), "SYSTEM", null,
-                        isRecoverable
+                        (isRecoverable
                                 ? "Cổng eKYC gián đoạn hoặc quá thời gian phản hồi. Giữ trạng thái EKYC_PENDING để tự động phục hồi."
-                                : "Cổng eKYC từ chối yêu cầu (" + ekycResult.reasonCode() + "). Không tự động phục hồi.");
+                                : "Cổng eKYC từ chối yêu cầu (" + ekycResult.reasonCode() + "). Không tự động phục hồi.")
+                                + providerDetailNote);
             }
             case NOT_STARTED, PENDING -> {
                 log.debug("Verification state pending/not-started");

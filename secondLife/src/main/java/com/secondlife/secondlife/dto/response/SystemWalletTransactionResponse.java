@@ -13,6 +13,6 @@ public record SystemWalletTransactionResponse(Long id, UUID orderId, SystemWalle
         BigDecimal shippingBalanceAfter, BigDecimal revenueBalanceAfter, Instant createdAt,
         UUID inspectionOrderId, BigDecimal carrierFee, BigDecimal unfundedExpense,
         String entryId, SystemWalletFundCategory fundCategory, BigDecimal totalDelta, SystemWalletDeltaAction deltaAction,
-        BigDecimal userShippingFee, String userShippingNote, String breakdownDescription) {
+        BigDecimal userShippingFee, String userShippingNote, String breakdownDescription, UUID topupPackagePurchaseId) {
 
 }

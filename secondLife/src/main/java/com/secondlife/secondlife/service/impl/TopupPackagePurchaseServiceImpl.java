@@ -19,6 +19,7 @@ import com.secondlife.secondlife.repository.UserWalletRepository;
 import com.secondlife.secondlife.service.CreditBalanceService;
 import com.secondlife.secondlife.service.CreditPricingService;
 import com.secondlife.secondlife.service.TopupPackagePurchaseService;
+import com.secondlife.secondlife.service.SystemWalletService;
 import com.secondlife.secondlife.service.WalletService;
 
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,7 @@ public class TopupPackagePurchaseServiceImpl implements TopupPackagePurchaseServ
     private final TopupPackagePurchaseRepository purchases;
     private final UserWalletRepository wallets;
     private final WalletService walletService;
+    private final SystemWalletService systemWallet;
     private final CreditBalanceRepository balances;
     private final CreditLedgerRepository ledger;
     private final CreditBalanceService creditBalances;
@@ -54,7 +56,8 @@ public class TopupPackagePurchaseServiceImpl implements TopupPackagePurchaseServ
         }
         var previous = purchases.findByUserIdAndRequestId(userId, request.requestId());
         if (previous.isPresent()) return replay(previous.get(), packageId, request);
-        // Serialize requests for one wallet; admin locks only the package.
+        // Follow the system wallet lock order used by order and inspection payments.
+        systemWallet.lockForPackagePurchase();
         wallets.ensureWalletExists(UUID.randomUUID(), userId);
         var wallet = wallets.findByUserIdWithLock(userId).orElseThrow();
         previous = purchases.findByUserIdAndRequestId(userId, request.requestId());
@@ -97,7 +100,9 @@ public class TopupPackagePurchaseServiceImpl implements TopupPackagePurchaseServ
         receipt.setValuationBalanceAfter(after.valuationCredits());
         receipt.setWalletBalanceAfter(wallet.getBalance());
         receipt.setCreatedAt(Instant.now().truncatedTo(ChronoUnit.MICROS));
-        return mapper.toPurchaseResponse(purchases.saveAndFlush(receipt));
+        var saved = purchases.saveAndFlush(receipt);
+        systemWallet.recordPackageRevenue(saved);
+        return mapper.toPurchaseResponse(saved);
     }
 
     private TopupPackagePurchaseResponse replay(TopupPackagePurchase receipt, UUID packageId,

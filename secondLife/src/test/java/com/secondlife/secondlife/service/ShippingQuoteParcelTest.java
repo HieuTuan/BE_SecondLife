@@ -11,10 +11,14 @@ import com.secondlife.secondlife.integration.shipping.ShippingProvider;
 import com.secondlife.secondlife.mapper.ShippingVehicleSelectionMapper;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.NegotiationRepository;
+import com.secondlife.secondlife.repository.OrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
 import com.secondlife.secondlife.repository.ShipmentRepository;
 import com.secondlife.secondlife.repository.ShippingPickupAddressRepository;
+import com.secondlife.secondlife.repository.SellerOnboardingRepository;
 import com.secondlife.secondlife.repository.ShippingQuoteRepository;
+import com.secondlife.secondlife.repository.UserReportRepository;
+import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.impl.ShippingQuoteServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -46,7 +50,9 @@ class ShippingQuoteParcelTest {
     private final ShippingQuoteService service = new ShippingQuoteServiceImpl(posts,
             mock(NegotiationRepository.class), addresses, quotes, mock(InspectionOrderRepository.class),
             mock(ShipmentRepository.class), provider, mapper, geocoding,
-            new ShippingVehicleSelectionMapper(Mappers.getMapper(ShippingVehicleSelectionMapper.Delegate.class)));
+            new ShippingVehicleSelectionMapper(Mappers.getMapper(ShippingVehicleSelectionMapper.Delegate.class)),
+            mock(UserRepository.class), mock(SellerOnboardingRepository.class),
+            mock(OrderRepository.class), mock(UserReportRepository.class));
     private final Post post = new Post();
     private final UUID buyerId = UUID.randomUUID();
     private final ShippingAddressRequest delivery = new ShippingAddressRequest("Buyer", "0912345678",

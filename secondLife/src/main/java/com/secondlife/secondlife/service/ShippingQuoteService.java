@@ -3,6 +3,7 @@ package com.secondlife.secondlife.service;
 import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.request.ShippingParcel;
 import com.secondlife.secondlife.dto.request.ShippingQuoteRequest;
+import com.secondlife.secondlife.dto.response.PickupAddressUpdateStatusResponse;
 import com.secondlife.secondlife.dto.response.ShippingQuoteResponse;
 import com.secondlife.secondlife.entity.ShippingQuote;
 import java.util.UUID;
@@ -10,6 +11,9 @@ import java.math.BigDecimal;
 
 public interface ShippingQuoteService {
     ShippingAddress savePickup(UUID userId, ShippingAddress address);
+
+    /** Returns whether the seller can currently change pickup address and why if blocked. */
+    PickupAddressUpdateStatusResponse pickupUpdateStatus(UUID userId);
 
     /** Returns the current pickup address, or null when the user has not configured one. */
     ShippingAddress pickup(UUID userId);

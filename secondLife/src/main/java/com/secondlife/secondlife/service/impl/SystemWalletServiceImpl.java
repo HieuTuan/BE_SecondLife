@@ -1,5 +1,9 @@
 package com.secondlife.secondlife.service.impl;
 
+import com.secondlife.secondlife.common.PageResponse;
+import com.secondlife.secondlife.dto.response.SystemWalletBalanceDetails;
+import com.secondlife.secondlife.dto.response.SystemWalletBalanceDetails.Entry;
+import com.secondlife.secondlife.dto.response.SystemWalletBalanceDetails.Fund;
 import com.secondlife.secondlife.dto.response.SystemWalletResponse;
 import com.secondlife.secondlife.dto.response.SystemWalletTransactionResponse;
 import com.secondlife.secondlife.entity.InspectionFeeSettlement;
@@ -9,6 +13,7 @@ import com.secondlife.secondlife.entity.SystemOrderFunds;
 import com.secondlife.secondlife.entity.SystemWallet;
 import com.secondlife.secondlife.entity.SystemWalletStatementEntry;
 import com.secondlife.secondlife.entity.SystemWalletTransaction;
+import com.secondlife.secondlife.entity.TopupPackagePurchase;
 import com.secondlife.secondlife.enums.EscrowStatus;
 import com.secondlife.secondlife.enums.OrderStatus;
 import com.secondlife.secondlife.enums.SystemWalletFundCategory;
@@ -34,6 +39,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -265,11 +271,57 @@ public class SystemWalletServiceImpl implements SystemWalletService {
     }
 
     @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void lockForPackagePurchase() {
+        lock();
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordPackageRevenue(TopupPackagePurchase purchase) {
+        BigDecimal amount = money(purchase.getPrice());
+        if (purchase.getId() == null || amount.signum() == 0) {
+            throw new ConflictException("Package revenue requires a paid purchase receipt");
+        }
+
+        var event = new SystemWalletTransaction();
+        event.setTopupPackagePurchaseId(purchase.getId());
+        event.setType(SystemWalletTransactionType.PACKAGE_REVENUE);
+        record(lock(), event, BigDecimal.ZERO, BigDecimal.ZERO, amount);
+    }
+
+    @Override
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public SystemWalletResponse getWallet() {
         var wallet = wallets.findById(SystemWallet.MAIN)
                 .orElseThrow(() -> new ConflictException("System wallet is not initialized"));
-        return systemWalletMapper.toResponse(wallet, transactions.getInspectionHeldBalance(), transactions.getTotalHubPaid());
+        return systemWalletMapper.toResponse(wallet, transactions.getInspectionHeldBalance(), transactions.getTotalHubPaid(),
+                transactions.getPackageRevenueBalance());
+    }
+
+    @Override
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public SystemWalletBalanceDetails getBalanceDetails(Fund fund, Pageable pageable) {
+        var wallet = wallets.findById(SystemWallet.MAIN)
+                .orElseThrow(() -> new ConflictException("System wallet is not initialized"));
+        if (fund == Fund.PRODUCT_ESCROW) {
+            var page = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                    Sort.by(Sort.Order.desc("productHeld"), Sort.Order.asc("orderId")));
+            var rows = funds.findByProductHeldGreaterThan(BigDecimal.ZERO, page)
+                    .map(allocation -> new Entry(allocation.getOrderId(), null, allocation.getProductHeld(), null, null));
+            var balance = wallet.getHeldBalance().subtract(transactions.getInspectionHeldBalance());
+            return new SystemWalletBalanceDetails(balance, funds.getTotalProductHeld(), null, null,
+                    wallet.getUpdatedAt(), PageResponse.from(rows));
+        }
+
+        var page = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
+        var rows = transactions.findShippingOrderBalances(page)
+                .map(item -> new Entry(item.getOrderId(), item.getInspectionOrderId(), item.getAmount(),
+                        item.getCredited(), item.getDebited()));
+        var shipping = transactions.getShippingTotals();
+        return new SystemWalletBalanceDetails(wallet.getShippingBalance(),
+                shipping.getCredited().subtract(shipping.getDebited()), shipping.getCredited(), shipping.getDebited(),
+                wallet.getUpdatedAt(), PageResponse.from(rows));
     }
 
     @Override
@@ -289,7 +341,11 @@ public class SystemWalletServiceImpl implements SystemWalletService {
         if (page.isEmpty()) {
             return page.map(entry -> systemWalletMapper.toTransactionResponse(entry, BigDecimal.ZERO));
         }
-        var orderIds = page.stream().map(SystemWalletStatementEntry::getOrderId).collect(Collectors.toSet());
+        var orderIds = page.stream().map(SystemWalletStatementEntry::getOrderId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        if (orderIds.isEmpty()) {
+            return page.map(entry -> systemWalletMapper.toTransactionResponse(entry, BigDecimal.ZERO));
+        }
         var shippingPaid = transactions.findShippingPayments(orderIds).stream().collect(Collectors.toMap(
                 payment -> new OrderReference(payment.getOrderId(), payment.getInspectionOrderId()),
                 SystemWalletTransactionRepository.ShippingPayment::getShippingFee));

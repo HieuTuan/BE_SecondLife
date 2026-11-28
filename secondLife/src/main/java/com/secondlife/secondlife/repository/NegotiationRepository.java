@@ -13,6 +13,7 @@ import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -39,4 +40,19 @@ public interface NegotiationRepository extends JpaRepository<Negotiation, UUID>,
     List<Negotiation> findByPostIdAndStatus(UUID postId, NegotiationStatus status);
 
     List<Negotiation> findByStatusAndExpiredAtBefore(NegotiationStatus status, Instant time);
+
+    @Query("""
+            SELECT n.id AS id, n.post.id AS postId, n.buyer.id AS buyerId,
+                   n.status AS status, n.offeredPrice AS offeredPrice
+            FROM Negotiation n WHERE n.id IN :ids
+            """)
+    List<ChatOfferState> findChatOfferStates(@Param("ids") Collection<UUID> ids);
+
+    interface ChatOfferState {
+        UUID getId();
+        UUID getPostId();
+        UUID getBuyerId();
+        NegotiationStatus getStatus();
+        BigDecimal getOfferedPrice();
+    }
 }

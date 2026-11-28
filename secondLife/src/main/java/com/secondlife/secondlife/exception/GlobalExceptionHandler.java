@@ -194,6 +194,13 @@ public class GlobalExceptionHandler {
                 .body(ErrorResponse.of(ex.getMessage(), request.getRequestURI()));
     }
 
+    @ExceptionHandler(TooManyRequestsException.class)
+    public ResponseEntity<ErrorResponse> handleTooManyRequests(TooManyRequestsException ex, HttpServletRequest request) {
+        log.warn("Rate or cooldown limit reached at {}: {}", request.getRequestURI(), ex.getMessage());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(ErrorResponse.of(ex.getMessage(), request.getRequestURI()));
+    }
+
     @ExceptionHandler(MissingServletRequestParameterException.class)
     public ResponseEntity<ErrorResponse> handleMissingParameter(
             MissingServletRequestParameterException ex, HttpServletRequest request) {

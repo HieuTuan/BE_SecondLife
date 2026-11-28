@@ -23,8 +23,9 @@ public class SystemWalletMapper {
         return delegate.toTransactionResponse(entry, userShippingFee);
     }
 
-    public SystemWalletResponse toResponse(SystemWallet wallet, BigDecimal inspectionHeldBalance, BigDecimal totalHubPaid) {
-        return delegate.toResponse(wallet, inspectionHeldBalance, totalHubPaid);
+    public SystemWalletResponse toResponse(SystemWallet wallet, BigDecimal inspectionHeldBalance, BigDecimal totalHubPaid,
+                                           BigDecimal packageRevenueBalance) {
+        return delegate.toResponse(wallet, inspectionHeldBalance, totalHubPaid, packageRevenueBalance);
     }
 
     @Mapper(config = MapStructConfiguration.class)
@@ -36,6 +37,8 @@ public class SystemWalletMapper {
         @Mapping(target = "heldBalance", expression = "java(wallet.getHeldBalance().subtract(inspectionHeldBalance))")
         @Mapping(target = "totalHubPaid", source = "totalHubPaid")
         @Mapping(target = "inspectionHeldBalance", source = "inspectionHeldBalance")
-        SystemWalletResponse toResponse(SystemWallet wallet, BigDecimal inspectionHeldBalance, BigDecimal totalHubPaid);
+        @Mapping(target = "packageRevenueBalance", source = "packageRevenueBalance")
+        SystemWalletResponse toResponse(SystemWallet wallet, BigDecimal inspectionHeldBalance, BigDecimal totalHubPaid,
+                                        BigDecimal packageRevenueBalance);
     }
 }

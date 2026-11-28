@@ -249,6 +249,10 @@ public class InspectionServiceImpl implements InspectionService {
             throw new BadRequestException("Bài đăng hiện không ở trạng thái sẵn sàng để giao dịch");
         }
 
+        if (postRepository.isAwaitingHubReturn(post.getId())) {
+            throw new ConflictException("Sản phẩm đang được hoàn từ Hub về người bán");
+        }
+
         if ("RESERVED".equals(post.getStatus()) && request.negotiationId() == null) {
             throw new ConflictException("Bài đăng đang được giữ chỗ. Bạn cần có thương lượng giá hợp lệ để tiếp tục.");
         }
@@ -1972,14 +1976,38 @@ public class InspectionServiceImpl implements InspectionService {
 
     private void restorePostStatusAfterInspectionEnd(InspectionOrder order) {
         Post post = order.getPost();
-        if (post != null && "RESERVED".equals(post.getStatus())) {
-            boolean hasActiveNegotiation = order.getNegotiation() != null
-                    && order.getNegotiation().getStatus() == NegotiationStatus.ACCEPTED
-                    && order.getNegotiation().getExpiredAt() != null
-                    && order.getNegotiation().getExpiredAt().isAfter(Instant.now());
-            post.setStatus(hasActiveNegotiation ? "RESERVED" : "ACTIVE");
+        if (post == null) {
+            return;
+        }
+        if (isAwaitingHubReturn(order) && ("RESERVED".equals(post.getStatus()) || "ACTIVE".equals(post.getStatus()))) {
+            post.setStatus("RETURNING");
+            postRepository.save(post);
+            return;
+        }
+        if ("RESERVED".equals(post.getStatus())) {
+            post.setStatus(ListingPublicationService.resolveRestoredStatusForNegotiation(order, Instant.now()));
             postRepository.save(post);
         }
+    }
+
+    private boolean isAwaitingHubReturn(InspectionOrder order) {
+        if (shipments == null
+                || order.getOrderType() != InspectionOrderType.AT_CENTER
+                || order.getInspectionScope() != InspectionScope.BUYER_REQUEST
+                || order.getOrder() != null) {
+            return false;
+        }
+        var inspectionShipments = shipments.findByInspectionOrderIdOrderByCreatedAtAsc(order.getId());
+        if (inspectionShipments == null || inspectionShipments.isEmpty()) {
+            return false;
+        }
+        boolean shippedToHub = inspectionShipments.stream()
+                .anyMatch(s -> "SELLER_TO_CENTER".equals(s.getLeg())
+                        && ("PICKED".equals(s.getStatus()) || "DELIVERED".equals(s.getStatus())));
+        boolean returnedToSeller = inspectionShipments.stream()
+                .anyMatch(s -> "CENTER_TO_SELLER".equals(s.getLeg())
+                        && "DELIVERED".equals(s.getStatus()));
+        return shippedToHub && !returnedToSeller;
     }
 
     private void notifyCenterManagersPendingDispatch(InspectionOrder order) {

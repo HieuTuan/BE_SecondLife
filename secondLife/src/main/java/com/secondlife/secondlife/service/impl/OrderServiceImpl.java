@@ -172,6 +172,10 @@ public class OrderServiceImpl implements OrderService {
             throw new ConflictException("Post is not available for purchase");
         }
 
+        if (postRepository.isAwaitingHubReturn(post.getId())) {
+            throw new ConflictException("Sản phẩm đang được hoàn từ Hub về người bán");
+        }
+
         if ("RESERVED".equals(post.getStatus()) && requestDTO.negotiationId() == null) {
             throw new ConflictException("Post is reserved. You must provide a valid negotiation to purchase it.");
         }

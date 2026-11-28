@@ -415,6 +415,192 @@ class VnptEkycProviderClientTest {
         server.verify();
     }
 
+    @Test
+    void http400NoFaceAndInvalidDocumentErrorsRequestUserResubmission() {
+        RestTemplate rest = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.createServer(rest);
+        for (int attempt = 0; attempt < 2; attempt++) {
+            for (String name : new String[]{"front", "back", "selfie"}) {
+                server.expect(requestTo("https://res.cloudinary.com/test-cloud/image/upload/" + name + ".jpg"))
+                        .andRespond(withSuccess(JPEG, MediaType.IMAGE_JPEG));
+            }
+        }
+        VnptEkycOrchestrator orchestrator = mock(VnptEkycOrchestrator.class);
+        when(orchestrator.verify(any(), any(), any(), anyString(), anyString(), anyInt()))
+                .thenThrow(new VnptCompareException(new VnptApiException("Bad request", 400,
+                        "/ai/v1/web/face/compare", "IDG-00010003", "Không tìm thấy khuôn mặt")))
+                .thenThrow(new VnptOcrException(new VnptApiException("Bad request", 400,
+                        "/ai/v1/web/ocr/id", "IDG-00010445", "Loại giấy tờ không hợp lệ")));
+        VnptEkycProviderClient adapter = new VnptEkycProviderClient(orchestrator, rest, "test-cloud", 10_485_760L);
+        EkycRequest request = new EkycRequest(VerificationType.CITIZEN_ID, "001",
+                "https://res.cloudinary.com/test-cloud/image/upload/front.jpg",
+                "https://res.cloudinary.com/test-cloud/image/upload/back.jpg",
+                "https://res.cloudinary.com/test-cloud/image/upload/selfie.jpg",
+                "ANDROID_Web_1.0_Device_1.0.0_web_123", "req-token");
+
+        var noFace = adapter.verify(request);
+        assertEquals(EkycStatus.UNCERTAIN, noFace.status());
+        assertEquals(ReasonCode.SELFIE_QUALITY_LOW, noFace.reasonCode());
+        assertTrue(noFace.reasonCode().isUserFixable());
+        assertTrue(noFace.userMessage().contains("IDG-00010003"));
+
+        var invalidDoc = adapter.verify(request);
+        assertEquals(EkycStatus.UNCERTAIN, invalidDoc.status());
+        assertEquals(ReasonCode.DOCUMENT_NOT_FULLY_VISIBLE, invalidDoc.reasonCode());
+        assertTrue(invalidDoc.reasonCode().isUserFixable());
+        assertTrue(invalidDoc.userMessage().contains("IDG-00010445"));
+        assertTrue(invalidDoc.userMessage().contains("Loại giấy tờ không hợp lệ"));
+
+        server.verify();
+    }
+
+    @Test
+    void http400MessageIdgCodeIsExtractedFromErrorBody() {
+        Module module = module();
+        expectToken(module.server(), "cached-token");
+        module.server().expect(requestTo(BASE + "/ai/v1/web/face/compare"))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"message\":\"IDG-00010003\",\"statusCode\":400,\"errors\":[\"Không tìm thấy khuôn mặt\"]}"));
+
+        VnptApiException error = assertThrows(VnptApiException.class,
+                () -> module.http().postJson("/ai/v1/web/face/compare", Map.of()));
+        assertEquals(400, error.getUpstreamStatus());
+        assertEquals("IDG-00010003", error.getProviderCode());
+        assertEquals("Không tìm thấy khuôn mặt", error.getProviderDetail());
+        module.server().verify();
+    }
+
+    @Test
+    void unmappedProvider400PreservesSanitizedEndpointAndDetailInProviderError() {
+        RestTemplate rest = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.createServer(rest);
+        for (String url : new String[]{
+                "https://res.cloudinary.com/test-cloud/image/upload/front.jpg",
+                "https://res.cloudinary.com/test-cloud/image/upload/back.jpg",
+                "https://res.cloudinary.com/test-cloud/image/upload/selfie.jpg"
+        }) {
+            server.expect(requestTo(url)).andRespond(withSuccess(JPEG, MediaType.IMAGE_JPEG));
+        }
+
+        ObjectMapper mapper = JsonMapper.builder().build();
+        VnptEkycProperties props = properties();
+        RestTemplate vnptRest = new RestTemplate();
+        MockRestServiceServer vnptServer = MockRestServiceServer.createServer(vnptRest);
+        VnptTokenService tokens = new VnptTokenService(props, vnptRest, mapper, 45_000L);
+        VnptHttpClient http = new VnptHttpClient(props, tokens, vnptRest, mapper);
+        VnptFileClient files = new VnptFileClient(http, 10_485_760L);
+        VnptEkycOrchestrator orchestrator = new VnptEkycOrchestrator(tokens, files,
+                new VnptOcrClient(http), new VnptCardLivenessClient(http),
+                new VnptFaceLivenessClient(http), new VnptMaskFaceClient(http),
+                new VnptFaceCompareClient(http), new EkycVerificationPolicy());
+        VnptEkycProviderClient adapter = new VnptEkycProviderClient(
+                orchestrator, rest, "test-cloud", 10_485_760L);
+
+        expectToken(vnptServer, "cached-token");
+        vnptServer.expect(requestTo(BASE + "/file-service/v1/addFile"))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"message\":\"BAD_UPLOAD\",\"errors\":[\"Dung lượng hoặc định dạng ảnh chưa hỗ trợ\"]}"));
+
+        var result = adapter.verify(new EkycRequest(
+                VerificationType.CITIZEN_ID, "001",
+                "https://res.cloudinary.com/test-cloud/image/upload/front.jpg",
+                "https://res.cloudinary.com/test-cloud/image/upload/back.jpg",
+                "https://res.cloudinary.com/test-cloud/image/upload/selfie.jpg",
+                "session", "request-identifier"));
+
+        assertEquals(EkycStatus.PROVIDER_ERROR, result.status());
+        assertEquals(ReasonCode.PROVIDER_REQUEST_REJECTED, result.reasonCode());
+        assertTrue(result.userMessage().contains("HTTP 400"));
+        assertTrue(result.userMessage().contains("BAD_UPLOAD"));
+        assertTrue(result.userMessage().contains("Dung lượng hoặc định dạng ảnh chưa hỗ trợ"));
+        server.verify();
+        vnptServer.verify();
+    }
+
+    @Test
+    void confirmedIdentityMismatchExplainsInputVsOcrDifferenceWithoutFullPii() throws Exception {
+        RestTemplate rest = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.createServer(rest);
+        for (String name : new String[]{"front", "back", "selfie"}) {
+            server.expect(requestTo("https://res.cloudinary.com/test-cloud/image/upload/" + name + ".jpg"))
+                    .andRespond(withSuccess(JPEG, MediaType.IMAGE_JPEG));
+        }
+        VnptEkycOrchestrator orchestrator = mock(VnptEkycOrchestrator.class);
+        ObjectMapper mapper = JsonMapper.builder().build();
+        var ocr = VnptResponseMapper.envelope(mapper.readTree(
+                "{\"message\":\"IDG-00000000\",\"object\":{\"id\":\"037094016689\",\"name\":\"Example User\",\"type_id\":5}}"),
+                "ocr", VnptResponseMapper::ocr);
+        var compare = VnptResponseMapper.envelope(mapper.readTree(compare("MATCH", 96)),
+                "compare", VnptResponseMapper::compare);
+        when(orchestrator.verify(any(byte[].class), any(byte[].class), any(byte[].class),
+                anyString(), anyString(), eq(-1)))
+                .thenReturn(new VnptResults.Verification(UUID.randomUUID(), true, "PASSED",
+                        ocr, null, null, null, compare));
+
+        VnptEkycProviderClient adapter = new VnptEkycProviderClient(orchestrator, rest, "test-cloud", 10_485_760L);
+        var result = adapter.verify(new EkycRequest(
+                VerificationType.CITIZEN_ID, "037094016680",
+                "https://res.cloudinary.com/test-cloud/image/upload/front.jpg",
+                "https://res.cloudinary.com/test-cloud/image/upload/back.jpg",
+                "https://res.cloudinary.com/test-cloud/image/upload/selfie.jpg",
+                "IOS_model_os_device_sdk_id_time", "request-identifier"));
+
+        assertEquals(EkycStatus.FAILED, result.status());
+        assertEquals(ReasonCode.CONFIRMED_IDENTITY_MISMATCH, result.reasonCode());
+        assertTrue(result.userMessage().contains("6680"));
+        assertTrue(result.userMessage().contains("6689"));
+        assertFalse(result.userMessage().contains("037094016680"));
+        server.verify();
+    }
+
+    @Test
+    void cornerCroppedWarningRequestsResubmissionAndFaceMaskTakesPriority() throws Exception {
+        RestTemplate rest = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.createServer(rest);
+        for (int i = 0; i < 2; i++) {
+            for (String name : new String[]{"front", "back", "selfie"}) {
+                server.expect(requestTo("https://res.cloudinary.com/test-cloud/image/upload/" + name + ".jpg"))
+                        .andRespond(withSuccess(JPEG, MediaType.IMAGE_JPEG));
+            }
+        }
+        VnptEkycOrchestrator orchestrator = mock(VnptEkycOrchestrator.class);
+        ObjectMapper mapper = JsonMapper.builder().build();
+        var croppedOcr = VnptResponseMapper.envelope(mapper.readTree(
+                "{\"message\":\"IDG-00000000\",\"object\":{\"id\":\"001\",\"type_id\":5,\"general_warning\":[\"anh_dau_vao_mat_goc\"]}}"),
+                "ocr", VnptResponseMapper::ocr);
+        var compare = VnptResponseMapper.envelope(mapper.readTree(compare("MATCH", 81)),
+                "compare", VnptResponseMapper::compare);
+        when(orchestrator.verify(any(byte[].class), any(byte[].class), any(byte[].class),
+                anyString(), anyString(), eq(-1)))
+                .thenReturn(new VnptResults.Verification(UUID.randomUUID(), true, "PASSED",
+                        croppedOcr, null, null, null, compare))
+                .thenReturn(new VnptResults.Verification(UUID.randomUUID(), false, "FACE_MASKED",
+                        croppedOcr, null, null, null, compare));
+
+        VnptEkycProviderClient adapter = new VnptEkycProviderClient(orchestrator, rest, "test-cloud", 10_485_760L);
+        EkycRequest request = new EkycRequest(
+                VerificationType.CITIZEN_ID, "001",
+                "https://res.cloudinary.com/test-cloud/image/upload/front.jpg",
+                "https://res.cloudinary.com/test-cloud/image/upload/back.jpg",
+                "https://res.cloudinary.com/test-cloud/image/upload/selfie.jpg",
+                "IOS_model_os_device_sdk_id_time", "request-identifier");
+
+        var cropped = adapter.verify(request);
+        assertEquals(EkycStatus.UNCERTAIN, cropped.status());
+        assertEquals(ReasonCode.DOCUMENT_NOT_FULLY_VISIBLE, cropped.reasonCode());
+        assertTrue(cropped.reasonCode().isUserFixable());
+        assertTrue(cropped.userMessage().contains("mất góc"));
+
+        var masked = adapter.verify(request);
+        assertEquals(EkycStatus.UNCERTAIN, masked.status());
+        assertEquals(ReasonCode.SELFIE_QUALITY_LOW, masked.reasonCode());
+        assertTrue(masked.reasonCode().isUserFixable());
+        assertTrue(masked.userMessage().contains("che khuất"));
+        server.verify();
+    }
+
     private void expectPipeline(MockRestServiceServer server, String match, int probability) {
         expectToken(server, "cached-token");
         for (String hash : new String[]{"front-hash", "back-hash", "selfie-hash"}) {

@@ -132,6 +132,17 @@ public interface UserReportRepository extends JpaRepository<UserReport, UUID>, R
     Page<SellerOrderDisputeResponse> sellerDisputes(@Param("sellerId") UUID sellerId, Pageable page);
 
     @Query(value = """
+            SELECT EXISTS(
+                SELECT 1 FROM user_reports
+                WHERE seller_id = :sellerId
+                  AND order_id IS NOT NULL
+                  AND (status IN ('OPEN', 'IN_REVIEW')
+                       OR (status = 'CONFIRMED' AND resolution_action = 'RETURN_AND_REFUND' AND refunded_at IS NULL))
+            )
+            """, nativeQuery = true)
+    boolean hasActiveSellerOrderDispute(@Param("sellerId") UUID sellerId);
+
+    @Query(value = """
             SELECT * FROM user_reports WHERE (CAST(:status AS TEXT) IS NULL OR status=:status)
                 AND (CAST(:type AS TEXT) IS NULL OR (:type='LISTING' AND order_id IS NULL) OR (:type='ORDER' AND order_id IS NOT NULL))
             ORDER BY created_at DESC,id DESC

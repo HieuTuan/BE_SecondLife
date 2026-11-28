@@ -149,6 +149,41 @@ public interface InspectionOrderRepository extends JpaRepository<InspectionOrder
     @Query("SELECT o FROM InspectionOrder o WHERE o.status = 'FAILED' AND o.appealStatus = com.secondlife.secondlife.enums.InspectionAppealStatus.NONE AND o.reputationPenaltyApplied = false AND o.appealDeadline IS NOT NULL AND o.appealDeadline < :now")
     List<InspectionOrder> findExpiredAppeals(@Param("now") Instant now);
 
+    @Query("""
+            SELECT count(o) > 0 FROM InspectionOrder o
+            LEFT JOIN o.seller seller
+            JOIN o.post post
+            LEFT JOIN o.order ord
+            WHERE (seller.id = :sellerId OR post.user.id = :sellerId)
+              AND (
+                o.status NOT IN ('COMPLETED', 'CANCELLED', 'PAYMENT_EXPIRED', 'FAILED', 'REJECTED')
+                OR o.appealStatus = com.secondlife.secondlife.enums.InspectionAppealStatus.PENDING_REVIEW
+                OR (
+                  o.orderType = com.secondlife.secondlife.enums.InspectionOrderType.AT_CENTER
+                  AND EXISTS (
+                    SELECT s.id FROM Shipment s
+                    WHERE s.inspectionOrderId = o.id
+                      AND s.leg = 'SELLER_TO_CENTER'
+                      AND s.status = 'DELIVERED'
+                  )
+                  AND NOT EXISTS (
+                    SELECT ret.id FROM Shipment ret
+                    WHERE ret.inspectionOrderId = o.id
+                      AND ret.leg = 'CENTER_TO_SELLER'
+                      AND ret.status = 'DELIVERED'
+                  )
+                  AND (
+                    o.inspectionScope = com.secondlife.secondlife.enums.InspectionScope.PRE_LISTING
+                    OR (
+                      o.status <> 'COMPLETED'
+                      AND (ord IS NULL OR ord.status <> com.secondlife.secondlife.enums.OrderStatus.COMPLETED)
+                    )
+                  )
+                )
+              )
+            """)
+    boolean hasActiveOrUnreturnedSellerInspection(@Param("sellerId") UUID sellerId);
+
     @Query("SELECT o FROM InspectionOrder o WHERE o.videoCleanupStatus = 'ACTIVE' " +
            "AND o.videoRetentionUntil IS NOT NULL AND o.videoRetentionUntil <= :now " +
            "AND (o.videoProofUrl IS NOT NULL OR o.unboxingVideoUrl IS NOT NULL)")

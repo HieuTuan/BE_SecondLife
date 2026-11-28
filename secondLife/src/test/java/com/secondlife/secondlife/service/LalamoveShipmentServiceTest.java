@@ -112,6 +112,33 @@ class LalamoveShipmentServiceTest {
         assertEquals("COMPLETED", inspection.getStatus());
     }
 
+    @Test
+    void deliveredBuyerRequestHubReturnRestoresListingStatus() {
+        var inspection = new InspectionOrder();
+        inspection.setId(UUID.randomUUID());
+        inspection.setPost(order.getPost());
+        inspection.setOrderType(InspectionOrderType.AT_CENTER);
+        inspection.setInspectionScope(InspectionScope.BUYER_REQUEST);
+        inspection.setStatus("FAILED");
+        when(inspections.findByIdForUpdate(inspection.getId())).thenReturn(Optional.of(inspection));
+
+        var returning = new Shipment();
+        returning.setId(UUID.randomUUID());
+        returning.setInspectionOrderId(inspection.getId());
+        returning.setLeg("CENTER_TO_SELLER");
+        returning.setProvider("LALAMOVE");
+        returning.setOrderCode("BUYER_REQ_RETURN");
+        returning.setStatus("PICKED");
+        rows.put(returning.getId(), returning);
+
+        Instant now = Instant.now();
+        service.receiveLalamove(mapper.valueToTree(Map.of("event_id", "buyer-req-delivered",
+                "event_type", "ORDER_STATUS_CHANGED", "order_code", returning.getOrderCode(),
+                "occurred_at", now.toString(), "status", "COMPLETED", "fee", 27000)));
+
+        verify(publication).restoreAfterInspectionReturn(inspection.getId());
+    }
+
     private void event(Shipment s,String eventId,String status,Instant time) {
         service.receiveLalamove(mapper.valueToTree(Map.of("event_id",eventId,"event_type","ORDER_STATUS_CHANGED","order_code",s.getOrderCode(),"occurred_at",time.toString(),"status",status)));
     }

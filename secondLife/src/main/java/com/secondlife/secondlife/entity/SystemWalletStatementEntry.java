@@ -30,6 +30,7 @@ public class SystemWalletStatementEntry {
     private int lineNumber;
     private UUID orderId;
     private UUID inspectionOrderId;
+    private UUID topupPackagePurchaseId;
 
     @Enumerated(EnumType.STRING)
     private SystemWalletTransactionType type;

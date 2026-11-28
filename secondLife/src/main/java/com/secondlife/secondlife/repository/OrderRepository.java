@@ -260,6 +260,18 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, RefreshOper
     """)
     AdminOrderStatsProjection getAdminOrderStats();
 
+    @Query("""
+        select count(o) > 0 from Order o
+        where o.seller.id = :sellerId
+          and (o.status not in (
+                com.secondlife.secondlife.enums.OrderStatus.COMPLETED,
+                com.secondlife.secondlife.enums.OrderStatus.CANCELLED)
+            or o.escrowStatus in (
+                com.secondlife.secondlife.enums.EscrowStatus.HELD,
+                com.secondlife.secondlife.enums.EscrowStatus.FROZEN))
+    """)
+    boolean hasUnfinishedSellerOrder(@Param("sellerId") UUID sellerId);
+
     interface AdminOrderStatsProjection {
         long getTotalOrders();
         long getConfirmedOrders();

@@ -1,6 +1,7 @@
 package com.secondlife.secondlife.integration;
 
 import com.secondlife.secondlife.service.MarketplaceListingService;
+import com.secondlife.secondlife.service.PostService;
 import jakarta.persistence.EntityManagerFactory;
 import org.hibernate.SessionFactory;
 import org.junit.jupiter.api.AfterAll;
@@ -57,6 +58,7 @@ class MarketplaceListingQueryIntegrationTest {
     }
 
     @Autowired MarketplaceListingService service;
+    @Autowired PostService postService;
     @Autowired MockMvc mvc;
     @Autowired JdbcTemplate jdbc;
     @Autowired EntityManagerFactory entityManagerFactory;
@@ -110,11 +112,11 @@ class MarketplaceListingQueryIntegrationTest {
         assertEquals(4, statements, "Expected page, count, batched images and batched inspections");
     }
 
-    @Test void listingDetailLoadsImagesAndInspectionInTwoQueries() {
+    @Test void listingDetailLoadsImagesInspectionAndReturnStatusInThreeQueries() {
         var listing = service.get(activeIds.getFirst());
         assertEquals(List.of(imageUrl(listing.postId(), 0), imageUrl(listing.postId(), 1), imageUrl(listing.postId(), 2)),
                 listing.imageUrls());
-        assertEquals(2, entityManagerFactory.unwrap(SessionFactory.class).getStatistics().getPrepareStatementCount());
+        assertEquals(3, entityManagerFactory.unwrap(SessionFactory.class).getStatistics().getPrepareStatementCount());
     }
 
     @Test
@@ -259,6 +261,44 @@ class MarketplaceListingQueryIntegrationTest {
                 .andExpect(jsonPath("$.data.totalElements").value(0));
         mvc.perform(get("/api/v1/posts/search").param("minPrice", "100").param("maxPrice", "90"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void activePostIsPublishedAgainWhenItsHubReturnIsDelivered() {
+        UUID buyerId = UUID.randomUUID();
+        jdbc.update("INSERT INTO users(id, email, password_hash) VALUES (?, ?, 'test-hash')",
+                buyerId, buyerId + "@example.test");
+        UUID postId = activeIds.getFirst();
+        UUID inspectionId = addInspection(postId, buyerId, "CANCELLED", null, "B", 1);
+        recordSettlement(inspectionId, "PASSED_BUYER_DEFAULTED", false);
+        addShipment(inspectionId, buyerId, "SELLER_TO_CENTER", "DELIVERED");
+
+        assertEquals(7, service.list(categoryId, null, PageRequest.of(0, 10)).getTotalElements());
+        assertEquals("RETURNING", service.get(postId).status());
+        assertEquals("RETURNING", postService.getMyPostDetail(sellerId, postId).status());
+        assertEquals("RETURNING", sellerPostStatus(postId));
+
+        addShipment(inspectionId, buyerId, "CENTER_TO_SELLER", "PICKED");
+        assertEquals(7, service.list(categoryId, null, PageRequest.of(0, 10)).getTotalElements());
+
+        jdbc.update("UPDATE shipments SET status = 'DELIVERED' WHERE inspection_order_id = ? AND leg = 'CENTER_TO_SELLER'",
+                inspectionId);
+        assertEquals(8, service.list(categoryId, null, PageRequest.of(0, 10)).getTotalElements());
+        assertEquals("ACTIVE", service.get(postId).status());
+        assertEquals("ACTIVE", sellerPostStatus(postId));
+    }
+
+    private String sellerPostStatus(UUID postId) {
+        return postService.getMyPosts(sellerId, PageRequest.of(0, 20)).getContent().stream()
+                .filter(post -> post.id().equals(postId)).findFirst().orElseThrow().status();
+    }
+
+    private void addShipment(UUID inspectionId, UUID buyerId, String leg, String status) {
+        jdbc.update("""
+                INSERT INTO shipments(id, inspection_order_id, seller_id, buyer_id, leg, request_id,
+                                      client_order_code, status, payload, created_at, updated_at)
+                VALUES (gen_random_uuid(), ?, ?, ?, ?, gen_random_uuid(), ?, ?, '{}', now(), now())
+                """, inspectionId, sellerId, buyerId, leg, UUID.randomUUID().toString(), status);
     }
 
     private UUID addInspection(UUID postId, UUID buyerId, String status, String seal, String grade, long sequence) {

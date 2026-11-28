@@ -1,10 +1,12 @@
 package com.secondlife.secondlife.service;
 
+import com.secondlife.secondlife.dto.response.SystemWalletBalanceDetails;
 import com.secondlife.secondlife.dto.response.SystemWalletResponse;
 import com.secondlife.secondlife.dto.response.SystemWalletTransactionResponse;
 import com.secondlife.secondlife.entity.InspectionFeeSettlement;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Order;
+import com.secondlife.secondlife.entity.TopupPackagePurchase;
 import com.secondlife.secondlife.enums.SystemWalletFundCategory;
 import com.secondlife.secondlife.enums.SystemWalletTransactionType;
 import org.springframework.data.domain.Page;
@@ -24,7 +26,10 @@ public interface SystemWalletService {
     void recordInspectionReturnCollection(UUID inspectionOrderId, BigDecimal amount, boolean debtPayment);
     void settleInspectionReturn(UUID inspectionOrderId, BigDecimal carrierFee, BigDecimal sellerCollected,
                                 BigDecimal reserveRefund);
+    void lockForPackagePurchase();
+    void recordPackageRevenue(TopupPackagePurchase purchase);
     SystemWalletResponse getWallet();
+    SystemWalletBalanceDetails getBalanceDetails(SystemWalletBalanceDetails.Fund fund, Pageable pageable);
     Page<SystemWalletTransactionResponse> getTransactions(
             SystemWalletTransactionType type, Boolean hasShipping, UUID orderId, SystemWalletFundCategory fundCategory, Pageable pageable);
 }

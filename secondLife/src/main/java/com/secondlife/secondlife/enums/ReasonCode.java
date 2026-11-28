@@ -10,7 +10,7 @@ public enum ReasonCode {
     CONFIRMED_IDENTITY_MISMATCH("Thông tin định danh xác nhận không khớp"),
 
     // User-Fixable Uncertain Cases
-    EKYC_CONTEXT_MISSING("Missing VNPT client session or request token; submit the documents again."),
+    EKYC_CONTEXT_MISSING("Thiếu phiên xác thực thiết bị VNPT; vui lòng tải lại trang và gửi lại hồ sơ."),
     IMAGE_TOO_BLURRY("Ảnh chụp bị mờ, không rõ nét. Vui lòng chụp lại rõ ràng hơn."),
     IMAGE_NOT_ACCESSIBLE("Không tải được ảnh xác thực. Vui lòng tải ảnh lên lại."),
     IMAGE_GLARE("Ảnh chụp bị lóa sáng hoặc phản chiếu ánh đèn. Vui lòng chụp ở góc đủ sáng, không lóa."),

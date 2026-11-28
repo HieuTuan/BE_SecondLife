@@ -6,6 +6,7 @@ import com.secondlife.secondlife.dto.request.ShippingAddressRequest;
 import com.secondlife.secondlife.dto.request.ShippingQuoteRequest;
 import com.secondlife.secondlife.entity.InspectionOrder;
 import com.secondlife.secondlife.entity.Post;
+import com.secondlife.secondlife.entity.SellerOnboarding;
 import com.secondlife.secondlife.entity.Shipment;
 import com.secondlife.secondlife.entity.ShippingPickupAddress;
 import com.secondlife.secondlife.entity.ShippingQuote;
@@ -39,6 +40,8 @@ class ShippingQuoteReservedPostTest {
     private ReverseGeocodingService geocoding;
     private ObjectMapper mapper;
     private ShippingQuoteService service;
+    private UserRepository users;
+    private SellerOnboardingRepository onboarding;
 
     @BeforeEach
     void setUp() {
@@ -51,8 +54,39 @@ class ShippingQuoteReservedPostTest {
         provider = mock(ShippingProvider.class);
         geocoding = mock(ReverseGeocodingService.class);
         mapper = mock(ObjectMapper.class);
+        users = mock(UserRepository.class);
+        onboarding = mock(SellerOnboardingRepository.class);
         service = new com.secondlife.secondlife.service.impl.ShippingQuoteServiceImpl(posts, negotiations, addresses, quotes,
-                inspections, shipments, provider, mapper, geocoding, mock(ShippingVehicleSelectionMapper.class));
+                inspections, shipments, provider, mapper, geocoding, mock(ShippingVehicleSelectionMapper.class),
+                users, onboarding, mock(OrderRepository.class), mock(UserReportRepository.class));
+    }
+
+    @Test
+    void savingWarehouseUpdatesShippingAndOnboardingWithTheSameAddress() {
+        UUID sellerId = UUID.randomUUID();
+        var address = new ShippingAddress("Seller", "0912345678", "Kho mới tại TP.HCM",
+                new BigDecimal("10.777"), new BigDecimal("106.695"));
+        String addressJson = new ObjectMapper().writeValueAsString(address);
+        var profile = new SellerOnboarding();
+        var verifiedAt = Instant.now();
+        profile.setEmailVerifiedAt(verifiedAt);
+        profile.setPickupProvinceId(1);
+        profile.setPickupWardId(2);
+        var pickup = new ShippingPickupAddress();
+        pickup.setUserId(sellerId);
+        when(users.findByIdForRoleUpdate(sellerId)).thenReturn(Optional.of(new User()));
+        when(onboarding.findById(sellerId)).thenReturn(Optional.of(profile));
+        when(addresses.findById(sellerId)).thenReturn(Optional.of(pickup));
+        when(mapper.writeValueAsString(address)).thenReturn(addressJson);
+
+        assertEquals(address, service.savePickup(sellerId, address));
+
+        verify(addresses).save(pickup);
+        assertEquals(addressJson, pickup.getAddressJson());
+        assertEquals(addressJson, profile.getPickupAddressJson());
+        assertEquals(verifiedAt, profile.getEmailVerifiedAt());
+        assertNull(profile.getPickupProvinceId());
+        assertNull(profile.getPickupWardId());
     }
 
     @Test
@@ -144,7 +178,9 @@ class ShippingQuoteReservedPostTest {
 
         ObjectMapper realMapper = new ObjectMapper();
         var realService = new com.secondlife.secondlife.service.impl.ShippingQuoteServiceImpl(posts, negotiations, addresses, quotes,
-                inspections, shipments, provider, realMapper, geocoding, mock(ShippingVehicleSelectionMapper.class));
+                inspections, shipments, provider, realMapper, geocoding, mock(ShippingVehicleSelectionMapper.class),
+                mock(UserRepository.class), mock(SellerOnboardingRepository.class),
+                mock(OrderRepository.class), mock(UserReportRepository.class));
 
         ShippingAddress delivery = new ShippingAddress("Buyer", "0912345678", "456 Buyer St", new BigDecimal("10.85"), new BigDecimal("106.65"));
         when(geocoding.shipping(any())).thenReturn(delivery);
@@ -209,7 +245,9 @@ class ShippingQuoteReservedPostTest {
 
         ObjectMapper realMapper = new ObjectMapper();
         var realService = new com.secondlife.secondlife.service.impl.ShippingQuoteServiceImpl(posts, negotiations, addresses, quotes,
-                inspections, shipments, provider, realMapper, geocoding, mock(ShippingVehicleSelectionMapper.class));
+                inspections, shipments, provider, realMapper, geocoding, mock(ShippingVehicleSelectionMapper.class),
+                mock(UserRepository.class), mock(SellerOnboardingRepository.class),
+                mock(OrderRepository.class), mock(UserReportRepository.class));
 
         ShippingAddress delivery = new ShippingAddress("Buyer", "0912345678", "456 Buyer St", new BigDecimal("10.85"), new BigDecimal("106.65"));
         when(geocoding.shipping(any())).thenReturn(delivery);
@@ -269,7 +307,9 @@ class ShippingQuoteReservedPostTest {
 
         ObjectMapper realMapper = new ObjectMapper();
         var realService = new com.secondlife.secondlife.service.impl.ShippingQuoteServiceImpl(posts, negotiations, addresses, quotes,
-                inspections, shipments, provider, realMapper, geocoding, mock(ShippingVehicleSelectionMapper.class));
+                inspections, shipments, provider, realMapper, geocoding, mock(ShippingVehicleSelectionMapper.class),
+                mock(UserRepository.class), mock(SellerOnboardingRepository.class),
+                mock(OrderRepository.class), mock(UserReportRepository.class));
 
         ShippingAddress delivery = new ShippingAddress("Buyer", "0912345678", "456 Buyer St", new BigDecimal("10.85"), new BigDecimal("106.65"));
         when(geocoding.shipping(any())).thenReturn(delivery);

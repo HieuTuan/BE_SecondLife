@@ -3,6 +3,7 @@ package com.secondlife.secondlife.service.impl;
 import com.secondlife.secondlife.dto.request.ShippingAddress;
 import com.secondlife.secondlife.dto.request.ShippingParcel;
 import com.secondlife.secondlife.dto.request.ShippingQuoteRequest;
+import com.secondlife.secondlife.dto.response.PickupAddressUpdateStatusResponse;
 import com.secondlife.secondlife.dto.response.ShippingQuoteResponse;
 import com.secondlife.secondlife.entity.Post;
 import com.secondlife.secondlife.entity.ShippingPickupAddress;
@@ -20,12 +21,17 @@ import com.secondlife.secondlife.mapper.ShippingPayloads;
 import com.secondlife.secondlife.mapper.ShippingVehicleSelectionMapper;
 import com.secondlife.secondlife.repository.InspectionOrderRepository;
 import com.secondlife.secondlife.repository.NegotiationRepository;
+import com.secondlife.secondlife.repository.OrderRepository;
 import com.secondlife.secondlife.repository.PostRepository;
+import com.secondlife.secondlife.repository.SellerOnboardingRepository;
 import com.secondlife.secondlife.repository.ShipmentRepository;
 import com.secondlife.secondlife.repository.ShippingPickupAddressRepository;
 import com.secondlife.secondlife.repository.ShippingQuoteRepository;
+import com.secondlife.secondlife.repository.UserReportRepository;
+import com.secondlife.secondlife.repository.UserRepository;
 import com.secondlife.secondlife.service.ReverseGeocodingService;
 import com.secondlife.secondlife.service.ShippingQuoteService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
@@ -33,11 +39,16 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
 @Service("shippingQuoteService")
+@RequiredArgsConstructor
 public class ShippingQuoteServiceImpl implements ShippingQuoteService {
+    private static final List<String> RESERVED_POST_STATUSES = List.of("RESERVED", "PAYMENT_PENDING");
+
     private final PostRepository posts;
     private final NegotiationRepository negotiations;
     private final ShippingPickupAddressRepository addresses;
@@ -48,33 +59,89 @@ public class ShippingQuoteServiceImpl implements ShippingQuoteService {
     private final ObjectMapper mapper;
     private final ReverseGeocodingService geocoding;
     private final ShippingVehicleSelectionMapper vehicleSelectionMapper;
+    private final UserRepository users;
+    private final SellerOnboardingRepository onboarding;
+    private final OrderRepository orders;
+    private final UserReportRepository reports;
 
-    public ShippingQuoteServiceImpl(PostRepository posts,
-                                  NegotiationRepository negotiations,
-                                  ShippingPickupAddressRepository addresses,
-                                  ShippingQuoteRepository quotes,
-                                  InspectionOrderRepository inspections,
-                                  ShipmentRepository shipments,
-                                  ShippingProvider provider,
-                                  ObjectMapper mapper,
-                                  ReverseGeocodingService geocoding,
-                                  ShippingVehicleSelectionMapper vehicleSelectionMapper) {
-        this.posts = posts;
-        this.negotiations = negotiations;
-        this.addresses = addresses;
-        this.quotes = quotes;
-        this.inspections = inspections;
-        this.shipments = shipments;
-        this.provider = provider;
-        this.mapper = mapper;
-        this.geocoding = geocoding;
-        this.vehicleSelectionMapper = vehicleSelectionMapper;
+    @Override
+    @Transactional
+    public ShippingAddress savePickup(UUID userId, ShippingAddress address) {
+        if ("LALAMOVE".equals(provider.code())) ShippingPayloads.requireCoordinates(address, "Seller pickup");
+        users.findByIdForRoleUpdate(userId).orElseThrow(() -> new NotFoundException("User not found"));
+
+        var existingRow = addresses.findById(userId).orElse(null);
+        ShippingAddress existingAddress = existingRow == null ? null : readPickupAddress(existingRow.getAddressJson());
+        if (existingAddress == null || !samePickupAddress(existingAddress, address)) {
+            String blockReason = resolvePickupAddressBlockReason(userId);
+            if (blockReason != null) {
+                throw new ConflictException(blockReason);
+            }
+        }
+
+        String addressJson = mapper.writeValueAsString(address);
+        onboarding.findById(userId).ifPresent(profile -> {
+            profile.setPickupAddressJson(addressJson);
+            profile.setPickupProvinceId(null);
+            profile.setPickupWardId(null);
+        });
+
+        var row = existingRow != null ? existingRow : new ShippingPickupAddress();
+        row.setUserId(userId);
+        row.setAddressJson(addressJson);
+        addresses.save(row);
+        return address;
     }
 
-    @Transactional public ShippingAddress savePickup(UUID userId,ShippingAddress address) {
-        if ("LALAMOVE".equals(provider.code())) ShippingPayloads.requireCoordinates(address,"Seller pickup");
-        var row = new ShippingPickupAddress(); row.setUserId(userId); row.setAddressJson(mapper.writeValueAsString(address));
-        addresses.save(row); return address;
+    @Override
+    @Transactional(readOnly = true)
+    public PickupAddressUpdateStatusResponse pickupUpdateStatus(UUID userId) {
+        String reason = resolvePickupAddressBlockReason(userId);
+        return new PickupAddressUpdateStatusResponse(reason == null, reason);
+    }
+
+    private String resolvePickupAddressBlockReason(UUID userId) {
+        if (reports.hasActiveSellerOrderDispute(userId)) {
+            return "Không thể thay đổi địa chỉ lấy hàng khi đang có đơn hàng khiếu nại hoặc tranh chấp chưa xử lý xong.";
+        }
+        if (orders.hasUnfinishedSellerOrder(userId)) {
+            return "Không thể thay đổi địa chỉ lấy hàng khi đang có đơn hàng chưa hoàn thành hoặc chưa hoàn tiền xong.";
+        }
+        if (inspections.hasActiveOrUnreturnedSellerInspection(userId)) {
+            return "Không thể thay đổi địa chỉ lấy hàng khi đang có đơn kiểm định tại nhà/trung tâm hoặc đơn hoàn hàng về người bán chưa hoàn tất.";
+        }
+        if (shipments.hasInFlightSellerShipment(userId)) {
+            return "Không thể thay đổi địa chỉ lấy hàng khi đang có chuyến vận chuyển chưa giao hoàn tất.";
+        }
+        if (posts.countByUser_IdAndStatusIn(userId, RESERVED_POST_STATUSES) > 0) {
+            return "Không thể thay đổi địa chỉ lấy hàng khi đang có sản phẩm được giữ chỗ hoặc chờ thanh toán.";
+        }
+        return null;
+    }
+
+    private ShippingAddress readPickupAddress(String addressJson) {
+        if (addressJson == null || addressJson.isBlank()) {
+            return null;
+        }
+        try {
+            return mapper.readValue(addressJson, ShippingAddress.class);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private boolean samePickupAddress(ShippingAddress a, ShippingAddress b) {
+        if (a == null || b == null) return false;
+        return Objects.equals(a.name(), b.name())
+                && Objects.equals(a.phone(), b.phone())
+                && Objects.equals(a.address(), b.address())
+                && sameCoordinate(a.latitude(), b.latitude())
+                && sameCoordinate(a.longitude(), b.longitude());
+    }
+
+    private boolean sameCoordinate(BigDecimal a, BigDecimal b) {
+        if (a == null || b == null) return a == b;
+        return a.compareTo(b) == 0;
     }
     @Transactional(readOnly=true) public ShippingAddress pickup(UUID userId) {
         return addresses.findById(userId).map(row -> mapper.readValue(row.getAddressJson(),ShippingAddress.class)).orElse(null);
@@ -90,6 +157,10 @@ public class ShippingQuoteServiceImpl implements ShippingQuoteService {
         Post post=posts.findById(request.postId()).orElseThrow(() -> new NotFoundException("Post not found"));
         if (!"ACTIVE".equals(post.getStatus()) && !"RESERVED".equals(post.getStatus())) {
             throw new ConflictException("Post is not available for shipping quotation");
+        }
+
+        if (posts.isAwaitingHubReturn(post.getId())) {
+            throw new ConflictException("Sản phẩm đang được hoàn từ Hub về người bán");
         }
 
         var passedInspection = inspections.findFirstByPostIdAndStatusOrderByCreatedAtDesc(post.getId(), "PASSED");

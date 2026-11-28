@@ -12,6 +12,7 @@ import com.secondlife.secondlife.entity.SellerVerification;
 import com.secondlife.secondlife.entity.User;
 import com.secondlife.secondlife.enums.*;
 import com.secondlife.secondlife.exception.ConflictException;
+import com.secondlife.secondlife.exception.TooManyRequestsException;
 import com.secondlife.secondlife.mapper.SellerVerificationMapper;
 import com.secondlife.secondlife.repository.SellerVerificationEventRepository;
 import com.secondlife.secondlife.repository.SellerVerificationRepository;
@@ -27,6 +28,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.lang.reflect.Field;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -193,6 +195,7 @@ class SellerVerificationServiceTest {
         assertEquals(SellerVerificationStatus.NEEDS_REVIEW, response.status());
         assertEquals(EkycStatus.PASSED, response.ekycStatus());
         assertEquals(RiskStatus.REVIEW, response.riskStatus());
+        assertEquals("Borderline face match", response.rejectionReason());
         assertFalse(buyer.hasRole(RoleCode.SELLER.name()));
         verify(roleAssignmentService, never()).grantRole(any(), any());
         verify(notificationService, never()).sendSellerVerificationApproved(any());
@@ -364,9 +367,11 @@ class SellerVerificationServiceTest {
         assertEquals(SellerVerificationStatus.EKYC_PENDING, response.status());
         assertEquals(EkycStatus.PROVIDER_ERROR, response.ekycStatus());
         assertEquals(ReasonCode.PROVIDER_REQUEST_REJECTED, response.reasonCode());
+        assertEquals("rejected", response.rejectionReason());
         ArgumentCaptor<SellerVerification> captor = ArgumentCaptor.forClass(SellerVerification.class);
         verify(sellerVerificationRepository, atLeastOnce()).save(captor.capture());
         assertNull(captor.getValue().getNextRetryAt());
+        assertEquals("rejected", captor.getValue().getRejectionReason());
     }
 
     @Test
@@ -565,5 +570,93 @@ class SellerVerificationServiceTest {
         assertEquals(3, sv.getRecoveryAttempts());
         assertNull(sv.getNextRetryAt());
         verifyNoInteractions(roleAssignmentService);
+    }
+
+    @Test
+    @DisplayName("Cooldown: >= 5 REJECTED attempts in 24h throws TooManyRequestsException before calling VNPT or saving")
+    void submitVerificationBlocksAttemptAfterFiveRejectionsWithin24Hours() {
+        when(userRepository.findByIdWithAuthorities(buyerId)).thenReturn(Optional.of(buyer));
+        when(sellerVerificationRepository.existsByUserIdAndStatusIn(eq(buyerId), anyCollection())).thenReturn(false);
+
+        Instant latestRejectedAt = Instant.parse("2026-11-28T03:30:00Z"); // 10:30 Asia/Ho_Chi_Minh -> unlock 10:30 29/11/2026
+        List<Instant> fiveRejections = List.of(
+                latestRejectedAt,
+                latestRejectedAt.minus(Duration.ofHours(1)),
+                latestRejectedAt.minus(Duration.ofHours(2)),
+                latestRejectedAt.minus(Duration.ofHours(3)),
+                latestRejectedAt.minus(Duration.ofHours(4))
+        );
+        when(sellerVerificationRepository.findRecentSubmittedAtByUserIdAndStatusSince(
+                eq(buyerId), eq(SellerVerificationStatus.REJECTED), any(Instant.class)))
+                .thenReturn(fiveRejections);
+
+        var request = new SellerVerificationRequest(
+                VerificationType.CITIZEN_ID, "012345678901", "http://f", "http://b"
+        );
+
+        TooManyRequestsException ex = assertThrows(TooManyRequestsException.class,
+                () -> service.submitVerification(buyerId, request));
+
+        assertTrue(ex.getMessage().contains("5 lần trong 24 giờ qua"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("10:30 ngày 29/11/2026"), ex.getMessage());
+        verify(sellerVerificationRepository, never()).save(any());
+        verifyNoInteractions(ekycService);
+    }
+
+    @Test
+    @DisplayName("Cooldown: 4 REJECTED attempts in 24h still allows 5th submission")
+    void submitVerificationAllowsAttemptWithFourRejectionsWithin24Hours() {
+        when(userRepository.findByIdWithAuthorities(buyerId)).thenReturn(Optional.of(buyer));
+        when(sellerVerificationRepository.existsByUserIdAndStatusIn(eq(buyerId), anyCollection())).thenReturn(false);
+
+        Instant now = Instant.now();
+        List<Instant> fourRejections = List.of(
+                now.minus(Duration.ofMinutes(10)),
+                now.minus(Duration.ofHours(1)),
+                now.minus(Duration.ofHours(2)),
+                now.minus(Duration.ofHours(3))
+        );
+        when(sellerVerificationRepository.findRecentSubmittedAtByUserIdAndStatusSince(
+                eq(buyerId), eq(SellerVerificationStatus.REJECTED), any(Instant.class)))
+                .thenReturn(fourRejections);
+        when(sellerVerificationRepository.save(any(SellerVerification.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(ekycService.verifyIdentity(any())).thenReturn(EkycResult.pass("MOCK", "REF1", 0.98, 0.99, 0.95));
+        when(sellerRiskService.evaluateRisk(eq(buyer), any(), any())).thenReturn(SellerRiskResult.clear());
+
+        var request = new SellerVerificationRequest(
+                VerificationType.CITIZEN_ID, "012345678901", "http://f", "http://b"
+        );
+
+        SellerVerificationResponse response = service.submitVerification(buyerId, request);
+
+        assertEquals(SellerVerificationStatus.APPROVED, response.status());
+        verify(ekycService).verifyIdentity(any());
+    }
+
+    @Test
+    @DisplayName("Cooldown queries a 24-hour rolling window and allows retry once older rejections expire")
+    void submitVerificationQueries24HourWindowAndAllowsWhenEmpty() {
+        when(userRepository.findByIdWithAuthorities(buyerId)).thenReturn(Optional.of(buyer));
+        when(sellerVerificationRepository.existsByUserIdAndStatusIn(eq(buyerId), anyCollection())).thenReturn(false);
+        when(sellerVerificationRepository.findRecentSubmittedAtByUserIdAndStatusSince(
+                eq(buyerId), eq(SellerVerificationStatus.REJECTED), any(Instant.class)))
+                .thenReturn(List.of());
+        when(sellerVerificationRepository.save(any(SellerVerification.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(ekycService.verifyIdentity(any())).thenReturn(EkycResult.pass("MOCK", "REF1", 0.98, 0.99, 0.95));
+        when(sellerRiskService.evaluateRisk(eq(buyer), any(), any())).thenReturn(SellerRiskResult.clear());
+
+        Instant beforeCall = Instant.now();
+        service.submitVerification(buyerId, new SellerVerificationRequest(
+                VerificationType.CITIZEN_ID, "012345678901", "http://f", "http://b"));
+        Instant afterCall = Instant.now();
+
+        ArgumentCaptor<Instant> sinceCaptor = ArgumentCaptor.forClass(Instant.class);
+        verify(sellerVerificationRepository).findRecentSubmittedAtByUserIdAndStatusSince(
+                eq(buyerId), eq(SellerVerificationStatus.REJECTED), sinceCaptor.capture());
+
+        Instant expectedLowerBound = beforeCall.minus(Duration.ofHours(24)).minusSeconds(2);
+        Instant expectedUpperBound = afterCall.minus(Duration.ofHours(24)).plusSeconds(2);
+        assertTrue(!sinceCaptor.getValue().isBefore(expectedLowerBound)
+                && !sinceCaptor.getValue().isAfter(expectedUpperBound));
     }
 }
